@@ -4,7 +4,8 @@ const { body, validationResult } = require('express-validator');
 const Payment = require('../models/Payment');
 const Razorpay = require('razorpay');
 const crypto = require('crypto');
-const { protect, authorize } = require('../middleware/auth');
+const { protect, authorize , scopeToSociety } = require('../middleware/auth');
+router.param('id', scopeToSociety(require('../models/Payment')));
 const { notifyUser } = require('../utils/notifyUser');
 
 // Initialize Razorpay only if credentials are provided
@@ -104,8 +105,7 @@ router.post('/create-order', protect, authorize('resident'), [
     console.error('Payment order creation error:', error);
     res.status(500).json({
       success: false,
-      message: 'Server error',
-      error: error.message
+      message: 'Server error'
     });
   }
 });
@@ -222,8 +222,7 @@ router.post('/verify', protect, authorize('resident'), [
     console.error('Payment verification error:', error);
     res.status(500).json({
       success: false,
-      message: 'Server error',
-      error: error.message
+      message: 'Server error'
     });
   }
 });
@@ -255,10 +254,12 @@ router.get('/', protect, async (req, res) => {
       query.month = req.query.month;
     }
 
+    if (req.user.role !== 'super_admin') query.societyId = req.user.societyId;
+
     const payments = await Payment.find(query)
       .populate('residentId', 'name flatNo')
       .sort({ createdAt: -1 })
-      .limit(parseInt(req.query.limit) || 50)
+      .limit(Math.min(parseInt(req.query.limit) || 200, 500))
       .skip(parseInt(req.query.skip) || 0);
 
     res.json({
@@ -269,9 +270,221 @@ router.get('/', protect, async (req, res) => {
   } catch (error) {
     res.status(500).json({
       success: false,
-      message: 'Server error',
-      error: error.message
+      message: 'Server error'
     });
+  }
+});
+
+// ---- Admin: dues, cash/cheque records, collections summary ----
+const ADMINS = ['society_admin', 'super_admin'];
+const adminSocietyId = (req) => (req.user.role === 'super_admin' ? req.body.societyId || req.query.societyId : req.user.societyId);
+
+// @route   POST /api/payments/generate
+// @desc    Create dues (e.g. monthly maintenance) for all approved residents, or chosen ones
+// @access  Private (Admins)
+router.post('/generate', protect, authorize(...ADMINS), [
+  body('type').optional().isIn(['maintenance', 'fine', 'other']).withMessage('Invalid type'),
+  body('amount').isFloat({ min: 1 }).withMessage('Amount must be at least 1'),
+  body('month').optional().matches(/^\d{4}-\d{2}$/).withMessage('Month must be YYYY-MM'),
+  body('dueDate').optional().isISO8601().withMessage('Invalid due date'),
+  body('description').optional().trim().isLength({ max: 200 }),
+  body('residentIds').optional().isArray()
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ success: false, errors: errors.array() });
+
+    const societyId = adminSocietyId(req);
+    if (!societyId) return res.status(400).json({ success: false, message: 'Society is required' });
+
+    const type = req.body.type || 'maintenance';
+    const { amount, month, dueDate, description, residentIds } = req.body;
+    if (type === 'maintenance' && !month) {
+      return res.status(400).json({ success: false, message: 'Choose the month these dues are for' });
+    }
+
+    const User = require('../models/User');
+    const filter = { societyId, role: 'resident', isApproved: true, isActive: true };
+    if (Array.isArray(residentIds) && residentIds.length) filter._id = { $in: residentIds };
+    const residents = await User.find(filter).select('name flatNo block');
+    if (!residents.length) {
+      return res.status(400).json({ success: false, message: 'No approved residents to bill' });
+    }
+
+    // Do not bill the same flat twice for the same month of maintenance.
+    let skipped = 0;
+    let todo = residents;
+    if (type === 'maintenance') {
+      const existing = await Payment.find({
+        societyId, type: 'maintenance', month, status: { $in: ['pending', 'processing', 'completed'] }
+      }).select('residentId');
+      const billed = new Set(existing.map((p) => p.residentId.toString()));
+      todo = residents.filter((r) => !billed.has(r._id.toString()));
+      skipped = residents.length - todo.length;
+    }
+
+    const docs = todo.map((r) => ({
+      residentId: r._id,
+      societyId,
+      amount,
+      type,
+      month,
+      year: month ? Number(month.slice(0, 4)) : undefined,
+      description: description || (type === 'maintenance' ? `Maintenance for ${month}` : undefined),
+      dueDate: dueDate ? new Date(dueDate) : undefined,
+      flatNo: r.flatNo || '-',
+      block: r.block,
+      status: 'pending'
+    }));
+    const created = docs.length ? await Payment.insertMany(docs) : [];
+
+    const io = req.app.get('io');
+    if (io) {
+      for (const p of created) {
+        try {
+          await notifyUser(io, p.residentId, {
+            societyId,
+            type: 'payment_due',
+            title: 'New payment due',
+            sms: true,
+            message: `₹${p.amount} is due${p.month ? ` for ${p.month}` : ''}${p.description && !p.month ? `: ${p.description}` : ''}`,
+            relatedId: p._id,
+            relatedModel: 'Payment',
+            actionUrl: '/payments'
+          });
+        } catch (e) { /* a failed notification must not undo the dues */ }
+      }
+    }
+
+    res.status(201).json({
+      success: true,
+      created: created.length,
+      skipped,
+      message: `Created dues for ${created.length} flat${created.length === 1 ? '' : 's'}${skipped ? ` (${skipped} already billed)` : ''}`
+    });
+  } catch (error) {
+    console.error('Generate dues error:', error);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// @route   GET /api/payments/admin/summary
+// @desc    Collected vs pending totals, optionally for one month
+// @access  Private (Admins)
+router.get('/admin/summary', protect, authorize(...ADMINS), async (req, res) => {
+  try {
+    const mongoose = require('mongoose');
+    const match = {};
+    const societyId = adminSocietyId(req);
+    if (req.user.role === 'society_admin' || societyId) match.societyId = new mongoose.Types.ObjectId(String(societyId));
+    if (req.query.month) match.month = req.query.month;
+
+    const rows = await Payment.aggregate([
+      { $match: match },
+      { $group: { _id: '$status', total: { $sum: '$amount' }, count: { $sum: 1 } } }
+    ]);
+    const pick = (s) => rows.find((r) => r._id === s) || { total: 0, count: 0 };
+    res.json({
+      success: true,
+      summary: {
+        collected: pick('completed').total,
+        collectedCount: pick('completed').count,
+        pending: pick('pending').total + pick('processing').total,
+        pendingCount: pick('pending').count + pick('processing').count
+      }
+    });
+  } catch (error) {
+    console.error('Payment summary error:', error);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// @route   PUT /api/payments/:id/mark-paid
+// @desc    Record a payment received outside the app (cash, cheque, UPI, card)
+// @access  Private (Admins)
+router.put('/:id/mark-paid', protect, authorize(...ADMINS), [
+  body('paymentMethod').isIn(['cash', 'cheque', 'upi', 'card']).withMessage('Choose how it was paid'),
+  body('reference').optional().trim().isLength({ max: 80 }),
+  body('notes').optional().trim().isLength({ max: 200 })
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ success: false, errors: errors.array() });
+
+    const payment = await Payment.findById(req.params.id);
+    if (!payment) return res.status(404).json({ success: false, message: 'Payment not found' });
+    if (req.user.role === 'society_admin' && payment.societyId.toString() !== req.user.societyId.toString()) {
+      return res.status(403).json({ success: false, message: 'Not authorized' });
+    }
+    if (payment.status === 'completed') {
+      return res.status(400).json({ success: false, message: 'This payment is already marked as paid' });
+    }
+
+    payment.status = 'completed';
+    payment.paymentMethod = req.body.paymentMethod;
+    payment.paidAt = new Date();
+    if (req.body.reference) payment.transactionId = `${req.body.paymentMethod}-${req.body.reference}-${payment._id}`;
+    payment.notes = [req.body.reference && `Ref: ${req.body.reference}`, req.body.notes, `Recorded by ${req.user.name}`]
+      .filter(Boolean).join(' · ');
+    await payment.save();
+
+    const io = req.app.get('io');
+    if (io) {
+      try {
+        await notifyUser(io, payment.residentId, {
+          societyId: payment.societyId,
+          type: 'payment_received',
+          title: 'Payment recorded',
+          message: `Your ${req.body.paymentMethod} payment of ₹${payment.amount} was recorded`,
+          relatedId: payment._id,
+          relatedModel: 'Payment',
+          actionUrl: '/payments'
+        });
+      } catch (e) { /* ignore */ }
+    }
+
+    res.json({ success: true, payment, message: 'Payment recorded' });
+  } catch (error) {
+    console.error('Mark paid error:', error);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// @route   POST /api/payments/:id/order
+// @desc    Start online payment for an existing pending due
+// @access  Private (Residents)
+router.post('/:id/order', protect, authorize('resident'), async (req, res) => {
+  try {
+    if (!razorpay) {
+      return res.status(503).json({ success: false, message: 'Online payment is not set up for this society. Please pay the admin directly.' });
+    }
+    const payment = await Payment.findById(req.params.id);
+    if (!payment) return res.status(404).json({ success: false, message: 'Payment not found' });
+    if (payment.residentId.toString() !== req.user.id) {
+      return res.status(403).json({ success: false, message: 'Not authorized' });
+    }
+    if (payment.status === 'completed') {
+      return res.status(400).json({ success: false, message: 'This payment is already paid' });
+    }
+
+    const order = await razorpay.orders.create({
+      amount: Math.round(payment.amount * 100),
+      currency: 'INR',
+      receipt: `receipt_${payment._id}`,
+      notes: { paymentId: payment._id.toString(), residentId: req.user.id.toString(), type: payment.type }
+    });
+    payment.razorpayOrderId = order.id;
+    await payment.save();
+
+    res.json({
+      success: true,
+      order: { id: order.id, amount: order.amount, currency: order.currency, receipt: order.receipt },
+      paymentId: payment._id,
+      keyId: process.env.RAZORPAY_KEY_ID
+    });
+  } catch (error) {
+    console.error('Order for due error:', error);
+    res.status(500).json({ success: false, message: 'Could not start the payment. Please try again.' });
   }
 });
 
@@ -304,8 +517,7 @@ router.get('/:id', protect, async (req, res) => {
   } catch (error) {
     res.status(500).json({
       success: false,
-      message: 'Server error',
-      error: error.message
+      message: 'Server error'
     });
   }
 });
@@ -336,8 +548,7 @@ router.get('/history/summary', protect, authorize('resident'), async (req, res) 
   } catch (error) {
     res.status(500).json({
       success: false,
-      message: 'Server error',
-      error: error.message
+      message: 'Server error'
     });
   }
 });

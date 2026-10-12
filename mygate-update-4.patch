@@ -1,0 +1,689 @@
+diff --git a/backend/routes/complaints.js b/backend/routes/complaints.js
+index 2d33a73..cbffa00 100644
+--- a/backend/routes/complaints.js
++++ b/backend/routes/complaints.js
+@@ -326,6 +326,37 @@ router.put('/:id/status', protect, authorize('society_admin', 'super_admin', 'st
+   }
+ });
+ 
++// @route   PUT /api/complaints/:id/feedback
++// @desc    Resident rates how a complaint was handled
++// @access  Private (Residents, own complaints)
++router.put('/:id/feedback', protect, authorize('resident'), [
++  body('rating').isInt({ min: 1, max: 5 }).withMessage('Choose a rating from 1 to 5'),
++  body('feedback').optional().trim().isLength({ max: 500 })
++], async (req, res) => {
++  try {
++    const errors = validationResult(req);
++    if (!errors.isEmpty()) return res.status(400).json({ success: false, errors: errors.array() });
++
++    const complaint = await Complaint.findById(req.params.id);
++    if (!complaint) return res.status(404).json({ success: false, message: 'Complaint not found' });
++    if (complaint.residentId.toString() !== req.user.id) {
++      return res.status(403).json({ success: false, message: 'Not authorized' });
++    }
++    if (!['resolved', 'closed'].includes(complaint.status)) {
++      return res.status(400).json({ success: false, message: 'You can rate a complaint once it is resolved' });
++    }
++
++    complaint.rating = Number(req.body.rating);
++    complaint.feedback = req.body.feedback || undefined;
++    await complaint.save();
++
++    res.json({ success: true, complaint, message: 'Thanks for your feedback' });
++  } catch (error) {
++    console.error('Complaint feedback error:', error);
++    res.status(500).json({ success: false, message: 'Server error' });
++  }
++});
++
+ // @route   POST /api/complaints/:id/update
+ // @desc    Add update to complaint
+ // @access  Private
+diff --git a/backend/routes/societies.js b/backend/routes/societies.js
+index 865fefb..b087630 100644
+--- a/backend/routes/societies.js
++++ b/backend/routes/societies.js
+@@ -186,10 +186,10 @@ router.get('/:id/residents', protect, authorize('society_admin', 'super_admin'),
+ 
+     const residents = await User.find({
+       societyId: req.params.id,
+-      role: 'resident'
++      role: { $in: ['resident', 'security', 'staff', 'vendor'] }
+     })
+-      .select('name email phone flatNo block isApproved createdAt')
+-      .sort({ flatNo: 1 });
++      .select('name email phone role flatNo block isApproved isActive rejectedAt createdAt')
++      .sort({ role: 1, flatNo: 1 });
+ 
+     res.json({
+       success: true,
+diff --git a/backend/routes/users.js b/backend/routes/users.js
+index 44bbdf7..7810d5a 100644
+--- a/backend/routes/users.js
++++ b/backend/routes/users.js
+@@ -203,6 +203,39 @@ router.put('/approve/:id', protect, authorize('society_admin', 'super_admin'), a
+   }
+ });
+ 
++// @route   PUT /api/users/:id/active
++// @desc    Deactivate or reactivate an approved account (blocks or restores sign-in)
++// @access  Private (Admins)
++router.put('/:id/active', protect, authorize('society_admin', 'super_admin'), [
++  body('active').isBoolean().withMessage('active must be true or false')
++], async (req, res) => {
++  try {
++    const errors = validationResult(req);
++    if (!errors.isEmpty()) return res.status(400).json({ success: false, errors: errors.array() });
++
++    const user = await User.findById(req.params.id);
++    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
++    if (!APPROVABLE_ROLES.includes(user.role)) {
++      return res.status(400).json({ success: false, message: 'This account cannot be changed here' });
++    }
++    if (req.user.role === 'society_admin' && user.societyId?.toString() !== req.user.societyId?.toString()) {
++      return res.status(403).json({ success: false, message: 'Not authorized' });
++    }
++    if (!user.isApproved) {
++      return res.status(400).json({ success: false, message: 'Approve or reject this sign-up instead' });
++    }
++
++    const active = req.body.active === true || req.body.active === 'true';
++    user.isActive = active;
++    await user.save({ validateBeforeSave: false });
++
++    res.json({ success: true, message: active ? `${user.name} can sign in again` : `${user.name} has been deactivated` });
++  } catch (error) {
++    console.error('Set active error:', error);
++    res.status(500).json({ success: false, message: 'Server error' });
++  }
++});
++
+ // @route   GET /api/users/pending-approvals
+ // @desc    Get pending approvals
+ // @access  Private (Admins)
+diff --git a/backend/routes/vehicles.js b/backend/routes/vehicles.js
+index 783625c..a6eccd2 100644
+--- a/backend/routes/vehicles.js
++++ b/backend/routes/vehicles.js
+@@ -107,6 +107,69 @@ router.get('/', protect, async (req, res) => {
+   }
+ });
+ 
++const canManageVehicle = (user, vehicle) =>
++  user.role === 'super_admin' ||
++  (user.role === 'society_admin' && vehicle.societyId.toString() === user.societyId?.toString()) ||
++  (user.role === 'resident' && vehicle.residentId.toString() === user.id);
++
++// @route   PUT /api/vehicles/:id
++// @desc    Edit vehicle details
++// @access  Private (owner, society admin)
++router.put('/:id', protect, authorize('resident', 'society_admin', 'super_admin'), [
++  body('vehicleNumber').optional().trim().notEmpty().withMessage('Vehicle number is required'),
++  body('vehicleType').optional().isIn(['car', 'bike', 'scooter', 'bicycle', 'other']).withMessage('Invalid vehicle type')
++], async (req, res) => {
++  try {
++    const errors = validationResult(req);
++    if (!errors.isEmpty()) return res.status(400).json({ success: false, errors: errors.array() });
++
++    const vehicle = await Vehicle.findById(req.params.id);
++    if (!vehicle) return res.status(404).json({ success: false, message: 'Vehicle not found' });
++    if (!canManageVehicle(req.user, vehicle)) {
++      return res.status(403).json({ success: false, message: 'Not authorized' });
++    }
++
++    if (req.body.vehicleNumber) {
++      const number = req.body.vehicleNumber.toUpperCase().trim();
++      if (number !== vehicle.vehicleNumber) {
++        const clash = await Vehicle.findOne({ vehicleNumber: number, societyId: vehicle.societyId, _id: { $ne: vehicle._id } });
++        if (clash) return res.status(400).json({ success: false, message: 'Another vehicle already uses that number' });
++        vehicle.vehicleNumber = number;
++      }
++    }
++    ['vehicleType', 'brand', 'model', 'color'].forEach((f) => {
++      if (req.body[f] !== undefined) vehicle[f] = req.body[f];
++    });
++    await vehicle.save();
++
++    res.json({ success: true, vehicle, message: 'Vehicle updated' });
++  } catch (error) {
++    console.error('Edit vehicle error:', error);
++    res.status(500).json({ success: false, message: 'Server error' });
++  }
++});
++
++// @route   DELETE /api/vehicles/:id
++// @desc    Remove a vehicle
++// @access  Private (owner, society admin)
++router.delete('/:id', protect, authorize('resident', 'society_admin', 'super_admin'), async (req, res) => {
++  try {
++    const vehicle = await Vehicle.findById(req.params.id);
++    if (!vehicle) return res.status(404).json({ success: false, message: 'Vehicle not found' });
++    if (!canManageVehicle(req.user, vehicle)) {
++      return res.status(403).json({ success: false, message: 'Not authorized' });
++    }
++    if (vehicle.isInside) {
++      return res.status(400).json({ success: false, message: 'This vehicle is inside the society right now. Ask the guard to log its exit first.' });
++    }
++    await vehicle.deleteOne();
++    res.json({ success: true, message: 'Vehicle removed' });
++  } catch (error) {
++    console.error('Delete vehicle error:', error);
++    res.status(500).json({ success: false, message: 'Server error' });
++  }
++});
++
+ // @route   GET /api/vehicles/:id
+ // @desc    Get single vehicle
+ // @access  Private
+diff --git a/backend/routes/visitors.js b/backend/routes/visitors.js
+index 05b8bda..9d6a887 100644
+--- a/backend/routes/visitors.js
++++ b/backend/routes/visitors.js
+@@ -202,6 +202,45 @@ router.get('/:id', protect, async (req, res) => {
+   }
+ });
+ 
++// @route   PUT /api/visitors/:id
++// @desc    Edit an invitation that has not been used yet
++// @access  Private (Residents, own visitors)
++router.put('/:id', protect, authorize('resident'), [
++  body('name').optional().trim().notEmpty().withMessage('Visitor name is required'),
++  body('phone').optional().matches(/^[0-9]{10}$/).withMessage('Please provide a valid phone number'),
++  body('purpose').optional().isIn(['personal', 'business', 'delivery', 'service', 'other']).withMessage('Invalid purpose'),
++  body('numberOfVisitors').optional().isInt({ min: 1, max: 50 }),
++  body('expectedArrival').optional({ nullable: true, checkFalsy: true }).isISO8601().withMessage('Invalid date format')
++], async (req, res) => {
++  try {
++    const errors = validationResult(req);
++    if (!errors.isEmpty()) {
++      return res.status(400).json({ success: false, errors: errors.array() });
++    }
++    const visitor = await Visitor.findById(req.params.id);
++    if (!visitor) return res.status(404).json({ success: false, message: 'Visitor not found' });
++    if (visitor.residentId.toString() !== req.user.id) {
++      return res.status(403).json({ success: false, message: 'Not authorized to edit this visitor' });
++    }
++    if (!['pending', 'approved'].includes(visitor.status)) {
++      return res.status(400).json({ success: false, message: 'Only invitations that have not been used yet can be edited' });
++    }
++
++    ['name', 'phone', 'purpose', 'purposeDescription', 'numberOfVisitors', 'vehicleNumber', 'notes'].forEach((f) => {
++      if (req.body[f] !== undefined) visitor[f] = req.body[f];
++    });
++    if (req.body.expectedArrival !== undefined) {
++      visitor.expectedArrival = req.body.expectedArrival ? new Date(req.body.expectedArrival) : null;
++    }
++    await visitor.save();
++
++    res.json({ success: true, visitor, message: 'Invitation updated' });
++  } catch (error) {
++    console.error('Edit visitor error:', error);
++    res.status(500).json({ success: false, message: 'Server error' });
++  }
++});
++
+ // @route   PUT /api/visitors/:id/approve
+ // @desc    Approve visitor
+ // @access  Private (Residents, Security, Admins)
+@@ -284,6 +323,13 @@ router.put('/:id/reject', protect, authorize('resident', 'security', 'society_ad
+       });
+     }
+ 
++    if (!['pending', 'approved'].includes(visitor.status)) {
++      return res.status(400).json({
++        success: false,
++        message: 'This visit has already started or finished and cannot be rejected'
++      });
++    }
++
+     visitor.rejected = true;
+     visitor.rejectedReason = req.body.reason || 'No reason provided';
+     visitor.status = 'rejected';
+diff --git a/frontend/src/pages/AdminResidents.jsx b/frontend/src/pages/AdminResidents.jsx
+index 935b483..065bdb5 100644
+--- a/frontend/src/pages/AdminResidents.jsx
++++ b/frontend/src/pages/AdminResidents.jsx
+@@ -1,13 +1,16 @@
+ import { useMemo, useState } from 'react'
+-import { FiCheck, FiSearch, FiUsers, FiX } from 'react-icons/fi'
++import { FiCheck, FiSearch, FiSlash, FiUserCheck, FiUsers, FiX } from 'react-icons/fi'
+ import { useAuth } from '../contexts/AuthContext'
+ import api from '../services/api'
+ import useApi from '../hooks/useApi'
+ import useAction from '../hooks/useAction'
+-import { DataList, EmptyState, Field, Modal, PageHeader, StatusTag, formatDate, titleCase } from '../components/ui'
++import { ConfirmDialog, DataList, EmptyState, Field, Modal, PageHeader, StatusTag, formatDate, titleCase } from '../components/ui'
+ 
+ const ROLE_LABEL = { resident: 'Resident', security: 'Guard', staff: 'Staff', vendor: 'Vendor' }
+ 
++// One word for where a person stands: waiting, rejected, active or deactivated.
++const stateOf = (u) => (!u.isApproved ? (u.rejectedAt ? 'rejected' : 'pending') : u.isActive === false ? 'deactivated' : 'active')
++
+ const flatOf = (u) => `${u.block ? `${u.block}-` : ''}${u.flatNo || '-'}`
+ 
+ const AdminResidents = () => {
+@@ -35,6 +38,7 @@ const AdminResidents = () => {
+ 
+   const approve = (u) => run(u._id, () => api.put(`/users/approve/${u._id}`), `${u.name} approved`)
+ 
++  const [deactivating, setDeactivating] = useState(null)
+   const [rejecting, setRejecting] = useState(null)
+   const [reason, setReason] = useState('')
+ 
+@@ -49,26 +53,50 @@ const AdminResidents = () => {
+         </div>
+       )
+     },
+-    ...(tab === 'pending' ? [{ key: 'role', header: 'Signed up as', render: (u) => ROLE_LABEL[u.role] || titleCase(u.role) }] : []),
++    { key: 'role', header: tab === 'pending' ? 'Signed up as' : 'Role', render: (u) => ROLE_LABEL[u.role] || titleCase(u.role) },
+     { key: 'flat', header: 'Flat', render: (u) => (u.flatNo ? flatOf(u) : '-') },
+     { key: 'phone', header: 'Phone', render: (u) => u.phone },
+     { key: 'joined', header: 'Registered', render: (u) => formatDate(u.createdAt) },
+-    ...(tab === 'all' ? [{ key: 'status', header: 'Status', render: (u) => <StatusTag status={u.isApproved ? 'approved' : 'pending'} /> }] : []),
++    ...(tab === 'all' ? [{ key: 'status', header: 'Status', render: (u) => <StatusTag status={stateOf(u)} /> }] : []),
+     {
+       key: 'actions',
+       header: '',
+       className: 'md:text-right',
+-      render: (u) =>
+-        tab === 'pending' || !u.isApproved ? (
+-          <div className="flex flex-wrap justify-end gap-2">
+-            <button className="btn-ok btn-sm" disabled={busy === u._id} onClick={() => approve(u)}>
+-              <FiCheck size={14} /> Approve
+-            </button>
+-            <button className="btn-secondary btn-sm" disabled={busy === u._id} onClick={() => setRejecting(u)}>
+-              <FiX size={14} /> Reject
+-            </button>
++      render: (u) => {
++        const state = stateOf(u)
++        if (state === 'pending')
++          return (
++            <div className="flex flex-wrap justify-end gap-2">
++              <button className="btn-ok btn-sm" disabled={busy === u._id} onClick={() => approve(u)}>
++                <FiCheck size={14} /> Approve
++              </button>
++              <button className="btn-secondary btn-sm" disabled={busy === u._id} onClick={() => setRejecting(u)}>
++                <FiX size={14} /> Reject
++              </button>
++            </div>
++          )
++        if (state === 'rejected')
++          return (
++            <div className="flex justify-end">
++              <button className="btn-ok btn-sm" disabled={busy === u._id} onClick={() => approve(u)}>
++                <FiCheck size={14} /> Approve instead
++              </button>
++            </div>
++          )
++        return (
++          <div className="flex justify-end">
++            {state === 'active' ? (
++              <button className="btn-secondary btn-sm" disabled={busy === u._id} onClick={() => setDeactivating(u)}>
++                <FiSlash size={14} /> Deactivate
++              </button>
++            ) : (
++              <button className="btn-secondary btn-sm" disabled={busy === u._id} onClick={() => run(u._id, () => api.put(`/users/${u._id}/active`, { active: true }), `${u.name} can sign in again`)}>
++                <FiUserCheck size={14} /> Reactivate
++              </button>
++            )}
+           </div>
+-        ) : null
++        )
++      }
+     }
+   ]
+ 
+@@ -80,7 +108,7 @@ const AdminResidents = () => {
+         <div className="flex gap-1 rounded-lg bg-sunken p-1" role="tablist" aria-label="Resident lists">
+           {[
+             { key: 'pending', label: `Waiting for approval${pending.data?.length ? ` (${pending.data.length})` : ''}` },
+-            { key: 'all', label: 'All residents' }
++            { key: 'all', label: 'Everyone' }
+           ].map((t) => (
+             <button key={t.key} role="tab" aria-selected={tab === t.key} onClick={() => setTab(t.key)}
+               className={`rounded-md px-3 py-1.5 text-sm font-semibold transition-colors ${tab === t.key ? 'bg-surface shadow-sm' : 'text-muted hover:text-ink'}`}>
+@@ -116,6 +144,20 @@ const AdminResidents = () => {
+         }
+       />
+ 
++      <ConfirmDialog
++        open={!!deactivating}
++        title="Deactivate this account?"
++        text={`${deactivating?.name} will be signed out and cannot sign in until you reactivate them. Their records are kept.`}
++        confirmLabel="Deactivate"
++        danger
++        busy={busy === deactivating?._id}
++        onClose={() => setDeactivating(null)}
++        onConfirm={async () => {
++          const ok = await run(deactivating._id, () => api.put(`/users/${deactivating._id}/active`, { active: false }), `${deactivating.name} deactivated`)
++          if (ok) setDeactivating(null)
++        }}
++      />
++
+       <Modal
+         open={!!rejecting}
+         onClose={() => setRejecting(null)}
+diff --git a/frontend/src/pages/Complaints.jsx b/frontend/src/pages/Complaints.jsx
+index 48ec622..c30e134 100644
+--- a/frontend/src/pages/Complaints.jsx
++++ b/frontend/src/pages/Complaints.jsx
+@@ -1,5 +1,5 @@
+ import { useMemo, useState } from 'react'
+-import { FiFileText, FiPlus } from 'react-icons/fi'
++import { FiFileText, FiPlus, FiStar } from 'react-icons/fi'
+ import { useAuth } from '../contexts/AuthContext'
+ import api from '../services/api'
+ import useApi from '../hooks/useApi'
+@@ -32,6 +32,7 @@ const Complaints = () => {
+     await reload()
+   })
+   const [comment, setComment] = useState('')
++  const [rate, setRate] = useState({ rating: 0, feedback: '' })
+   const [statusForm, setStatusForm] = useState({ status: 'in_progress', resolution: '' })
+ 
+   const societyId = detail?.societyId?._id || detail?.societyId || user?.societyId?._id || user?.societyId
+@@ -177,6 +178,44 @@ const Complaints = () => {
+               {detail.resolution && <p className="mt-3 rounded-md bg-ok-soft px-3 py-2 text-sm text-ok"><strong>Resolution:</strong> {detail.resolution}</p>}
+             </div>
+ 
++            {detail.rating ? (
++              <p className="rounded-md bg-sunken px-3 py-2 text-sm">
++                <strong>Rated {detail.rating}/5</strong>{detail.feedback ? ` · ${detail.feedback}` : ''}
++              </p>
++            ) : isResident && ['resolved', 'closed'].includes(detail.status) ? (
++              <div className="rounded-md border border-line p-3">
++                <p className="mb-2 text-sm font-semibold">How was this handled?</p>
++                <div className="mb-3 flex gap-1" role="radiogroup" aria-label="Rating">
++                  {[1, 2, 3, 4, 5].map((n) => (
++                    <button
++                      key={n}
++                      type="button"
++                      role="radio"
++                      aria-checked={rate.rating === n}
++                      aria-label={`${n} star${n > 1 ? 's' : ''}`}
++                      onClick={() => setRate({ ...rate, rating: n })}
++                      className="grid h-10 w-10 place-items-center rounded-md hover:bg-sunken"
++                    >
++                      <FiStar size={22} className={n <= rate.rating ? 'fill-amber text-amber' : 'text-muted'} />
++                    </button>
++                  ))}
++                </div>
++                <div className="flex gap-2">
++                  <input aria-label="Feedback" className="input" maxLength={500} placeholder="Anything to add? (optional)" value={rate.feedback} onChange={(e) => setRate({ ...rate, feedback: e.target.value })} />
++                  <button
++                    className="btn-primary"
++                    disabled={!rate.rating || detailBusy === 'rate'}
++                    onClick={async () => {
++                      const ok = await runDetail('rate', () => api.put(`/complaints/${detail._id}/feedback`, { rating: rate.rating, feedback: rate.feedback.trim() || undefined }), 'Thanks for your feedback')
++                      if (ok) setRate({ rating: 0, feedback: '' })
++                    }}
++                  >
++                    Send
++                  </button>
++                </div>
++              </div>
++            ) : null}
++
+             {isAdmin && (
+               <Field label="Assign to" htmlFor="c-assign">
+                 <select
+diff --git a/frontend/src/pages/Vehicles.jsx b/frontend/src/pages/Vehicles.jsx
+index 96cd33e..8abbe6b 100644
+--- a/frontend/src/pages/Vehicles.jsx
++++ b/frontend/src/pages/Vehicles.jsx
+@@ -1,10 +1,10 @@
+ import { useMemo, useState } from 'react'
+-import { FiLogIn, FiLogOut, FiPlus, FiSearch, FiTruck } from 'react-icons/fi'
++import { FiEdit2, FiLogIn, FiLogOut, FiPlus, FiSearch, FiTrash2, FiTruck } from 'react-icons/fi'
+ import { useAuth } from '../contexts/AuthContext'
+ import api from '../services/api'
+ import useApi from '../hooks/useApi'
+ import useAction from '../hooks/useAction'
+-import { DataList, EmptyState, Field, Modal, PageHeader, Spinner, titleCase } from '../components/ui'
++import { ConfirmDialog, DataList, EmptyState, Field, Modal, PageHeader, Spinner, titleCase } from '../components/ui'
+ 
+ const TYPES = ['car', 'bike', 'scooter', 'bicycle', 'other']
+ const EMPTY_FORM = { vehicleNumber: '', vehicleType: 'car', brand: '', model: '', color: '' }
+@@ -16,6 +16,9 @@ const Vehicles = () => {
+   const [open, setOpen] = useState(false)
+   const [form, setForm] = useState(EMPTY_FORM)
+   const [query, setQuery] = useState('')
++  const [editing, setEditing] = useState(null) // vehicle being edited
++  const [removing, setRemoving] = useState(null)
++  const canManage = isResident || isAdmin
+ 
+   const rows = useMemo(() => {
+     const q = query.trim().toLowerCase()
+@@ -26,8 +29,11 @@ const Vehicles = () => {
+   const submit = async (e) => {
+     e.preventDefault()
+     const payload = Object.fromEntries(Object.entries({ ...form, vehicleNumber: form.vehicleNumber.trim().toUpperCase() }).filter(([, v]) => v !== ''))
+-    const ok = await run('create', () => api.post('/vehicles/register', payload), 'Vehicle registered')
++    const ok = editing
++      ? await run('create', () => api.put(`/vehicles/${editing._id}`, payload), 'Vehicle updated')
++      : await run('create', () => api.post('/vehicles/register', payload), 'Vehicle registered')
+     if (ok) {
++      setEditing(null)
+       setOpen(false)
+       setForm(EMPTY_FORM)
+     }
+@@ -49,6 +55,29 @@ const Vehicles = () => {
+     ...(isResident ? [] : [{ key: 'owner', header: 'Owner', render: (v) => `${v.residentId?.name || '-'}${v.residentId?.flatNo ? ` (${v.residentId.flatNo})` : ''}` }]),
+     { key: 'type', header: 'Type', render: (v) => titleCase(v.vehicleType) },
+     { key: 'status', header: 'Status', render: (v) => <span className={v.isInside ? 'tag-ok' : 'tag-neutral'}>{v.isInside ? 'Inside' : 'Outside'}</span> },
++    ...(canManage
++      ? [
++          {
++            key: 'manage',
++            header: '',
++            className: 'md:text-right',
++            render: (v) => (
++              <div className="flex justify-end gap-2">
++                <button className="btn-secondary btn-sm" aria-label={`Edit ${v.vehicleNumber}`} onClick={() => {
++                  setEditing(v)
++                  setForm({ vehicleNumber: v.vehicleNumber || '', vehicleType: v.vehicleType || 'car', brand: v.brand || '', model: v.model || '', color: v.color || '' })
++                  setOpen(true)
++                }}>
++                  <FiEdit2 size={14} /> Edit
++                </button>
++                <button className="btn-secondary btn-sm" aria-label={`Remove ${v.vehicleNumber}`} onClick={() => setRemoving(v)}>
++                  <FiTrash2 size={14} /> Remove
++                </button>
++              </div>
++            )
++          }
++        ]
++      : []),
+     ...(canLog
+       ? [
+           {
+@@ -80,7 +109,7 @@ const Vehicles = () => {
+         subtitle={isResident ? 'Register your vehicles so the gate recognises them.' : 'Registered vehicles and who is parked inside right now.'}
+         action={
+           isResident && (
+-            <button className="btn-primary" onClick={() => setOpen(true)}>
++            <button className="btn-primary" onClick={() => { setEditing(null); setForm(EMPTY_FORM); setOpen(true) }}>
+               <FiPlus size={16} /> Register vehicle
+             </button>
+           )
+@@ -112,14 +141,14 @@ const Vehicles = () => {
+ 
+       <Modal
+         open={open}
+-        onClose={() => setOpen(false)}
+-        title="Register vehicle"
++        onClose={() => { setOpen(false); setEditing(null) }}
++        title={editing ? 'Edit vehicle' : 'Register vehicle'}
+         footer={
+           <>
+-            <button className="btn-secondary" onClick={() => setOpen(false)}>Cancel</button>
++            <button className="btn-secondary" onClick={() => { setOpen(false); setEditing(null) }}>Cancel</button>
+             <button className="btn-primary" form="vehicle-form" type="submit" disabled={busy === 'create'}>
+               {busy === 'create' && <Spinner className="h-4 w-4" />}
+-              Register
++              {editing ? 'Save changes' : 'Register'}
+             </button>
+           </>
+         }
+@@ -142,6 +171,20 @@ const Vehicles = () => {
+           </div>
+         </form>
+       </Modal>
++
++      <ConfirmDialog
++        open={!!removing}
++        title="Remove this vehicle?"
++        text={`${removing?.vehicleNumber} will be removed from the register. You can add it again later.`}
++        confirmLabel="Remove"
++        danger
++        busy={busy === removing?._id}
++        onClose={() => setRemoving(null)}
++        onConfirm={async () => {
++          const ok = await run(removing._id, () => api.delete(`/vehicles/${removing._id}`), 'Vehicle removed')
++          if (ok) setRemoving(null)
++        }}
++      />
+     </>
+   )
+ }
+diff --git a/frontend/src/pages/Visitors.jsx b/frontend/src/pages/Visitors.jsx
+index 9a30596..6f168c5 100644
+--- a/frontend/src/pages/Visitors.jsx
++++ b/frontend/src/pages/Visitors.jsx
+@@ -1,12 +1,12 @@
+ import { useMemo, useState } from 'react'
+ import { QRCodeSVG } from 'qrcode.react'
+-import { FiCheck, FiLogIn, FiLogOut, FiPlus, FiUsers, FiX } from 'react-icons/fi'
++import { FiCheck, FiEdit2, FiLogIn, FiLogOut, FiPlus, FiUsers, FiX } from 'react-icons/fi'
+ import { useAuth } from '../contexts/AuthContext'
+ import api from '../services/api'
+ import useApi from '../hooks/useApi'
+ import useAction from '../hooks/useAction'
+ import { passCode } from '../utils/pass'
+-import { DataList, EmptyState, Field, Modal, PageHeader, Spinner, StatusTag, formatDate, titleCase } from '../components/ui'
++import { ConfirmDialog, DataList, EmptyState, Field, Modal, PageHeader, Spinner, StatusTag, formatDate, titleCase } from '../components/ui'
+ 
+ const PURPOSES = ['personal', 'business', 'delivery', 'service', 'other']
+ const EMPTY_FORM = { name: '', phone: '', purpose: 'personal', numberOfVisitors: 1, vehicleNumber: '', expectedArrival: '' }
+@@ -30,6 +30,8 @@ const Visitors = () => {
+   const [formError, setFormError] = useState('')
+   const [passFor, setPassFor] = useState(null)
+   const [rejecting, setRejecting] = useState(null)
++  const [editing, setEditing] = useState(null)
++  const [cancelling, setCancelling] = useState(null)
+   const [reason, setReason] = useState('')
+ 
+   const visitors = useMemo(
+@@ -54,6 +56,15 @@ const Visitors = () => {
+     else payload.expectedArrival = new Date(payload.expectedArrival).toISOString()
+     if (!payload.vehicleNumber) delete payload.vehicleNumber
+ 
++    if (editing) {
++      const done = await run('invite', () => api.put(`/visitors/${editing._id}`, { ...payload, expectedArrival: payload.expectedArrival || null }), 'Invitation updated')
++      if (done) {
++        setInviteOpen(false)
++        setEditing(null)
++        setForm(EMPTY_FORM)
++      }
++      return
++    }
+     const res = await run('invite', () => api.post('/visitors/invite', payload), 'Invitation sent. Your guest can now enter.')
+     if (res) {
+       setInviteOpen(false)
+@@ -62,6 +73,25 @@ const Visitors = () => {
+     }
+   }
+ 
++  const toLocalInput = (d) => {
++    if (!d) return ''
++    const dt = new Date(d)
++    return new Date(dt.getTime() - dt.getTimezoneOffset() * 60000).toISOString().slice(0, 16)
++  }
++  const openEdit = (v) => {
++    setEditing(v)
++    setFormError('')
++    setForm({
++      name: v.name || '',
++      phone: v.phone || '',
++      purpose: v.purpose || 'personal',
++      numberOfVisitors: v.numberOfVisitors || 1,
++      vehicleNumber: v.vehicleNumber || '',
++      expectedArrival: toLocalInput(v.expectedArrival)
++    })
++    setInviteOpen(true)
++  }
++
+   const columns = [
+     {
+       key: 'name',
+@@ -103,6 +133,18 @@ const Visitors = () => {
+                 </button>
+               </>
+             )}
++            {isResident && ['pending', 'approved'].includes(v.status) && (
++              <>
++                <button className="btn-secondary btn-sm" disabled={isBusy} onClick={() => openEdit(v)}>
++                  <FiEdit2 size={14} /> Edit
++                </button>
++                {v.status === 'approved' && (
++                  <button className="btn-secondary btn-sm" disabled={isBusy} onClick={() => setCancelling(v)}>
++                    <FiX size={14} /> Cancel
++                  </button>
++                )}
++              </>
++            )}
+             {isResident && ['approved', 'checked_in'].includes(v.status) && (
+               <button className="btn-secondary btn-sm" onClick={() => setPassFor(v)}>
+                 Show pass
+@@ -135,7 +177,7 @@ const Visitors = () => {
+         }
+         action={
+           isResident && (
+-            <button className="btn-primary" onClick={() => setInviteOpen(true)}>
++            <button className="btn-primary" onClick={() => { setEditing(null); setForm(EMPTY_FORM); setFormError(''); setInviteOpen(true) }}>
+               <FiPlus size={16} /> Invite visitor
+             </button>
+           )
+@@ -183,16 +225,16 @@ const Visitors = () => {
+ 
+       <Modal
+         open={inviteOpen}
+-        onClose={() => setInviteOpen(false)}
+-        title="Invite visitor"
++        onClose={() => { setInviteOpen(false); setEditing(null) }}
++        title={editing ? 'Edit invitation' : 'Invite visitor'}
+         footer={
+           <>
+-            <button className="btn-secondary" onClick={() => setInviteOpen(false)}>
++            <button className="btn-secondary" onClick={() => { setInviteOpen(false); setEditing(null) }}>
+               Cancel
+             </button>
+             <button className="btn-primary" form="invite-form" type="submit" disabled={busy === 'invite'}>
+               {busy === 'invite' && <Spinner className="h-4 w-4" />}
+-              Send invitation
++              {editing ? 'Save changes' : 'Send invitation'}
+             </button>
+           </>
+         }
+@@ -230,6 +272,20 @@ const Visitors = () => {
+         </form>
+       </Modal>
+ 
++      <ConfirmDialog
++        open={!!cancelling}
++        title="Cancel this invitation?"
++        text={`${cancelling?.name}'s pass will stop working at the gate.`}
++        confirmLabel="Cancel invitation"
++        danger
++        busy={busy === cancelling?._id}
++        onClose={() => setCancelling(null)}
++        onConfirm={async () => {
++          const ok = await run(cancelling._id, () => api.put(`/visitors/${cancelling._id}/reject`, { reason: 'Cancelled by resident' }), 'Invitation cancelled')
++          if (ok) setCancelling(null)
++        }}
++      />
++
+       <Modal open={!!passFor} onClose={() => setPassFor(null)} title="Gate pass" size="sm" footer={<button className="btn-primary" onClick={() => setPassFor(null)}>Done</button>}>
+         {passFor && (
+           <div className="text-center">

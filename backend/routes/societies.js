@@ -3,7 +3,8 @@ const router = express.Router();
 const { body, validationResult } = require('express-validator');
 const Society = require('../models/Society');
 const User = require('../models/User');
-const { protect, authorize } = require('../middleware/auth');
+const { protect, authorize , scopeToOwnSociety } = require('../middleware/auth');
+router.param('id', scopeToOwnSociety);
 
 // @route   POST /api/societies
 // @desc    Create a society
@@ -57,8 +58,7 @@ router.post('/', protect, authorize('super_admin'), [
     console.error('Society creation error:', error);
     res.status(500).json({
       success: false,
-      message: 'Server error',
-      error: error.message
+      message: 'Server error'
     });
   }
 });
@@ -73,7 +73,7 @@ router.get('/public', async (req, res) => {
       .sort({ name: 1 });
     res.json({ success: true, societies });
   } catch (error) {
-    res.status(500).json({ success: false, message: 'Server error', error: error.message });
+    res.status(500).json({ success: false, message: 'Server error' });
   }
 });
 
@@ -102,8 +102,7 @@ router.get('/', protect, async (req, res) => {
   } catch (error) {
     res.status(500).json({
       success: false,
-      message: 'Server error',
-      error: error.message
+      message: 'Server error'
     });
   }
 });
@@ -139,8 +138,7 @@ router.get('/:id', protect, async (req, res) => {
   } catch (error) {
     res.status(500).json({
       success: false,
-      message: 'Server error',
-      error: error.message
+      message: 'Server error'
     });
   }
 });
@@ -158,7 +156,7 @@ router.get('/:id/staff', protect, authorize('society_admin', 'super_admin'), asy
       .sort({ name: 1 });
     res.json({ success: true, staff });
   } catch (error) {
-    res.status(500).json({ success: false, message: 'Server error', error: error.message });
+    res.status(500).json({ success: false, message: 'Server error' });
   }
 });
 
@@ -186,10 +184,10 @@ router.get('/:id/residents', protect, authorize('society_admin', 'super_admin'),
 
     const residents = await User.find({
       societyId: req.params.id,
-      role: 'resident'
+      role: { $in: ['resident', 'security', 'staff', 'vendor'] }
     })
-      .select('name email phone flatNo block isApproved createdAt')
-      .sort({ flatNo: 1 });
+      .select('name email phone role flatNo block isApproved isActive rejectedAt createdAt')
+      .sort({ role: 1, flatNo: 1 });
 
     res.json({
       success: true,
@@ -199,8 +197,7 @@ router.get('/:id/residents', protect, authorize('society_admin', 'super_admin'),
   } catch (error) {
     res.status(500).json({
       success: false,
-      message: 'Server error',
-      error: error.message
+      message: 'Server error'
     });
   }
 });
@@ -248,8 +245,7 @@ router.put('/:id', protect, authorize('super_admin', 'society_admin'), async (re
   } catch (error) {
     res.status(500).json({
       success: false,
-      message: 'Server error',
-      error: error.message
+      message: 'Server error'
     });
   }
 });

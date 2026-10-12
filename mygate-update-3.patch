@@ -1,0 +1,1046 @@
+diff --git a/SETUP_SERVICES.md b/SETUP_SERVICES.md
+new file mode 100644
+index 0000000..0aebd2a
+--- /dev/null
++++ b/SETUP_SERVICES.md
+@@ -0,0 +1,44 @@
++# Setting up email and online payments
++
++Both are optional. The app runs without them.
++
++## Password-reset email (Gmail)
++
++Without these settings, "Forgot password" still works in development: the reset link is printed in the backend terminal. In production (`NODE_ENV=production`) users are told email is unavailable.
++
++1. Turn on 2-Step Verification for the Google account: https://myaccount.google.com/security
++2. Create an App Password: https://myaccount.google.com/apppasswords (name it "MyGate"). Copy the 16 characters, without spaces.
++3. In `backend/.env`:
++   ```
++   EMAIL_HOST=smtp.gmail.com
++   EMAIL_PORT=587
++   EMAIL_USER=you@gmail.com
++   EMAIL_PASS=the16characterapppassword
++   FRONTEND_URL=http://localhost:5173
++   ```
++   `FRONTEND_URL` must be the address users open, because the reset link is built from it.
++4. Restart the backend, then try Forgot password with a real account.
++
++Port 465 also works (it switches to SSL automatically). Any SMTP provider (Brevo, SendGrid, Zoho) works with its own host, user and password.
++
++## Online payments (Razorpay)
++
++Without keys, residents see "Online payments are not set up" and admins can still create dues and record cash, cheque or UPI payments.
++
++1. Sign up at https://dashboard.razorpay.com and stay in **Test Mode**.
++2. Settings > API Keys > Generate Test Key. Copy the Key Id and Key Secret.
++3. In `backend/.env`:
++   ```
++   RAZORPAY_KEY_ID=rzp_test_xxxxxxxxxxxx
++   RAZORPAY_KEY_SECRET=xxxxxxxxxxxxxxxx
++   ```
++4. Restart the backend.
++5. Test: admin opens Payments > Create dues. Resident opens Payments > Pay now. Use Razorpay's test card `4111 1111 1111 1111`, any future expiry, any CVV, and any OTP.
++
++Going live needs Razorpay KYC approval, then swapping in the `rzp_live_` keys. Never commit the secret or put it in the frontend.
++
++## Money flow
++
++- Admin: Payments > Create dues bills every approved resident. Flats already billed for the same month are skipped.
++- Resident: Pay now on a pending due (online), or pays the admin directly.
++- Admin: Record payment on a pending row marks cash, cheque or UPI as received. The resident is notified and the Collected total updates.
+diff --git a/backend/middleware/auth.js b/backend/middleware/auth.js
+index b4d257a..7993234 100644
+--- a/backend/middleware/auth.js
++++ b/backend/middleware/auth.js
+@@ -32,6 +32,14 @@ exports.protect = async (req, res, next) => {
+         });
+       }
+ 
++      // Residents, guards, staff and vendors can use the API only after an admin approves them.
++      if (['resident', 'security', 'staff', 'vendor'].includes(req.user.role) && !req.user.isApproved && req.user.isActive) {
++        return res.status(403).json({
++          success: false,
++          message: 'Your account is pending approval from society admin'
++        });
++      }
++
+       if (!req.user.isActive) {
+         return res.status(401).json({
+           success: false,
+diff --git a/backend/models/User.js b/backend/models/User.js
+index 8694cc7..0f9c8d8 100644
+--- a/backend/models/User.js
++++ b/backend/models/User.js
+@@ -75,6 +75,13 @@ const userSchema = new mongoose.Schema({
+     type: Boolean,
+     default: true
+   },
++  rejectedAt: {
++    type: Date
++  },
++  rejectedReason: {
++    type: String,
++    trim: true
++  },
+   resetPasswordToken: String,
+   resetPasswordExpire: Date,
+   lastLogin: Date
+diff --git a/backend/routes/auth.js b/backend/routes/auth.js
+index ea99e50..ece0327 100644
+--- a/backend/routes/auth.js
++++ b/backend/routes/auth.js
+@@ -6,6 +6,7 @@ const Society = require('../models/Society');
+ const { protect, authorize } = require('../middleware/auth');
+ const generateToken = require('../utils/generateToken');
+ const sendEmail = require('../utils/sendEmail');
++const { notifyUser } = require('../utils/notifyUser');
+ const crypto = require('crypto');
+ 
+ // @route   POST /api/auth/register
+@@ -56,19 +57,27 @@ router.post('/register', [
+       societyId,
+       flatNo: flatNo || null,
+       block: block || null,
+-      isApproved: role === 'resident' ? false : true // Residents need approval
++      // Everyone who signs up on their own waits for a society admin. Otherwise anyone could register as a guard.
++      isApproved: false
+     });
+ 
+-    // If resident, notify admins
+-    if (role === 'resident' && !user.isApproved) {
+-      // Get society admins
+-      const admins = await User.find({ 
+-        societyId, 
+-        role: { $in: ['society_admin', 'super_admin'] } 
+-      });
+-
+-      // Notify admins (would use notification service in production)
+-      console.log(`New resident ${user.name} registered and pending approval`);
++    // Tell the society's admins someone is waiting. A failed notification must not fail the sign-up.
++    try {
++      const io = req.app.get('io');
++      const admins = await User.find({ societyId, role: 'society_admin', isActive: true });
++      const roleLabel = { resident: 'resident', security: 'guard', staff: 'staff member', vendor: 'vendor' }[role] || role;
++      for (const admin of admins) {
++        await notifyUser(io, admin._id, {
++          societyId,
++          type: 'general',
++          title: 'New sign-up to approve',
++          message: `${user.name} registered as a ${roleLabel}${user.flatNo ? ` (flat ${user.block ? `${user.block}-` : ''}${user.flatNo})` : ''}. Review it in People.`,
++          priority: 'medium',
++          actionUrl: '/admin/residents'
++        });
++      }
++    } catch (notifyError) {
++      console.error('Could not notify admins of new sign-up:', notifyError.message);
+     }
+ 
+     // Generate token
+@@ -84,9 +93,7 @@ router.post('/register', [
+         role: user.role,
+         isApproved: user.isApproved
+       },
+-      message: role === 'resident' && !user.isApproved 
+-        ? 'Registration successful. Your account is pending admin approval.'
+-        : 'Registration successful'
++      message: 'Registration successful. Your account is pending admin approval.'
+     });
+   } catch (error) {
+     console.error('Registration error:', error);
+@@ -132,6 +139,16 @@ router.post('/login', [
+       });
+     }
+ 
++    // A rejected sign-up (or a deactivated account) cannot sign in. Say why, so the person is not left guessing.
++    if (!user.isActive) {
++      return res.status(403).json({
++        success: false,
++        message: user.rejectedAt
++          ? `Your registration was not approved${user.rejectedReason ? `: ${user.rejectedReason}` : '.'} Contact your society admin.`
++          : 'This account has been deactivated. Contact your society admin.'
++      });
++    }
++
+     // Update last login
+     user.lastLogin = new Date();
+     await user.save();
+@@ -219,6 +236,24 @@ router.post('/forgot-password', [
+     // Create reset URL
+     const resetUrl = `${process.env.FRONTEND_URL}/reset-password/${resetToken}`;
+ 
++    // No mail server set up: in development print the link so the flow can still be tested.
++    if (!sendEmail.isEmailConfigured()) {
++      if (process.env.NODE_ENV !== 'production') {
++        console.log(`\n[dev] Email is not configured. Password reset link for ${user.email}:\n${resetUrl}\n`);
++        return res.json({
++          success: true,
++          message: 'Email is not set up on this server. In development the reset link is printed in the backend console.'
++        });
++      }
++      user.resetPasswordToken = undefined;
++      user.resetPasswordExpire = undefined;
++      await user.save({ validateBeforeSave: false });
++      return res.status(503).json({
++        success: false,
++        message: 'Password reset email is not available right now. Please contact your society admin.'
++      });
++    }
++
+     // Send email
+     try {
+       await sendEmail({
+@@ -239,6 +274,7 @@ router.post('/forgot-password', [
+         message: 'Password reset email sent'
+       });
+     } catch (error) {
++      console.error('Reset email failed:', error.message);
+       user.resetPasswordToken = undefined;
+       user.resetPasswordExpire = undefined;
+       await user.save({ validateBeforeSave: false });
+diff --git a/backend/routes/deliveries.js b/backend/routes/deliveries.js
+index efe1b49..9d61e53 100644
+--- a/backend/routes/deliveries.js
++++ b/backend/routes/deliveries.js
+@@ -245,6 +245,55 @@ router.put('/:id/approve', protect, authorize('resident', 'security', 'society_a
+   }
+ });
+ 
++// @route   PUT /api/deliveries/:id/reject
++// @desc    Reject or cancel a delivery that has not reached the gate yet
++// @access  Private (Residents, Security, Admins)
++router.put('/:id/reject', protect, authorize('resident', 'security', 'society_admin'), [
++  body('reason').optional().trim().isLength({ max: 200 })
++], async (req, res) => {
++  try {
++    const delivery = await Delivery.findById(req.params.id);
++    if (!delivery) {
++      return res.status(404).json({ success: false, message: 'Delivery not found' });
++    }
++    if (req.user.role === 'resident' && delivery.residentId.toString() !== req.user.id) {
++      return res.status(403).json({ success: false, message: 'Not authorized to reject this delivery' });
++    }
++    if (req.user.role !== 'resident' && delivery.societyId.toString() !== req.user.societyId?.toString()) {
++      return res.status(403).json({ success: false, message: 'Not authorized' });
++    }
++    if (!['pending', 'approved'].includes(delivery.status)) {
++      return res.status(400).json({ success: false, message: 'This delivery has already been handled and cannot be rejected' });
++    }
++
++    delivery.rejected = true;
++    delivery.rejectedReason = req.body.reason || 'No reason provided';
++    delivery.status = 'rejected';
++    delivery.approved = false;
++    await delivery.save();
++
++    const io = req.app.get('io');
++    if (io) {
++      try {
++        await notifyUser(io, delivery.residentId, {
++          societyId: delivery.societyId,
++          type: 'delivery_approval',
++          title: 'Delivery rejected',
++          message: req.user.role === 'resident' ? 'You cancelled an expected delivery' : 'A delivery for you was turned away at the gate',
++          relatedId: delivery._id,
++          relatedModel: 'Delivery',
++          actionUrl: '/deliveries'
++        });
++      } catch (e) { /* notification failure must not fail the action */ }
++    }
++
++    res.json({ success: true, delivery, message: 'Delivery rejected' });
++  } catch (error) {
++    console.error('Reject delivery error:', error);
++    res.status(500).json({ success: false, message: 'Server error' });
++  }
++});
++
+ // @route   PUT /api/deliveries/:id/check-in
+ // @desc    Check in delivery
+ // @access  Private (Security)
+diff --git a/backend/routes/payments.js b/backend/routes/payments.js
+index 87cf744..5c7f0a5 100644
+--- a/backend/routes/payments.js
++++ b/backend/routes/payments.js
+@@ -275,6 +275,218 @@ router.get('/', protect, async (req, res) => {
+   }
+ });
+ 
++// ---- Admin: dues, cash/cheque records, collections summary ----
++const ADMINS = ['society_admin', 'super_admin'];
++const adminSocietyId = (req) => (req.user.role === 'super_admin' ? req.body.societyId || req.query.societyId : req.user.societyId);
++
++// @route   POST /api/payments/generate
++// @desc    Create dues (e.g. monthly maintenance) for all approved residents, or chosen ones
++// @access  Private (Admins)
++router.post('/generate', protect, authorize(...ADMINS), [
++  body('type').optional().isIn(['maintenance', 'fine', 'other']).withMessage('Invalid type'),
++  body('amount').isFloat({ min: 1 }).withMessage('Amount must be at least 1'),
++  body('month').optional().matches(/^\d{4}-\d{2}$/).withMessage('Month must be YYYY-MM'),
++  body('dueDate').optional().isISO8601().withMessage('Invalid due date'),
++  body('description').optional().trim().isLength({ max: 200 }),
++  body('residentIds').optional().isArray()
++], async (req, res) => {
++  try {
++    const errors = validationResult(req);
++    if (!errors.isEmpty()) return res.status(400).json({ success: false, errors: errors.array() });
++
++    const societyId = adminSocietyId(req);
++    if (!societyId) return res.status(400).json({ success: false, message: 'Society is required' });
++
++    const type = req.body.type || 'maintenance';
++    const { amount, month, dueDate, description, residentIds } = req.body;
++    if (type === 'maintenance' && !month) {
++      return res.status(400).json({ success: false, message: 'Choose the month these dues are for' });
++    }
++
++    const User = require('../models/User');
++    const filter = { societyId, role: 'resident', isApproved: true, isActive: true };
++    if (Array.isArray(residentIds) && residentIds.length) filter._id = { $in: residentIds };
++    const residents = await User.find(filter).select('name flatNo block');
++    if (!residents.length) {
++      return res.status(400).json({ success: false, message: 'No approved residents to bill' });
++    }
++
++    // Do not bill the same flat twice for the same month of maintenance.
++    let skipped = 0;
++    let todo = residents;
++    if (type === 'maintenance') {
++      const existing = await Payment.find({
++        societyId, type: 'maintenance', month, status: { $in: ['pending', 'processing', 'completed'] }
++      }).select('residentId');
++      const billed = new Set(existing.map((p) => p.residentId.toString()));
++      todo = residents.filter((r) => !billed.has(r._id.toString()));
++      skipped = residents.length - todo.length;
++    }
++
++    const docs = todo.map((r) => ({
++      residentId: r._id,
++      societyId,
++      amount,
++      type,
++      month,
++      year: month ? Number(month.slice(0, 4)) : undefined,
++      description: description || (type === 'maintenance' ? `Maintenance for ${month}` : undefined),
++      dueDate: dueDate ? new Date(dueDate) : undefined,
++      flatNo: r.flatNo || '-',
++      block: r.block,
++      status: 'pending'
++    }));
++    const created = docs.length ? await Payment.insertMany(docs) : [];
++
++    const io = req.app.get('io');
++    if (io) {
++      for (const p of created) {
++        try {
++          await notifyUser(io, p.residentId, {
++            societyId,
++            type: 'payment_due',
++            title: 'New payment due',
++            message: `₹${p.amount} is due${p.month ? ` for ${p.month}` : ''}${p.description && !p.month ? `: ${p.description}` : ''}`,
++            relatedId: p._id,
++            relatedModel: 'Payment',
++            actionUrl: '/payments'
++          });
++        } catch (e) { /* a failed notification must not undo the dues */ }
++      }
++    }
++
++    res.status(201).json({
++      success: true,
++      created: created.length,
++      skipped,
++      message: `Created dues for ${created.length} flat${created.length === 1 ? '' : 's'}${skipped ? ` (${skipped} already billed)` : ''}`
++    });
++  } catch (error) {
++    console.error('Generate dues error:', error);
++    res.status(500).json({ success: false, message: 'Server error' });
++  }
++});
++
++// @route   GET /api/payments/admin/summary
++// @desc    Collected vs pending totals, optionally for one month
++// @access  Private (Admins)
++router.get('/admin/summary', protect, authorize(...ADMINS), async (req, res) => {
++  try {
++    const mongoose = require('mongoose');
++    const match = {};
++    const societyId = adminSocietyId(req);
++    if (req.user.role === 'society_admin' || societyId) match.societyId = new mongoose.Types.ObjectId(String(societyId));
++    if (req.query.month) match.month = req.query.month;
++
++    const rows = await Payment.aggregate([
++      { $match: match },
++      { $group: { _id: '$status', total: { $sum: '$amount' }, count: { $sum: 1 } } }
++    ]);
++    const pick = (s) => rows.find((r) => r._id === s) || { total: 0, count: 0 };
++    res.json({
++      success: true,
++      summary: {
++        collected: pick('completed').total,
++        collectedCount: pick('completed').count,
++        pending: pick('pending').total + pick('processing').total,
++        pendingCount: pick('pending').count + pick('processing').count
++      }
++    });
++  } catch (error) {
++    console.error('Payment summary error:', error);
++    res.status(500).json({ success: false, message: 'Server error' });
++  }
++});
++
++// @route   PUT /api/payments/:id/mark-paid
++// @desc    Record a payment received outside the app (cash, cheque, UPI, card)
++// @access  Private (Admins)
++router.put('/:id/mark-paid', protect, authorize(...ADMINS), [
++  body('paymentMethod').isIn(['cash', 'cheque', 'upi', 'card']).withMessage('Choose how it was paid'),
++  body('reference').optional().trim().isLength({ max: 80 }),
++  body('notes').optional().trim().isLength({ max: 200 })
++], async (req, res) => {
++  try {
++    const errors = validationResult(req);
++    if (!errors.isEmpty()) return res.status(400).json({ success: false, errors: errors.array() });
++
++    const payment = await Payment.findById(req.params.id);
++    if (!payment) return res.status(404).json({ success: false, message: 'Payment not found' });
++    if (req.user.role === 'society_admin' && payment.societyId.toString() !== req.user.societyId.toString()) {
++      return res.status(403).json({ success: false, message: 'Not authorized' });
++    }
++    if (payment.status === 'completed') {
++      return res.status(400).json({ success: false, message: 'This payment is already marked as paid' });
++    }
++
++    payment.status = 'completed';
++    payment.paymentMethod = req.body.paymentMethod;
++    payment.paidAt = new Date();
++    if (req.body.reference) payment.transactionId = `${req.body.paymentMethod}-${req.body.reference}-${payment._id}`;
++    payment.notes = [req.body.reference && `Ref: ${req.body.reference}`, req.body.notes, `Recorded by ${req.user.name}`]
++      .filter(Boolean).join(' · ');
++    await payment.save();
++
++    const io = req.app.get('io');
++    if (io) {
++      try {
++        await notifyUser(io, payment.residentId, {
++          societyId: payment.societyId,
++          type: 'payment_received',
++          title: 'Payment recorded',
++          message: `Your ${req.body.paymentMethod} payment of ₹${payment.amount} was recorded`,
++          relatedId: payment._id,
++          relatedModel: 'Payment',
++          actionUrl: '/payments'
++        });
++      } catch (e) { /* ignore */ }
++    }
++
++    res.json({ success: true, payment, message: 'Payment recorded' });
++  } catch (error) {
++    console.error('Mark paid error:', error);
++    res.status(500).json({ success: false, message: 'Server error' });
++  }
++});
++
++// @route   POST /api/payments/:id/order
++// @desc    Start online payment for an existing pending due
++// @access  Private (Residents)
++router.post('/:id/order', protect, authorize('resident'), async (req, res) => {
++  try {
++    if (!razorpay) {
++      return res.status(503).json({ success: false, message: 'Online payment is not set up for this society. Please pay the admin directly.' });
++    }
++    const payment = await Payment.findById(req.params.id);
++    if (!payment) return res.status(404).json({ success: false, message: 'Payment not found' });
++    if (payment.residentId.toString() !== req.user.id) {
++      return res.status(403).json({ success: false, message: 'Not authorized' });
++    }
++    if (payment.status === 'completed') {
++      return res.status(400).json({ success: false, message: 'This payment is already paid' });
++    }
++
++    const order = await razorpay.orders.create({
++      amount: Math.round(payment.amount * 100),
++      currency: 'INR',
++      receipt: `receipt_${payment._id}`,
++      notes: { paymentId: payment._id.toString(), residentId: req.user.id.toString(), type: payment.type }
++    });
++    payment.razorpayOrderId = order.id;
++    await payment.save();
++
++    res.json({
++      success: true,
++      order: { id: order.id, amount: order.amount, currency: order.currency, receipt: order.receipt },
++      paymentId: payment._id,
++      keyId: process.env.RAZORPAY_KEY_ID
++    });
++  } catch (error) {
++    console.error('Order for due error:', error);
++    res.status(500).json({ success: false, message: 'Could not start the payment. Please try again.' });
++  }
++});
++
+ // @route   GET /api/payments/:id
+ // @desc    Get single payment
+ // @access  Private
+diff --git a/backend/routes/users.js b/backend/routes/users.js
+index 6789f15..44bbdf7 100644
+--- a/backend/routes/users.js
++++ b/backend/routes/users.js
+@@ -99,8 +99,49 @@ router.put('/notifications/read-all', protect, async (req, res) => {
+   }
+ });
+ 
++// Roles that sign up on their own and must be approved by a society admin.
++const APPROVABLE_ROLES = ['resident', 'security', 'staff', 'vendor'];
++
++// @route   PUT /api/users/reject/:id
++// @desc    Reject a sign-up. The person can no longer sign in and sees the reason.
++// @access  Private (Admins)
++router.put('/reject/:id', protect, authorize('society_admin', 'super_admin'), [
++  body('reason').optional().trim().isLength({ max: 200 }).withMessage('Reason must be 200 characters or fewer')
++], async (req, res) => {
++  try {
++    const errors = validationResult(req);
++    if (!errors.isEmpty()) {
++      return res.status(400).json({ success: false, errors: errors.array() });
++    }
++
++    const user = await User.findById(req.params.id);
++    if (!user) {
++      return res.status(404).json({ success: false, message: 'User not found' });
++    }
++    if (!APPROVABLE_ROLES.includes(user.role)) {
++      return res.status(400).json({ success: false, message: 'This account cannot be rejected' });
++    }
++    if (user.isApproved) {
++      return res.status(400).json({ success: false, message: 'This person is already approved. Deactivate the account instead.' });
++    }
++    if (req.user.role === 'society_admin' && user.societyId?.toString() !== req.user.societyId?.toString()) {
++      return res.status(403).json({ success: false, message: 'Not authorized' });
++    }
++
++    user.isActive = false;
++    user.rejectedAt = new Date();
++    user.rejectedReason = req.body.reason || undefined;
++    await user.save({ validateBeforeSave: false });
++
++    res.json({ success: true, message: 'Sign-up rejected' });
++  } catch (error) {
++    console.error('Reject user error:', error);
++    res.status(500).json({ success: false, message: 'Server error' });
++  }
++});
++
+ // @route   PUT /api/users/approve/:id
+-// @desc    Approve resident
++// @desc    Approve a resident, guard, staff member or vendor
+ // @access  Private (Admins)
+ router.put('/approve/:id', protect, authorize('society_admin', 'super_admin'), async (req, res) => {
+   try {
+@@ -113,10 +154,10 @@ router.put('/approve/:id', protect, authorize('society_admin', 'super_admin'), a
+       });
+     }
+ 
+-    if (user.role !== 'resident') {
++    if (!APPROVABLE_ROLES.includes(user.role)) {
+       return res.status(400).json({
+         success: false,
+-        message: 'Only residents can be approved'
++        message: 'Only residents, guards, staff and vendors need approval'
+       });
+     }
+ 
+@@ -129,8 +170,11 @@ router.put('/approve/:id', protect, authorize('society_admin', 'super_admin'), a
+     }
+ 
+     user.isApproved = true;
++    user.isActive = true;
+     user.approvedBy = req.user.id;
+     user.approvedAt = new Date();
++    user.rejectedAt = undefined;
++    user.rejectedReason = undefined;
+     await user.save();
+ 
+     // Notify user
+@@ -165,8 +209,9 @@ router.put('/approve/:id', protect, authorize('society_admin', 'super_admin'), a
+ router.get('/pending-approvals', protect, authorize('society_admin', 'super_admin'), async (req, res) => {
+   try {
+     let query = {
+-      role: 'resident',
+-      isApproved: false
++      role: { $in: APPROVABLE_ROLES },
++      isApproved: false,
++      isActive: true
+     };
+ 
+     if (req.user.role === 'society_admin') {
+@@ -174,7 +219,7 @@ router.get('/pending-approvals', protect, authorize('society_admin', 'super_admi
+     }
+ 
+     const users = await User.find(query)
+-      .select('name email phone flatNo block createdAt')
++      .select('name email phone role flatNo block createdAt')
+       .sort({ createdAt: -1 });
+ 
+     res.json({
+diff --git a/backend/utils/sendEmail.js b/backend/utils/sendEmail.js
+index 7cc580e..7e20b6b 100644
+--- a/backend/utils/sendEmail.js
++++ b/backend/utils/sendEmail.js
+@@ -1,9 +1,12 @@
+ const nodemailer = require('nodemailer');
+ 
++const isEmailConfigured = () => !!(process.env.EMAIL_HOST && process.env.EMAIL_USER && process.env.EMAIL_PASS);
++
+ const sendEmail = async (options) => {
+   const transporter = nodemailer.createTransport({
+     host: process.env.EMAIL_HOST,
+-    port: process.env.EMAIL_PORT,
++    port: Number(process.env.EMAIL_PORT) || 587,
++    secure: Number(process.env.EMAIL_PORT) === 465,
+     auth: {
+       user: process.env.EMAIL_USER,
+       pass: process.env.EMAIL_PASS
+@@ -25,3 +28,4 @@ const sendEmail = async (options) => {
+ };
+ 
+ module.exports = sendEmail;
++module.exports.isEmailConfigured = isEmailConfigured;
+diff --git a/frontend/src/components/Layout.jsx b/frontend/src/components/Layout.jsx
+index 630aaaa..2d1761a 100644
+--- a/frontend/src/components/Layout.jsx
++++ b/frontend/src/components/Layout.jsx
+@@ -43,7 +43,7 @@ const NAV = {
+     { to: '/notices', icon: FiBell, label: 'Notices' }
+   ],
+   society_admin: [
+-    { to: '/admin/residents', icon: FiCheckCircle, label: 'Residents' },
++    { to: '/admin/residents', icon: FiCheckCircle, label: 'People' },
+     { to: '/gate', icon: FiShield, label: 'Gate console' },
+     { to: '/visitors', icon: FiUsers, label: 'Visitors' },
+     { to: '/deliveries', icon: FiPackage, label: 'Deliveries' },
+@@ -56,7 +56,7 @@ const NAV = {
+   ],
+   super_admin: [
+     { to: '/admin/societies', icon: FiHome, label: 'Societies' },
+-    { to: '/admin/residents', icon: FiCheckCircle, label: 'Residents' },
++    { to: '/admin/residents', icon: FiCheckCircle, label: 'People' },
+     { to: '/visitors', icon: FiUsers, label: 'Visitors' },
+     { to: '/deliveries', icon: FiPackage, label: 'Deliveries' },
+     { to: '/vehicles', icon: FiTruck, label: 'Vehicles' },
+diff --git a/frontend/src/pages/AdminResidents.jsx b/frontend/src/pages/AdminResidents.jsx
+index a11da67..935b483 100644
+--- a/frontend/src/pages/AdminResidents.jsx
++++ b/frontend/src/pages/AdminResidents.jsx
+@@ -1,10 +1,12 @@
+ import { useMemo, useState } from 'react'
+-import { FiCheck, FiSearch, FiUsers } from 'react-icons/fi'
++import { FiCheck, FiSearch, FiUsers, FiX } from 'react-icons/fi'
+ import { useAuth } from '../contexts/AuthContext'
+ import api from '../services/api'
+ import useApi from '../hooks/useApi'
+ import useAction from '../hooks/useAction'
+-import { DataList, EmptyState, Field, PageHeader, StatusTag, formatDate } from '../components/ui'
++import { DataList, EmptyState, Field, Modal, PageHeader, StatusTag, formatDate, titleCase } from '../components/ui'
++
++const ROLE_LABEL = { resident: 'Resident', security: 'Guard', staff: 'Staff', vendor: 'Vendor' }
+ 
+ const flatOf = (u) => `${u.block ? `${u.block}-` : ''}${u.flatNo || '-'}`
+ 
+@@ -33,6 +35,9 @@ const AdminResidents = () => {
+ 
+   const approve = (u) => run(u._id, () => api.put(`/users/approve/${u._id}`), `${u.name} approved`)
+ 
++  const [rejecting, setRejecting] = useState(null)
++  const [reason, setReason] = useState('')
++
+   const columns = [
+     {
+       key: 'name',
+@@ -44,7 +49,8 @@ const AdminResidents = () => {
+         </div>
+       )
+     },
+-    { key: 'flat', header: 'Flat', render: flatOf },
++    ...(tab === 'pending' ? [{ key: 'role', header: 'Signed up as', render: (u) => ROLE_LABEL[u.role] || titleCase(u.role) }] : []),
++    { key: 'flat', header: 'Flat', render: (u) => (u.flatNo ? flatOf(u) : '-') },
+     { key: 'phone', header: 'Phone', render: (u) => u.phone },
+     { key: 'joined', header: 'Registered', render: (u) => formatDate(u.createdAt) },
+     ...(tab === 'all' ? [{ key: 'status', header: 'Status', render: (u) => <StatusTag status={u.isApproved ? 'approved' : 'pending'} /> }] : []),
+@@ -54,16 +60,21 @@ const AdminResidents = () => {
+       className: 'md:text-right',
+       render: (u) =>
+         tab === 'pending' || !u.isApproved ? (
+-          <button className="btn-ok btn-sm" disabled={busy === u._id} onClick={() => approve(u)}>
+-            <FiCheck size={14} /> Approve
+-          </button>
++          <div className="flex flex-wrap justify-end gap-2">
++            <button className="btn-ok btn-sm" disabled={busy === u._id} onClick={() => approve(u)}>
++              <FiCheck size={14} /> Approve
++            </button>
++            <button className="btn-secondary btn-sm" disabled={busy === u._id} onClick={() => setRejecting(u)}>
++              <FiX size={14} /> Reject
++            </button>
++          </div>
+         ) : null
+     }
+   ]
+ 
+   return (
+     <>
+-      <PageHeader title="Residents" subtitle="Approve new residents and see who lives in your society." />
++      <PageHeader title="People" subtitle="Approve or reject new sign-ups, and see who lives in your society." />
+ 
+       <div className="mb-4 flex flex-wrap items-center gap-3">
+         <div className="flex gap-1 rounded-lg bg-sunken p-1" role="tablist" aria-label="Resident lists">
+@@ -99,11 +110,43 @@ const AdminResidents = () => {
+         empty={
+           <EmptyState
+             icon={FiUsers}
+-            title={query ? 'No residents match that search' : tab === 'pending' ? 'No one is waiting for approval' : 'No residents yet'}
+-            text={tab === 'pending' && !query ? 'New sign-ups from residents will appear here for you to approve.' : undefined}
++            title={query ? 'No one matches that search' : tab === 'pending' ? 'No one is waiting for approval' : 'No residents yet'}
++            text={tab === 'pending' && !query ? 'Residents, guards and staff who sign up will appear here for you to approve.' : undefined}
+           />
+         }
+       />
++
++      <Modal
++        open={!!rejecting}
++        onClose={() => setRejecting(null)}
++        title="Reject this sign-up?"
++        size="sm"
++        footer={
++          <>
++            <button className="btn-secondary" onClick={() => setRejecting(null)}>Cancel</button>
++            <button
++              className="btn-danger"
++              disabled={busy === rejecting?._id}
++              onClick={async () => {
++                const ok = await run(rejecting._id, () => api.put(`/users/reject/${rejecting._id}`, { reason: reason.trim() || undefined }), `${rejecting.name} rejected`)
++                if (ok) {
++                  setRejecting(null)
++                  setReason('')
++                }
++              }}
++            >
++              Reject sign-up
++            </button>
++          </>
++        }
++      >
++        <p className="mb-3 text-sm text-muted">
++          {rejecting?.name} will not be able to sign in. They will see your reason the next time they try.
++        </p>
++        <Field label="Reason" htmlFor="reject-reason" hint="Optional. For example: flat number not found.">
++          <input id="reject-reason" maxLength={200} className="input" value={reason} onChange={(e) => setReason(e.target.value)} />
++        </Field>
++      </Modal>
+     </>
+   )
+ }
+diff --git a/frontend/src/pages/Deliveries.jsx b/frontend/src/pages/Deliveries.jsx
+index 8f63742..9c0170c 100644
+--- a/frontend/src/pages/Deliveries.jsx
++++ b/frontend/src/pages/Deliveries.jsx
+@@ -1,5 +1,5 @@
+ import { useState } from 'react'
+-import { FiCheck, FiLogIn, FiPackage, FiPlus } from 'react-icons/fi'
++import { FiCheck, FiLogIn, FiPackage, FiPlus, FiX } from 'react-icons/fi'
+ import { useAuth } from '../contexts/AuthContext'
+ import api from '../services/api'
+ import useApi from '../hooks/useApi'
+@@ -70,6 +70,19 @@ const Deliveries = () => {
+                 <FiLogIn size={14} /> Check in
+               </button>
+             )}
++            {['pending', 'approved'].includes(d.status) && (
++              <button
++                className="btn-secondary btn-sm"
++                disabled={isBusy}
++                onClick={() => {
++                  if (window.confirm(isResident ? 'Cancel this expected delivery?' : 'Turn this delivery away?')) {
++                    run(d._id, () => api.put(`/deliveries/${d._id}/reject`), isResident ? 'Delivery cancelled' : 'Delivery rejected')
++                  }
++                }}
++              >
++                <FiX size={14} /> {isResident ? 'Cancel' : 'Reject'}
++              </button>
++            )}
+             {(isResident || isSecurity || isAdmin) && ['approved', 'in_transit'].includes(d.status) && (
+               <button className="btn-secondary btn-sm" disabled={isBusy} onClick={() => run(d._id, () => api.put(`/deliveries/${d._id}/deliver`), 'Marked as delivered')}>
+                 {isResident ? 'Received' : 'Delivered'}
+diff --git a/frontend/src/pages/Payments.jsx b/frontend/src/pages/Payments.jsx
+index a0b09e5..0da16f7 100644
+--- a/frontend/src/pages/Payments.jsx
++++ b/frontend/src/pages/Payments.jsx
+@@ -1,6 +1,6 @@
+ import { useMemo, useState } from 'react'
+ import toast from 'react-hot-toast'
+-import { FiAlertTriangle, FiCreditCard, FiFileText, FiPlus } from 'react-icons/fi'
++import { FiAlertTriangle, FiCheckCircle, FiCreditCard, FiFileText, FiPlus } from 'react-icons/fi'
+ import { useAuth } from '../contexts/AuthContext'
+ import api from '../services/api'
+ import useApi from '../hooks/useApi'
+@@ -13,7 +13,17 @@ const EMPTY_FORM = { amount: '', type: 'maintenance', month: thisMonth(), descri
+ 
+ const Payments = () => {
+   const { user, isResident } = useAuth()
+-  const { data, loading, error, reload } = useApi('/payments', { params: { limit: 100 }, select: (d) => d.payments || [] })
++  const isSocAdmin = user?.role === 'society_admin'
++  const [month, setMonth] = useState('')
++  const { data, loading, error, reload } = useApi('/payments', {
++    params: { limit: 100, ...(!isResident && month ? { month } : {}) },
++    select: (d) => d.payments || []
++  })
++  const summary = useApi('/payments/admin/summary', {
++    enabled: !isResident,
++    params: month ? { month } : {},
++    select: (d) => d.summary
++  })
+   const { data: config } = useApi('/payments/config', { live: false })
+   const online = config?.enabled !== false
+ 
+@@ -24,9 +34,64 @@ const Payments = () => {
+   const [receipt, setReceipt] = useState(null)
+ 
+   const totals = useMemo(() => {
++    if (!isResident && summary.data) return { paid: summary.data.collected, pending: summary.data.pending }
+     const sum = (status) => (data || []).filter((p) => p.status === status).reduce((n, p) => n + (p.amount || 0), 0)
+     return { paid: sum('completed'), pending: sum('pending') }
+-  }, [data])
++  }, [data, isResident, summary.data])
++
++  // Admin: create dues for every approved resident
++  const [duesOpen, setDuesOpen] = useState(false)
++  const [dues, setDues] = useState({ type: 'maintenance', amount: '', month: thisMonth(), dueDate: '', description: '' })
++  const [duesError, setDuesError] = useState('')
++  const createDues = async (e) => {
++    e.preventDefault()
++    setDuesError('')
++    const amount = parseFloat(dues.amount)
++    if (!amount || amount < 1) return setDuesError('Enter an amount of at least ₹1.')
++    setBusy('dues')
++    try {
++      const { data: res } = await api.post('/payments/generate', {
++        type: dues.type,
++        amount,
++        month: dues.type === 'maintenance' ? dues.month : undefined,
++        dueDate: dues.dueDate || undefined,
++        description: dues.description.trim() || undefined
++      })
++      toast.success(res.message)
++      setDuesOpen(false)
++      reload()
++      summary.reload()
++    } catch (err) {
++      setDuesError(errorMessage(err, 'Could not create the dues.'))
++    } finally {
++      setBusy(null)
++    }
++  }
++
++  // Admin: record cash / cheque / UPI received outside the app
++  const [recording, setRecording] = useState(null)
++  const [rec, setRec] = useState({ paymentMethod: 'cash', reference: '' })
++  const [recError, setRecError] = useState('')
++  const recordPayment = async (e) => {
++    e.preventDefault()
++    setRecError('')
++    setBusy('rec')
++    try {
++      await api.put(`/payments/${recording._id}/mark-paid`, {
++        paymentMethod: rec.paymentMethod,
++        reference: rec.reference.trim() || undefined
++      })
++      toast.success('Payment recorded')
++      setRecording(null)
++      setRec({ paymentMethod: 'cash', reference: '' })
++      reload()
++      summary.reload()
++    } catch (err) {
++      setRecError(errorMessage(err, 'Could not record the payment.'))
++    } finally {
++      setBusy(null)
++    }
++  }
+ 
+   // Opens the Razorpay window for an order, then confirms the signed result with the server.
+   const pay = async (payment, order) => {
+@@ -80,10 +145,16 @@ const Payments = () => {
+   }
+ 
+   const payPending = async (p) => {
+-    if (!p.razorpayOrderId) return toast.error('This payment has no open order. Start a new payment instead.')
+     setBusy(p._id)
+-    await pay(p, { id: p.razorpayOrderId, amount: Math.round(p.amount * 100), currency: 'INR' })
+-    setBusy(null)
++    try {
++      const { data: res } = await api.post(`/payments/${p._id}/order`)
++      await pay(p, { ...res.order, keyId: res.keyId })
++    } catch (err) {
++      toast.error(errorMessage(err, 'Could not start the payment.'))
++      reload()
++    } finally {
++      setBusy(null)
++    }
+   }
+ 
+   const columns = [
+@@ -101,6 +172,23 @@ const Payments = () => {
+     { key: 'amount', header: 'Amount', className: 'md:text-right font-semibold', render: (p) => formatINR(p.amount) },
+     { key: 'date', header: 'Date', render: (p) => formatDate(p.paidAt || p.createdAt) },
+     { key: 'status', header: 'Status', render: (p) => <StatusTag status={p.status} /> },
++    ...(!isResident && isSocAdmin
++      ? [
++          {
++            key: 'actions',
++            header: '',
++            className: 'md:text-right',
++            render: (p) =>
++              p.status === 'pending' ? (
++                <div className="flex justify-end">
++                  <button className="btn-secondary btn-sm" onClick={() => setRecording(p)}>
++                    <FiCheckCircle size={14} /> Record payment
++                  </button>
++                </div>
++              ) : null
++          }
++        ]
++      : []),
+     ...(isResident
+       ? [
+           {
+@@ -131,13 +219,17 @@ const Payments = () => {
+     <>
+       <PageHeader
+         title="Payments"
+-        subtitle={isResident ? 'Pay maintenance and other dues online. Every payment is kept on record.' : 'Payments made by residents.'}
++        subtitle={isResident ? 'Pay maintenance and other dues online. Every payment is kept on record.' : 'Create dues, record cash or cheque payments and see what has been collected.'}
+         action={
+-          isResident && (
++          isResident ? (
+             <button className="btn-primary" disabled={!online} onClick={() => setOpen(true)}>
+               <FiPlus size={16} /> Make payment
+             </button>
+-          )
++          ) : isSocAdmin ? (
++            <button className="btn-primary" onClick={() => setDuesOpen(true)}>
++              <FiPlus size={16} /> Create dues
++            </button>
++          ) : null
+         }
+       />
+ 
+@@ -148,9 +240,18 @@ const Payments = () => {
+         </p>
+       )}
+ 
++      {!isResident && (
++        <div className="mb-4 flex flex-wrap items-end gap-3">
++          <Field label="Month" htmlFor="pay-filter-month" className="w-44">
++            <input id="pay-filter-month" type="month" className="input" value={month} onChange={(e) => setMonth(e.target.value)} />
++          </Field>
++          {month && <button className="btn-secondary btn-sm mb-1" onClick={() => setMonth('')}>All months</button>}
++        </div>
++      )}
++
+       <div className="mb-5 grid grid-cols-2 gap-3 sm:max-w-md">
+         <div className="panel px-4 py-3">
+-          <p className="text-xs text-muted">Paid</p>
++          <p className="text-xs text-muted">{isResident ? 'Paid' : 'Collected'}</p>
+           <p className="font-display text-xl font-bold text-ok">{formatINR(totals.paid)}</p>
+         </div>
+         <div className="panel px-4 py-3">
+@@ -205,6 +306,85 @@ const Payments = () => {
+         </form>
+       </Modal>
+ 
++      <Modal
++        open={duesOpen}
++        onClose={() => setDuesOpen(false)}
++        title="Create dues"
++        footer={
++          <>
++            <button className="btn-secondary" onClick={() => setDuesOpen(false)}>Cancel</button>
++            <button className="btn-primary" form="dues-form" type="submit" disabled={busy === 'dues'}>
++              {busy === 'dues' && <Spinner className="h-4 w-4" />}
++              Bill all residents
++            </button>
++          </>
++        }
++      >
++        <form id="dues-form" onSubmit={createDues} className="space-y-4">
++          <p className="text-sm text-muted">Every approved resident gets this due and a notification. Flats already billed for the same month are skipped.</p>
++          <div className="grid gap-4 sm:grid-cols-2">
++            <Field label="Amount per flat (₹)" htmlFor="dues-amount">
++              <input id="dues-amount" type="number" min="1" step="0.01" required className="input" value={dues.amount} onChange={(e) => setDues({ ...dues, amount: e.target.value })} />
++            </Field>
++            <Field label="Type" htmlFor="dues-type">
++              <select id="dues-type" className="input" value={dues.type} onChange={(e) => setDues({ ...dues, type: e.target.value })}>
++                {['maintenance', 'fine', 'other'].map((t) => <option key={t} value={t}>{titleCase(t)}</option>)}
++              </select>
++            </Field>
++          </div>
++          <div className="grid gap-4 sm:grid-cols-2">
++            {dues.type === 'maintenance' && (
++              <Field label="For month" htmlFor="dues-month">
++                <input id="dues-month" type="month" required className="input" value={dues.month} onChange={(e) => setDues({ ...dues, month: e.target.value })} />
++              </Field>
++            )}
++            <Field label="Due date" htmlFor="dues-date" hint="Optional">
++              <input id="dues-date" type="date" className="input" value={dues.dueDate} onChange={(e) => setDues({ ...dues, dueDate: e.target.value })} />
++            </Field>
++          </div>
++          <Field label="Note" htmlFor="dues-desc" hint="Optional">
++            <input id="dues-desc" maxLength={200} className="input" value={dues.description} onChange={(e) => setDues({ ...dues, description: e.target.value })} />
++          </Field>
++          {duesError && <p role="alert" className="text-sm font-medium text-danger">{duesError}</p>}
++        </form>
++      </Modal>
++
++      <Modal
++        open={!!recording}
++        onClose={() => setRecording(null)}
++        title="Record a payment"
++        size="sm"
++        footer={
++          <>
++            <button className="btn-secondary" onClick={() => setRecording(null)}>Cancel</button>
++            <button className="btn-ok" form="record-form" type="submit" disabled={busy === 'rec'}>
++              {busy === 'rec' && <Spinner className="h-4 w-4" />}
++              Mark as paid
++            </button>
++          </>
++        }
++      >
++        {recording && (
++          <form id="record-form" onSubmit={recordPayment} className="space-y-4">
++            <p className="text-sm text-muted">
++              {formatINR(recording.amount)} from {recording.residentId?.name || 'resident'} ({recording.flatNo}) for {titleCase(recording.type)}{recording.month ? ` · ${recording.month}` : ''}.
++            </p>
++            <Field label="Received by" htmlFor="rec-method">
++              <select id="rec-method" className="input" value={rec.paymentMethod} onChange={(e) => setRec({ ...rec, paymentMethod: e.target.value })}>
++                <option value="cash">Cash</option>
++                <option value="cheque">Cheque</option>
++                <option value="upi">UPI (outside the app)</option>
++                <option value="card">Card</option>
++              </select>
++            </Field>
++            <Field label="Reference" htmlFor="rec-ref" hint="Optional. Cheque number or UPI transaction ID.">
++              <input id="rec-ref" maxLength={80} className="input" value={rec.reference} onChange={(e) => setRec({ ...rec, reference: e.target.value })} />
++            </Field>
++            {recError && <p role="alert" className="text-sm font-medium text-danger">{recError}</p>}
++          </form>
++        )}
++      </Modal>
++
+       <Modal
+         open={!!receipt}
+         onClose={() => setReceipt(null)}
+@@ -223,6 +403,7 @@ const Payments = () => {
+               ['Amount', formatINR(receipt.amount)],
+               ['For', `${titleCase(receipt.type)}${receipt.month ? ` · ${receipt.month}` : ''}`],
+               ['Paid on', formatDate(receipt.paidAt, true)],
++              ['Method', titleCase(receipt.paymentMethod || 'online')],
+               ['Flat', `${receipt.block ? `${receipt.block}-` : ''}${receipt.flatNo || '-'}`],
+               ['Transaction', receipt.transactionId || receipt.razorpayPaymentId || '-']
+             ].map(([k, v]) => (

@@ -20,26 +20,32 @@
   --danger-soft: 252 228 228;
   --info: 30 90 160;
   --info-soft: 221 233 249;
+  --side: 10 58 57;
+  --on-solid: 255 255 255;
 }
 
+/* Dark theme: a calm slate with a hint of teal. Surfaces step up in lightness (bg < sunken < surface)
+   so cards read as raised without needing shadows, and coloured fills are muted to avoid glare. */
 .dark {
-  --bg: 8 24 24;
-  --surface: 15 37 36;
-  --sunken: 11 30 29;
-  --ink: 228 238 236;
-  --muted: 143 168 165;
-  --line: 33 62 60;
-  --brand: 74 190 182;
-  --brand-strong: 120 214 207;
-  --brand-soft: 20 62 60;
-  --brand-ink: 6 30 29;
-  --amber-soft: 70 52 8;
-  --ok: 92 200 142;
-  --ok-soft: 18 62 40;
-  --danger: 244 120 120;
-  --danger-soft: 72 24 24;
-  --info: 120 170 240;
-  --info-soft: 22 44 80;
+  --bg: 12 20 22;
+  --surface: 21 32 35;
+  --sunken: 16 26 28;
+  --ink: 231 238 238;
+  --muted: 150 166 168;
+  --line: 44 60 63;
+  --brand: 78 196 187;
+  --brand-strong: 112 214 205;
+  --brand-soft: 24 54 56;
+  --brand-ink: 4 28 28;
+  --amber-soft: 62 48 12;
+  --ok: 88 190 138;
+  --ok-soft: 20 54 40;
+  --danger: 240 118 118;
+  --danger-soft: 66 28 30;
+  --info: 124 172 238;
+  --info-soft: 26 42 74;
+  --side: 8 17 19;
+  --on-solid: 6 24 24;
 }
 
 @layer base {
@@ -78,16 +84,17 @@
     @apply btn text-muted hover:bg-sunken hover:text-ink;
   }
   .btn-danger {
-    @apply btn bg-danger text-white hover:opacity-90;
+    @apply btn bg-danger text-on-solid hover:opacity-90;
   }
   .btn-ok {
-    @apply btn bg-ok text-white hover:opacity-90;
+    @apply btn bg-ok text-on-solid hover:opacity-90;
   }
   .btn-sm {
-    @apply min-h-[32px] px-3 text-xs;
+    @apply min-h-[36px] px-3 text-xs sm:min-h-[32px];
   }
+  /* 16px on phones: anything smaller makes iOS zoom the page when a field is focused. */
   .input {
-    @apply block w-full rounded-md border border-line bg-surface px-3 py-2 text-sm text-ink placeholder:text-muted/70 transition-colors focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/25 disabled:bg-sunken;
+    @apply block min-h-[42px] w-full rounded-md border border-line bg-surface px-3 py-2 text-base text-ink sm:text-sm placeholder:text-muted/70 transition-colors focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/25 disabled:bg-sunken;
   }
   .label {
     @apply mb-1 block text-sm font-semibold text-ink;
@@ -117,11 +124,7 @@
 
 /* The one signature element: a boom-barrier stripe, used on the sidebar edge and active nav state. */
 .hazard {
-  background-image: repeating-linear-gradient(
-    -45deg,
-    #f5a800 0 10px,
-    rgb(var(--brand-strong)) 10px 20px
-  );
+  background-image: repeating-linear-gradient(-45deg, #f5a800 0 10px, #0a3a39 10px 20px);
 }
 
 @keyframes skeleton {

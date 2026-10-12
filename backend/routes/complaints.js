@@ -1,8 +1,10 @@
 const express = require('express');
+const { cleanImages } = require('../utils/imageUrl');
 const router = express.Router();
 const { body, validationResult } = require('express-validator');
 const Complaint = require('../models/Complaint');
-const { protect, authorize, checkSocietyAccess } = require('../middleware/auth');
+const { protect, authorize, checkSocietyAccess , scopeToSociety } = require('../middleware/auth');
+router.param('id', scopeToSociety(require('../models/Complaint')));
 const { notifyUser } = require('../utils/notifyUser');
 const User = require('../models/User');
 
@@ -38,7 +40,7 @@ router.post('/', protect, authorize('resident'), [
       description,
       category,
       priority: priority || 'medium',
-      images: images || [],
+      images: cleanImages(images),
       location,
       flatNo: req.user.flatNo,
       block: req.user.block,
@@ -77,8 +79,7 @@ router.post('/', protect, authorize('resident'), [
     console.error('Complaint creation error:', error);
     res.status(500).json({
       success: false,
-      message: 'Server error',
-      error: error.message
+      message: 'Server error'
     });
   }
 });
@@ -111,11 +112,13 @@ router.get('/', protect, async (req, res) => {
       query.category = req.query.category;
     }
 
+    if (req.user.role !== 'super_admin') query.societyId = req.user.societyId;
+
     const complaints = await Complaint.find(query)
       .populate('residentId', 'name email phone flatNo')
       .populate('assignedTo', 'name email')
       .sort({ createdAt: -1 })
-      .limit(parseInt(req.query.limit) || 50)
+      .limit(Math.min(parseInt(req.query.limit) || 200, 500))
       .skip(parseInt(req.query.skip) || 0);
 
     res.json({
@@ -126,8 +129,7 @@ router.get('/', protect, async (req, res) => {
   } catch (error) {
     res.status(500).json({
       success: false,
-      message: 'Server error',
-      error: error.message
+      message: 'Server error'
     });
   }
 });
@@ -164,8 +166,7 @@ router.get('/:id', protect, async (req, res) => {
   } catch (error) {
     res.status(500).json({
       success: false,
-      message: 'Server error',
-      error: error.message
+      message: 'Server error'
     });
   }
 });
@@ -243,8 +244,7 @@ router.put('/:id/assign', protect, authorize('society_admin', 'super_admin'), [
   } catch (error) {
     res.status(500).json({
       success: false,
-      message: 'Server error',
-      error: error.message
+      message: 'Server error'
     });
   }
 });
@@ -320,9 +320,39 @@ router.put('/:id/status', protect, authorize('society_admin', 'super_admin', 'st
   } catch (error) {
     res.status(500).json({
       success: false,
-      message: 'Server error',
-      error: error.message
+      message: 'Server error'
     });
+  }
+});
+
+// @route   PUT /api/complaints/:id/feedback
+// @desc    Resident rates how a complaint was handled
+// @access  Private (Residents, own complaints)
+router.put('/:id/feedback', protect, authorize('resident'), [
+  body('rating').isInt({ min: 1, max: 5 }).withMessage('Choose a rating from 1 to 5'),
+  body('feedback').optional().trim().isLength({ max: 500 })
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ success: false, errors: errors.array() });
+
+    const complaint = await Complaint.findById(req.params.id);
+    if (!complaint) return res.status(404).json({ success: false, message: 'Complaint not found' });
+    if (complaint.residentId.toString() !== req.user.id) {
+      return res.status(403).json({ success: false, message: 'Not authorized' });
+    }
+    if (!['resolved', 'closed'].includes(complaint.status)) {
+      return res.status(400).json({ success: false, message: 'You can rate a complaint once it is resolved' });
+    }
+
+    complaint.rating = Number(req.body.rating);
+    complaint.feedback = req.body.feedback || undefined;
+    await complaint.save();
+
+    res.json({ success: true, complaint, message: 'Thanks for your feedback' });
+  } catch (error) {
+    console.error('Complaint feedback error:', error);
+    res.status(500).json({ success: false, message: 'Server error' });
   }
 });
 
@@ -399,8 +429,7 @@ router.post('/:id/update', protect, [
   } catch (error) {
     res.status(500).json({
       success: false,
-      message: 'Server error',
-      error: error.message
+      message: 'Server error'
     });
   }
 });

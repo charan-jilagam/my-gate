@@ -18,9 +18,11 @@ export const SocketProvider = ({ children }) => {
   useEffect(() => {
     if (!isAuthenticated || !user?.id) return undefined
 
-    const newSocket = io(SOCKET_URL, { transports: ['websocket', 'polling'] })
+    const newSocket = io(SOCKET_URL, {
+      transports: ['websocket', 'polling'],
+      auth: { token: localStorage.getItem('token') }
+    })
 
-    newSocket.on('connect', () => newSocket.emit('join-room', user.id))
     newSocket.on('notification', (notification) => {
       setLastNotification({ ...notification, receivedAt: Date.now() })
       toast(notification.title || 'New notification', { icon: '🔔', duration: 5000 })

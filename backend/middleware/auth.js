@@ -1,8 +1,11 @@
 const jwt = require('jsonwebtoken');
+const mongoose = require('mongoose');
 const User = require('../models/User');
 
 // Protect routes - verify JWT token
 exports.protect = async (req, res, next) => {
+  // Already authenticated earlier in this request (for example by a router.param guard).
+  if (req.user) return next();
   try {
     let token;
 
@@ -32,6 +35,14 @@ exports.protect = async (req, res, next) => {
         });
       }
 
+      // Residents, guards, staff and vendors can use the API only after an admin approves them.
+      if (['resident', 'security', 'staff', 'vendor'].includes(req.user.role) && !req.user.isApproved && req.user.isActive) {
+        return res.status(403).json({
+          success: false,
+          message: 'Your account is pending approval from society admin'
+        });
+      }
+
       if (!req.user.isActive) {
         return res.status(401).json({
           success: false,
@@ -57,8 +68,7 @@ exports.protect = async (req, res, next) => {
   } catch (error) {
     res.status(500).json({
       success: false,
-      message: 'Server error',
-      error: error.message
+      message: 'Server error'
     });
   }
 };
@@ -96,4 +106,39 @@ exports.checkSocietyAccess = (req, res, next) => {
   }
 
   next();
+};
+
+// router.param('id', scopeToSociety(Model)): a user may only touch records from their own society.
+// Runs the login check itself because param callbacks run before the route's own middleware.
+exports.scopeToSociety = (Model, field = 'societyId') => (req, res, next, id) => {
+  exports.protect(req, res, async (err) => {
+    if (err) return next(err);
+    try {
+      if (!mongoose.Types.ObjectId.isValid(id)) {
+        return res.status(404).json({ success: false, message: 'Not found' });
+      }
+      if (req.user.role === 'super_admin') return next();
+      const doc = await Model.findById(id).select(field).lean();
+      if (doc && String(doc[field]) !== String(req.user.societyId)) {
+        return res.status(403).json({ success: false, message: 'Not authorized' });
+      }
+      next();
+    } catch (e) {
+      next(e);
+    }
+  });
+};
+
+// Same idea for /societies/:id, where the id is the society itself.
+exports.scopeToOwnSociety = (req, res, next, id) => {
+  exports.protect(req, res, (err) => {
+    if (err) return next(err);
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(404).json({ success: false, message: 'Not found' });
+    }
+    if (req.user.role !== 'super_admin' && String(id) !== String(req.user.societyId)) {
+      return res.status(403).json({ success: false, message: 'Not authorized' });
+    }
+    next();
+  });
 };

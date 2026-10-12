@@ -12,6 +12,10 @@ const createAdmin = async () => {
     // Get admin details from command line arguments or use defaults
     const args = process.argv.slice(2);
     const email = args[0] || 'admin@mygate.com';
+    if (process.env.NODE_ENV === 'production' && !args[1]) {
+      console.error('Pass a password: npm run create-admin <email> <password> <name> <phone> <role>');
+      process.exit(1);
+    }
     const password = args[1] || 'admin123';
     const name = args[2] || 'Super Admin';
     const phone = args[3] || '1234567890';

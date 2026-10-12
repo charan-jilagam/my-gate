@@ -5,6 +5,7 @@ const User = require('../models/User');
 const Notification = require('../models/Notification');
 const { protect, authorize } = require('../middleware/auth');
 const { notifyUser } = require('../utils/notifyUser');
+const { isSafeUrl } = require('../utils/imageUrl');
 
 // @route   GET /api/users/notifications
 // @desc    Get user notifications
@@ -14,7 +15,7 @@ router.get('/notifications', protect, async (req, res) => {
     const notifications = await Notification.find({ userId: req.user.id })
       .populate('relatedId')
       .sort({ createdAt: -1 })
-      .limit(parseInt(req.query.limit) || 50)
+      .limit(Math.min(parseInt(req.query.limit) || 200, 500))
       .skip(parseInt(req.query.skip) || 0);
 
     const unreadCount = await Notification.countDocuments({
@@ -31,8 +32,7 @@ router.get('/notifications', protect, async (req, res) => {
   } catch (error) {
     res.status(500).json({
       success: false,
-      message: 'Server error',
-      error: error.message
+      message: 'Server error'
     });
   }
 });
@@ -70,8 +70,7 @@ router.put('/notifications/:id/read', protect, async (req, res) => {
   } catch (error) {
     res.status(500).json({
       success: false,
-      message: 'Server error',
-      error: error.message
+      message: 'Server error'
     });
   }
 });
@@ -93,14 +92,54 @@ router.put('/notifications/read-all', protect, async (req, res) => {
   } catch (error) {
     res.status(500).json({
       success: false,
-      message: 'Server error',
-      error: error.message
+      message: 'Server error'
     });
   }
 });
 
+// Roles that sign up on their own and must be approved by a society admin.
+const APPROVABLE_ROLES = ['resident', 'security', 'staff', 'vendor'];
+
+// @route   PUT /api/users/reject/:id
+// @desc    Reject a sign-up. The person can no longer sign in and sees the reason.
+// @access  Private (Admins)
+router.put('/reject/:id', protect, authorize('society_admin', 'super_admin'), [
+  body('reason').optional().trim().isLength({ max: 200 }).withMessage('Reason must be 200 characters or fewer')
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ success: false, errors: errors.array() });
+    }
+
+    const user = await User.findById(req.params.id);
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+    if (!APPROVABLE_ROLES.includes(user.role)) {
+      return res.status(400).json({ success: false, message: 'This account cannot be rejected' });
+    }
+    if (user.isApproved) {
+      return res.status(400).json({ success: false, message: 'This person is already approved. Deactivate the account instead.' });
+    }
+    if (req.user.role === 'society_admin' && user.societyId?.toString() !== req.user.societyId?.toString()) {
+      return res.status(403).json({ success: false, message: 'Not authorized' });
+    }
+
+    user.isActive = false;
+    user.rejectedAt = new Date();
+    user.rejectedReason = req.body.reason || undefined;
+    await user.save({ validateBeforeSave: false });
+
+    res.json({ success: true, message: 'Sign-up rejected' });
+  } catch (error) {
+    console.error('Reject user error:', error);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
 // @route   PUT /api/users/approve/:id
-// @desc    Approve resident
+// @desc    Approve a resident, guard, staff member or vendor
 // @access  Private (Admins)
 router.put('/approve/:id', protect, authorize('society_admin', 'super_admin'), async (req, res) => {
   try {
@@ -113,10 +152,10 @@ router.put('/approve/:id', protect, authorize('society_admin', 'super_admin'), a
       });
     }
 
-    if (user.role !== 'resident') {
+    if (!APPROVABLE_ROLES.includes(user.role)) {
       return res.status(400).json({
         success: false,
-        message: 'Only residents can be approved'
+        message: 'Only residents, guards, staff and vendors need approval'
       });
     }
 
@@ -129,8 +168,11 @@ router.put('/approve/:id', protect, authorize('society_admin', 'super_admin'), a
     }
 
     user.isApproved = true;
+    user.isActive = true;
     user.approvedBy = req.user.id;
     user.approvedAt = new Date();
+    user.rejectedAt = undefined;
+    user.rejectedReason = undefined;
     await user.save();
 
     // Notify user
@@ -140,6 +182,7 @@ router.put('/approve/:id', protect, authorize('society_admin', 'super_admin'), a
         societyId: user.societyId,
         type: 'general',
         title: 'Account Approved',
+        sms: true,
         message: 'Your account has been approved by the admin',
         priority: 'high'
       });
@@ -153,9 +196,41 @@ router.put('/approve/:id', protect, authorize('society_admin', 'super_admin'), a
   } catch (error) {
     res.status(500).json({
       success: false,
-      message: 'Server error',
-      error: error.message
+      message: 'Server error'
     });
+  }
+});
+
+// @route   PUT /api/users/:id/active
+// @desc    Deactivate or reactivate an approved account (blocks or restores sign-in)
+// @access  Private (Admins)
+router.put('/:id/active', protect, authorize('society_admin', 'super_admin'), [
+  body('active').isBoolean().withMessage('active must be true or false')
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ success: false, errors: errors.array() });
+
+    const user = await User.findById(req.params.id);
+    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+    if (!APPROVABLE_ROLES.includes(user.role)) {
+      return res.status(400).json({ success: false, message: 'This account cannot be changed here' });
+    }
+    if (req.user.role === 'society_admin' && user.societyId?.toString() !== req.user.societyId?.toString()) {
+      return res.status(403).json({ success: false, message: 'Not authorized' });
+    }
+    if (!user.isApproved) {
+      return res.status(400).json({ success: false, message: 'Approve or reject this sign-up instead' });
+    }
+
+    const active = req.body.active === true || req.body.active === 'true';
+    user.isActive = active;
+    await user.save({ validateBeforeSave: false });
+
+    res.json({ success: true, message: active ? `${user.name} can sign in again` : `${user.name} has been deactivated` });
+  } catch (error) {
+    console.error('Set active error:', error);
+    res.status(500).json({ success: false, message: 'Server error' });
   }
 });
 
@@ -165,8 +240,9 @@ router.put('/approve/:id', protect, authorize('society_admin', 'super_admin'), a
 router.get('/pending-approvals', protect, authorize('society_admin', 'super_admin'), async (req, res) => {
   try {
     let query = {
-      role: 'resident',
-      isApproved: false
+      role: { $in: APPROVABLE_ROLES },
+      isApproved: false,
+      isActive: true
     };
 
     if (req.user.role === 'society_admin') {
@@ -174,7 +250,7 @@ router.get('/pending-approvals', protect, authorize('society_admin', 'super_admi
     }
 
     const users = await User.find(query)
-      .select('name email phone flatNo block createdAt')
+      .select('name email phone role flatNo block createdAt')
       .sort({ createdAt: -1 });
 
     res.json({
@@ -185,8 +261,7 @@ router.get('/pending-approvals', protect, authorize('society_admin', 'super_admi
   } catch (error) {
     res.status(500).json({
       success: false,
-      message: 'Server error',
-      error: error.message
+      message: 'Server error'
     });
   }
 });
@@ -196,7 +271,8 @@ router.get('/pending-approvals', protect, authorize('society_admin', 'super_admi
 // @access  Private
 router.put('/profile', protect, [
   body('name').optional().trim().notEmpty(),
-  body('phone').optional().matches(/^[0-9]{10}$/)
+  body('phone').optional().matches(/^[0-9]{10}$/),
+  body('profilePic').optional({ values: 'falsy' }).custom((v) => isSafeUrl(v)).withMessage('Invalid picture')
 ], async (req, res) => {
   try {
     const errors = validationResult(req);
@@ -221,8 +297,7 @@ router.put('/profile', protect, [
   } catch (error) {
     res.status(500).json({
       success: false,
-      message: 'Server error',
-      error: error.message
+      message: 'Server error'
     });
   }
 });

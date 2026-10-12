@@ -1,16 +1,29 @@
 import { useMemo, useState } from 'react'
-import { FiFileText, FiPlus } from 'react-icons/fi'
+import { FiFileText, FiPlus, FiStar } from 'react-icons/fi'
 import { useAuth } from '../contexts/AuthContext'
 import api from '../services/api'
 import useApi from '../hooks/useApi'
 import useAction from '../hooks/useAction'
+import ImageUpload from '../components/ImageUpload'
+import ExportButtons from '../components/ExportButtons'
+import { imgSrc } from '../utils/media'
 import { DataList, EmptyState, Field, Modal, PageHeader, Spinner, StatusTag, formatDate, titleCase } from '../components/ui'
 
 const CATEGORIES = ['maintenance', 'security', 'cleaning', 'amenities', 'billing', 'noise', 'parking', 'other']
 const PRIORITIES = ['low', 'medium', 'high', 'urgent']
 const STATUSES = ['open', 'in_progress', 'resolved', 'closed', 'rejected']
-const EMPTY_FORM = { title: '', description: '', category: 'maintenance', priority: 'medium', location: '' }
+const EMPTY_FORM = { title: '', description: '', category: 'maintenance', priority: 'medium', location: '', images: [] }
 const FILTERS = [{ key: 'all', label: 'All' }, ...['open', 'in_progress', 'resolved'].map((s) => ({ key: s, label: titleCase(s) }))]
+
+const EXPORT_COLUMNS = [
+  { header: 'Raised', value: (c) => formatDate(c.createdAt) },
+  { header: 'Title', value: (c) => c.title },
+  { header: 'Flat', value: (c) => `${c.block ? `${c.block}-` : ''}${c.flatNo || ''}` },
+  { header: 'Category', value: (c) => titleCase(c.category) },
+  { header: 'Priority', value: (c) => titleCase(c.priority) },
+  { header: 'Status', value: (c) => titleCase(c.status) },
+  { header: 'Rating', value: (c) => c.rating || '' }
+]
 
 const Complaints = () => {
   const { user, isResident, isAdmin } = useAuth()
@@ -32,6 +45,7 @@ const Complaints = () => {
     await reload()
   })
   const [comment, setComment] = useState('')
+  const [rate, setRate] = useState({ rating: 0, feedback: '' })
   const [statusForm, setStatusForm] = useState({ status: 'in_progress', resolution: '' })
 
   const societyId = detail?.societyId?._id || detail?.societyId || user?.societyId?._id || user?.societyId
@@ -47,6 +61,7 @@ const Complaints = () => {
     e.preventDefault()
     const payload = { ...form, title: form.title.trim(), description: form.description.trim() }
     if (!payload.location.trim()) delete payload.location
+    if (!payload.images.length) delete payload.images
     const ok = await run('create', () => api.post('/complaints', payload), 'Complaint submitted')
     if (ok) {
       setCreateOpen(false)
@@ -78,11 +93,14 @@ const Complaints = () => {
         title="Complaints"
         subtitle={isResident ? 'Raise an issue and follow it until it is fixed.' : 'Issues raised by residents.'}
         action={
-          isResident && (
-            <button className="btn-primary" onClick={() => setCreateOpen(true)}>
-              <FiPlus size={16} /> Raise complaint
-            </button>
-          )
+          <div className="flex flex-wrap items-center gap-2">
+            <ExportButtons filename="complaints" title="Complaints" rows={rows} columns={EXPORT_COLUMNS} />
+            {isResident && (
+              <button className="btn-primary" onClick={() => setCreateOpen(true)}>
+                <FiPlus size={16} /> Raise complaint
+              </button>
+            )}
+          </div>
         }
       />
 
@@ -153,6 +171,10 @@ const Complaints = () => {
           <Field label="Where in the society" htmlFor="c-loc" hint="Optional">
             <input id="c-loc" className="input" value={form.location} onChange={(e) => setForm({ ...form, location: e.target.value })} />
           </Field>
+          <div>
+            <p className="label">Photos <span className="font-normal text-muted">(optional, up to 4)</span></p>
+            <ImageUpload value={form.images} onChange={(images) => setForm({ ...form, images })} max={4} />
+          </div>
         </form>
       </Modal>
 
@@ -174,8 +196,55 @@ const Complaints = () => {
                 Raised by {detail.residentId?.name || 'resident'} · Flat {detail.block ? `${detail.block}-` : ''}{detail.flatNo}
                 {detail.assignedTo?.name ? ` · Assigned to ${detail.assignedTo.name}` : ''}
               </p>
+              {detail.images?.length > 0 && (
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {detail.images.map((img) => (
+                    <a key={img.url} href={imgSrc(img.url)} target="_blank" rel="noreferrer" aria-label="Open photo">
+                      <img src={imgSrc(img.url)} alt={img.name || 'Complaint photo'} className="h-24 w-24 rounded-md object-cover ring-1 ring-line" loading="lazy" />
+                    </a>
+                  ))}
+                </div>
+              )}
               {detail.resolution && <p className="mt-3 rounded-md bg-ok-soft px-3 py-2 text-sm text-ok"><strong>Resolution:</strong> {detail.resolution}</p>}
             </div>
+
+            {detail.rating ? (
+              <p className="rounded-md bg-sunken px-3 py-2 text-sm">
+                <strong>Rated {detail.rating}/5</strong>{detail.feedback ? ` · ${detail.feedback}` : ''}
+              </p>
+            ) : isResident && ['resolved', 'closed'].includes(detail.status) ? (
+              <div className="rounded-md border border-line p-3">
+                <p className="mb-2 text-sm font-semibold">How was this handled?</p>
+                <div className="mb-3 flex gap-1" role="radiogroup" aria-label="Rating">
+                  {[1, 2, 3, 4, 5].map((n) => (
+                    <button
+                      key={n}
+                      type="button"
+                      role="radio"
+                      aria-checked={rate.rating === n}
+                      aria-label={`${n} star${n > 1 ? 's' : ''}`}
+                      onClick={() => setRate({ ...rate, rating: n })}
+                      className="grid h-10 w-10 place-items-center rounded-md hover:bg-sunken"
+                    >
+                      <FiStar size={22} className={n <= rate.rating ? 'fill-amber text-amber' : 'text-muted'} />
+                    </button>
+                  ))}
+                </div>
+                <div className="flex gap-2">
+                  <input aria-label="Feedback" className="input" maxLength={500} placeholder="Anything to add? (optional)" value={rate.feedback} onChange={(e) => setRate({ ...rate, feedback: e.target.value })} />
+                  <button
+                    className="btn-primary"
+                    disabled={!rate.rating || detailBusy === 'rate'}
+                    onClick={async () => {
+                      const ok = await runDetail('rate', () => api.put(`/complaints/${detail._id}/feedback`, { rating: rate.rating, feedback: rate.feedback.trim() || undefined }), 'Thanks for your feedback')
+                      if (ok) setRate({ rating: 0, feedback: '' })
+                    }}
+                  >
+                    Send
+                  </button>
+                </div>
+              </div>
+            ) : null}
 
             {isAdmin && (
               <Field label="Assign to" htmlFor="c-assign">

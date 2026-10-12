@@ -1,0 +1,2619 @@
+diff --git a/.gitignore b/.gitignore
+index 6dd3f24..1ab2ec3 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -42,3 +42,6 @@ backend/.env
+ # Frontend specific
+ frontend/.env.local
+ frontend/.env.production
++
++# Uploaded images (when Cloudinary is not used)
++backend/uploads/
+diff --git a/SETUP_SERVICES.md b/SETUP_SERVICES.md
+index 0aebd2a..622af7b 100644
+--- a/SETUP_SERVICES.md
++++ b/SETUP_SERVICES.md
+@@ -42,3 +42,52 @@ Going live needs Razorpay KYC approval, then swapping in the `rzp_live_` keys. N
+ - Admin: Payments > Create dues bills every approved resident. Flats already billed for the same month are skipped.
+ - Resident: Pay now on a pending due (online), or pays the admin directly.
+ - Admin: Record payment on a pending row marks cash, cheque or UPI as received. The resident is notified and the Collected total updates.
++
++## Photos (complaints and profile)
++
++Photos work out of the box: without Cloudinary they are saved in `backend/uploads` on the server. That is fine for development, but many hosts erase the disk on every deploy, so use Cloudinary in production.
++
++1. Create a free account at https://cloudinary.com and open the Dashboard.
++2. In `backend/.env`:
++   ```
++   CLOUDINARY_CLOUD_NAME=your_cloud_name
++   CLOUDINARY_API_KEY=your_api_key
++   CLOUDINARY_API_SECRET=your_api_secret
++   ```
++3. Restart the backend. Uploads are limited to 5 MB and to JPG, PNG, GIF and WebP.
++
++## Browser (push) notifications
++
++Needs VAPID keys. Generate a pair once and keep them:
++
++```
++cd backend
++npx web-push generate-vapid-keys
++```
++
++Put them in `backend/.env`, then restart the backend:
++
++```
++VAPID_PUBLIC_KEY=...
++VAPID_PRIVATE_KEY=...
++VAPID_SUBJECT=mailto:you@example.com
++```
++
++Each person turns it on from **Profile > Notifications > This device**. Browsers only allow push on **https://** pages (and on `localhost` while developing). On iPhone, the site must first be added to the Home Screen.
++
++## SMS (Twilio)
++
++SMS is sent only for the important events: a visitor at the gate, a delivery arriving, new dues and account approval. Each person can switch it off in Profile.
++
++```
++TWILIO_ACCOUNT_SID=ACxxxxxxxx
++TWILIO_AUTH_TOKEN=xxxxxxxx
++TWILIO_FROM=+1xxxxxxxxxx
++SMS_DEFAULT_COUNTRY_CODE=+91
++```
++
++A Twilio trial account can only text numbers you have verified in the Twilio console. Sending to Indian numbers from a production account also needs DLT registration, which Twilio's India documentation walks through. Without these settings nothing is sent (the text is printed in the backend console in development).
++
++## Camera QR scanning
++
++Guards tap **Scan** in the Gate console. Browsers only allow the camera on **https://** pages (or `localhost`), so it works after you deploy with HTTPS. On a phone testing over your Wi-Fi address without HTTPS, type the pass code instead.
+diff --git a/backend/.env.example b/backend/.env.example
+index 85cf6f0..7ff7fbb 100644
+--- a/backend/.env.example
++++ b/backend/.env.example
+@@ -26,6 +26,17 @@ CLOUDINARY_CLOUD_NAME=your_cloud_name
+ CLOUDINARY_API_KEY=your_api_key
+ CLOUDINARY_API_SECRET=your_api_secret
+ 
++# Web push (generate with: npx web-push generate-vapid-keys). Optional.
++# VAPID_PUBLIC_KEY=
++# VAPID_PRIVATE_KEY=
++# VAPID_SUBJECT=mailto:you@example.com
++
++# SMS through Twilio. Optional.
++# TWILIO_ACCOUNT_SID=
++# TWILIO_AUTH_TOKEN=
++# TWILIO_FROM=
++# SMS_DEFAULT_COUNTRY_CODE=+91
++
+ # Razorpay Payment Gateway (Optional - leave empty for development without payments)
+ # RAZORPAY_KEY_ID=your_razorpay_key_id
+ # RAZORPAY_KEY_SECRET=your_razorpay_key_secret
+diff --git a/backend/models/Notice.js b/backend/models/Notice.js
+index 329ff71..aebe69e 100644
+--- a/backend/models/Notice.js
++++ b/backend/models/Notice.js
+@@ -37,7 +37,7 @@ const noticeSchema = new mongoose.Schema({
+   }],
+   targetAudience: {
+     type: String,
+-    enum: ['all', 'residents', 'owners', 'tenants', 'specific_blocks'],
++    enum: ['all', 'residents', 'owners', 'tenants', 'specific_blocks', 'specific_flats'],
+     default: 'all'
+   },
+   targetBlocks: [{
+diff --git a/backend/models/User.js b/backend/models/User.js
+index 96ef918..b91bf7b 100644
+--- a/backend/models/User.js
++++ b/backend/models/User.js
+@@ -82,6 +82,18 @@ const userSchema = new mongoose.Schema({
+     type: String,
+     trim: true
+   },
++  notificationPrefs: {
++    push: { type: Boolean, default: true },
++    sms: { type: Boolean, default: true }
++  },
++  pushSubscriptions: {
++    type: [{
++      endpoint: { type: String, required: true },
++      keys: { p256dh: String, auth: String },
++      addedAt: { type: Date, default: Date.now }
++    }],
++    select: false
++  },
+   loginAttempts: { type: Number, default: 0 },
+   lockUntil: Date,
+   resetPasswordToken: String,
+diff --git a/backend/package-lock.json b/backend/package-lock.json
+index 5724b0b..60e8c60 100644
+--- a/backend/package-lock.json
++++ b/backend/package-lock.json
+@@ -24,7 +24,8 @@
+         "nodemailer": "^6.9.4",
+         "qrcode": "^1.5.3",
+         "razorpay": "^2.9.1",
+-        "socket.io": "^4.6.1"
++        "socket.io": "^4.6.1",
++        "web-push": "^3.6.7"
+       },
+       "devDependencies": {
+         "jest": "^29.6.2",
+@@ -1178,6 +1179,15 @@
+         "node": ">= 0.6"
+       }
+     },
++    "node_modules/agent-base": {
++      "version": "7.1.4",
++      "resolved": "https://registry.npmjs.org/agent-base/-/agent-base-7.1.4.tgz",
++      "integrity": "sha512-MnA+YT8fwfJPgBx3m60MNqakm30XOkyIoH1y6huTQvC0PwZG7ki8NacLBcrPbNoo8vEZy7Jpuk7+jMO+CUovTQ==",
++      "license": "MIT",
++      "engines": {
++        "node": ">= 14"
++      }
++    },
+     "node_modules/ansi-escapes": {
+       "version": "4.3.2",
+       "resolved": "https://registry.npmjs.org/ansi-escapes/-/ansi-escapes-4.3.2.tgz",
+@@ -1254,6 +1264,18 @@
+       "integrity": "sha512-PCVAQswWemu6UdxsDFFX/+gVeYqKAod3D3UVm91jHwynguOwAvYPhx8nNlM++NqRcK6CxxpUafjmhIdKiHibqg==",
+       "license": "MIT"
+     },
++    "node_modules/asn1.js": {
++      "version": "5.4.1",
++      "resolved": "https://registry.npmjs.org/asn1.js/-/asn1.js-5.4.1.tgz",
++      "integrity": "sha512-+I//4cYPccV8LdmBLiX8CYvf9Sp3vQsrqu2QNXRcrbiWvcx/UdlFiqUJJzxRQxgsZmvhXhn4cSKeSmoFjVdupA==",
++      "license": "MIT",
++      "dependencies": {
++        "bn.js": "^4.0.0",
++        "inherits": "^2.0.1",
++        "minimalistic-assert": "^1.0.0",
++        "safer-buffer": "^2.1.0"
++      }
++    },
+     "node_modules/asynckit": {
+       "version": "0.4.0",
+       "resolved": "https://registry.npmjs.org/asynckit/-/asynckit-0.4.0.tgz",
+@@ -1432,6 +1454,12 @@
+         "url": "https://github.com/sponsors/sindresorhus"
+       }
+     },
++    "node_modules/bn.js": {
++      "version": "4.12.5",
++      "resolved": "https://registry.npmjs.org/bn.js/-/bn.js-4.12.5.tgz",
++      "integrity": "sha512-3aRg6/JxfffFD+OlOjOFR3Vo79l39ooBTFucxx+MT3dhCtzn3EmiUPQo+6/OZuI2jbXi3YKgmiTFBgChQMwIRQ==",
++      "license": "MIT"
++    },
+     "node_modules/body-parser": {
+       "version": "1.20.4",
+       "resolved": "https://registry.npmjs.org/body-parser/-/body-parser-1.20.4.tgz",
+@@ -2726,6 +2754,15 @@
+       "dev": true,
+       "license": "MIT"
+     },
++    "node_modules/http_ece": {
++      "version": "1.2.0",
++      "resolved": "https://registry.npmjs.org/http_ece/-/http_ece-1.2.0.tgz",
++      "integrity": "sha512-JrF8SSLVmcvc5NducxgyOrKXe3EsyHMgBFgSaIUGmArKe+rwr0uphRkRXvwiom3I+fpIfoItveHrfudL8/rxuA==",
++      "license": "MIT",
++      "engines": {
++        "node": ">=16"
++      }
++    },
+     "node_modules/http-errors": {
+       "version": "2.0.1",
+       "resolved": "https://registry.npmjs.org/http-errors/-/http-errors-2.0.1.tgz",
+@@ -2746,6 +2783,42 @@
+         "url": "https://opencollective.com/express"
+       }
+     },
++    "node_modules/https-proxy-agent": {
++      "version": "7.0.6",
++      "resolved": "https://registry.npmjs.org/https-proxy-agent/-/https-proxy-agent-7.0.6.tgz",
++      "integrity": "sha512-vK9P5/iUfdl95AI+JVyUuIcVtd4ofvtrOr3HNtM2yxC9bnMbEdp3x01OhQNnjb8IJYi38VlTE3mBXwcfvywuSw==",
++      "license": "MIT",
++      "dependencies": {
++        "agent-base": "^7.1.2",
++        "debug": "4"
++      },
++      "engines": {
++        "node": ">= 14"
++      }
++    },
++    "node_modules/https-proxy-agent/node_modules/debug": {
++      "version": "4.4.3",
++      "resolved": "https://registry.npmjs.org/debug/-/debug-4.4.3.tgz",
++      "integrity": "sha512-RGwwWnwQvkVfavKVt22FGLw+xYSdzARwm0ru6DhTVA3umU5hZc28V3kO4stgYryrTlLpuvgI9GiijltAjNbcqA==",
++      "license": "MIT",
++      "dependencies": {
++        "ms": "^2.1.3"
++      },
++      "engines": {
++        "node": ">=6.0"
++      },
++      "peerDependenciesMeta": {
++        "supports-color": {
++          "optional": true
++        }
++      }
++    },
++    "node_modules/https-proxy-agent/node_modules/ms": {
++      "version": "2.1.3",
++      "resolved": "https://registry.npmjs.org/ms/-/ms-2.1.3.tgz",
++      "integrity": "sha512-6FlzubTLZG3J2a/NVCAleEhjzq5oxgHyaCU9yYXvcLsvoVaHJq/s5xXI6/XXP6tz7R9xAOtHnSO/tXtF3WRTlA==",
++      "license": "MIT"
++    },
+     "node_modules/human-signals": {
+       "version": "2.1.0",
+       "resolved": "https://registry.npmjs.org/human-signals/-/human-signals-2.1.0.tgz",
+@@ -4040,6 +4113,12 @@
+         "node": ">=6"
+       }
+     },
++    "node_modules/minimalistic-assert": {
++      "version": "1.0.1",
++      "resolved": "https://registry.npmjs.org/minimalistic-assert/-/minimalistic-assert-1.0.1.tgz",
++      "integrity": "sha512-UtJcAD4yEaGtjPezWuO9wC4nwUnVH/8/Im3yEHQP4b67cXlD/Qr9hdITCU1xDbSEXg2XKNaP8jsReV7vQd00/A==",
++      "license": "ISC"
++    },
+     "node_modules/minimatch": {
+       "version": "3.1.2",
+       "resolved": "https://registry.npmjs.org/minimatch/-/minimatch-3.1.2.tgz",
+@@ -5738,6 +5817,25 @@
+         "makeerror": "1.0.12"
+       }
+     },
++    "node_modules/web-push": {
++      "version": "3.6.7",
++      "resolved": "https://registry.npmjs.org/web-push/-/web-push-3.6.7.tgz",
++      "integrity": "sha512-OpiIUe8cuGjrj3mMBFWY+e4MMIkW3SVT+7vEIjvD9kejGUypv8GPDf84JdPWskK8zMRIJ6xYGm+Kxr8YkPyA0A==",
++      "license": "MPL-2.0",
++      "dependencies": {
++        "asn1.js": "^5.3.0",
++        "http_ece": "1.2.0",
++        "https-proxy-agent": "^7.0.0",
++        "jws": "^4.0.0",
++        "minimist": "^1.2.5"
++      },
++      "bin": {
++        "web-push": "src/cli.js"
++      },
++      "engines": {
++        "node": ">= 16"
++      }
++    },
+     "node_modules/webidl-conversions": {
+       "version": "7.0.0",
+       "resolved": "https://registry.npmjs.org/webidl-conversions/-/webidl-conversions-7.0.0.tgz",
+diff --git a/backend/package.json b/backend/package.json
+index f4bbb1a..430343e 100644
+--- a/backend/package.json
++++ b/backend/package.json
+@@ -10,29 +10,34 @@
+     "create-admin": "node scripts/createAdmin.js",
+     "seed": "node scripts/seedData.js"
+   },
+-  "keywords": ["mygate", "society-management", "api"],
++  "keywords": [
++    "mygate",
++    "society-management",
++    "api"
++  ],
+   "author": "",
+   "license": "ISC",
+   "dependencies": {
+-    "express": "^4.18.2",
+-    "mongoose": "^7.5.0",
+     "bcryptjs": "^2.4.3",
+-    "jsonwebtoken": "^9.0.2",
+-    "dotenv": "^16.3.1",
++    "cloudinary": "^1.40.0",
+     "cors": "^2.8.5",
++    "dotenv": "^16.3.1",
++    "express": "^4.18.2",
++    "express-rate-limit": "^6.10.0",
++    "express-validator": "^7.0.1",
++    "helmet": "^7.0.0",
+     "joi": "^17.9.2",
+-    "socket.io": "^4.6.1",
+-    "nodemailer": "^6.9.4",
++    "jsonwebtoken": "^9.0.2",
++    "mongoose": "^7.5.0",
+     "multer": "^1.4.5-lts.1",
+-    "cloudinary": "^1.40.0",
++    "nodemailer": "^6.9.4",
+     "qrcode": "^1.5.3",
+     "razorpay": "^2.9.1",
+-    "express-rate-limit": "^6.10.0",
+-    "helmet": "^7.0.0",
+-    "express-validator": "^7.0.1"
++    "socket.io": "^4.6.1",
++    "web-push": "^3.6.7"
+   },
+   "devDependencies": {
+-    "nodemon": "^3.0.1",
+-    "jest": "^29.6.2"
++    "jest": "^29.6.2",
++    "nodemon": "^3.0.1"
+   }
+ }
+diff --git a/backend/routes/bookings.js b/backend/routes/bookings.js
+index c9176dd..da65c67 100644
+--- a/backend/routes/bookings.js
++++ b/backend/routes/bookings.js
+@@ -143,7 +143,7 @@ router.get('/', protect, async (req, res) => {
+       .populate('residentId', 'name flatNo')
+       .populate('approvedBy', 'name')
+       .sort({ slotDate: -1, startTime: -1 })
+-      .limit(parseInt(req.query.limit) || 50)
++      .limit(Math.min(parseInt(req.query.limit) || 200, 500))
+       .skip(parseInt(req.query.skip) || 0);
+ 
+     res.json({
+diff --git a/backend/routes/complaints.js b/backend/routes/complaints.js
+index 2357405..1def165 100644
+--- a/backend/routes/complaints.js
++++ b/backend/routes/complaints.js
+@@ -1,4 +1,5 @@
+ const express = require('express');
++const { cleanImages } = require('../utils/imageUrl');
+ const router = express.Router();
+ const { body, validationResult } = require('express-validator');
+ const Complaint = require('../models/Complaint');
+@@ -39,7 +40,7 @@ router.post('/', protect, authorize('resident'), [
+       description,
+       category,
+       priority: priority || 'medium',
+-      images: images || [],
++      images: cleanImages(images),
+       location,
+       flatNo: req.user.flatNo,
+       block: req.user.block,
+@@ -117,7 +118,7 @@ router.get('/', protect, async (req, res) => {
+       .populate('residentId', 'name email phone flatNo')
+       .populate('assignedTo', 'name email')
+       .sort({ createdAt: -1 })
+-      .limit(parseInt(req.query.limit) || 50)
++      .limit(Math.min(parseInt(req.query.limit) || 200, 500))
+       .skip(parseInt(req.query.skip) || 0);
+ 
+     res.json({
+diff --git a/backend/routes/deliveries.js b/backend/routes/deliveries.js
+index fb1da62..f9be3cc 100644
+--- a/backend/routes/deliveries.js
++++ b/backend/routes/deliveries.js
+@@ -137,7 +137,7 @@ router.get('/', protect, async (req, res) => {
+       .populate('approvedBy', 'name')
+       .populate('receivedBy', 'name')
+       .sort({ createdAt: -1 })
+-      .limit(parseInt(req.query.limit) || 50)
++      .limit(Math.min(parseInt(req.query.limit) || 200, 500))
+       .skip(parseInt(req.query.skip) || 0);
+ 
+     res.json({
+@@ -329,6 +329,7 @@ router.put('/:id/check-in', protect, authorize('security', 'society_admin', 'sup
+         societyId: delivery.societyId,
+         type: 'delivery_entry',
+         title: 'Delivery Arrived',
++        sms: true,
+         message: `Your delivery has arrived at the gate`,
+         relatedId: delivery._id,
+         relatedModel: 'Delivery',
+diff --git a/backend/routes/notices.js b/backend/routes/notices.js
+index 6f7f055..15f6128 100644
+--- a/backend/routes/notices.js
++++ b/backend/routes/notices.js
+@@ -7,6 +7,13 @@ router.param('id', scopeToSociety(require('../models/Notice')));
+ const { notifyUsers } = require('../utils/notifyUser');
+ const User = require('../models/User');
+ 
++// A flat can be written as "101" or "A-101"; both match a resident in block A, flat 101.
++const matchesFlat = (user, flats) => {
++  const flat = String(user.flatNo || '').toUpperCase();
++  const full = `${String(user.block || '').toUpperCase()}-${flat}`;
++  return flats.includes(flat) || flats.includes(full);
++};
++
+ // @route   POST /api/notices
+ // @desc    Create a notice
+ // @access  Private (Admins)
+@@ -15,7 +22,9 @@ router.post('/', protect, authorize('society_admin', 'super_admin'), [
+   body('content').trim().notEmpty().withMessage('Content is required'),
+   body('type').isIn(['notice', 'announcement', 'poll', 'event', 'maintenance']).withMessage('Invalid notice type'),
+   body('priority').optional().isIn(['low', 'medium', 'high', 'urgent']),
+-  body('targetAudience').optional().isIn(['all', 'residents', 'owners', 'tenants', 'specific_blocks'])
++  body('targetAudience').optional().isIn(['all', 'residents', 'owners', 'tenants', 'specific_blocks', 'specific_flats']),
++  body('targetBlocks').optional().isArray({ max: 50 }),
++  body('targetFlats').optional().isArray({ max: 500 })
+ ], async (req, res) => {
+   try {
+     const errors = validationResult(req);
+@@ -41,6 +50,16 @@ router.post('/', protect, authorize('society_admin', 'super_admin'), [
+       societyId: bodySocietyId
+     } = req.body;
+ 
++    const clean = (list) => [...new Set((Array.isArray(list) ? list : []).map((x) => String(x).trim().toUpperCase()).filter(Boolean))];
++    const blocks = targetAudience === 'specific_blocks' ? clean(targetBlocks) : [];
++    const flats = targetAudience === 'specific_flats' ? clean(targetFlats) : [];
++    if (targetAudience === 'specific_blocks' && !blocks.length) {
++      return res.status(400).json({ success: false, message: 'Enter at least one block' });
++    }
++    if (targetAudience === 'specific_flats' && !flats.length) {
++      return res.status(400).json({ success: false, message: 'Enter at least one flat' });
++    }
++
+     const societyId = req.user.role === 'super_admin' ? bodySocietyId : req.user.societyId;
+     if (!societyId) {
+       return res.status(400).json({ success: false, message: 'Society is required' });
+@@ -55,8 +74,8 @@ router.post('/', protect, authorize('society_admin', 'super_admin'), [
+       category: category || 'general',
+       attachments: attachments || [],
+       targetAudience: targetAudience || 'all',
+-      targetBlocks: targetBlocks || [],
+-      targetFlats: targetFlats || [],
++      targetBlocks: blocks,
++      targetFlats: flats,
+       pollOptions: type === 'poll' ? pollOptions : undefined,
+       pollEndDate: pollEndDate ? new Date(pollEndDate) : undefined,
+       eventDate: eventDate ? new Date(eventDate) : undefined,
+@@ -70,18 +89,12 @@ router.post('/', protect, authorize('society_admin', 'super_admin'), [
+     // Notify all relevant users
+     const io = req.app.get('io');
+     if (io) {
+-      let targetUsers = [];
+-
+-      if (targetAudience === 'all') {
+-        targetUsers = await User.find({ societyId, role: 'resident' });
+-      } else if (targetAudience === 'residents') {
+-        targetUsers = await User.find({ societyId, role: 'resident' });
+-      } else if (targetAudience === 'specific_blocks' && targetBlocks.length > 0) {
+-        targetUsers = await User.find({
+-          societyId,
+-          role: 'resident',
+-          block: { $in: targetBlocks }
+-        });
++      // Residents of the society, narrowed by block or flat when the notice is targeted.
++      let targetUsers = await User.find({ societyId, role: 'resident', isApproved: true, isActive: true }).select('_id block flatNo');
++      if (targetAudience === 'specific_blocks') {
++        targetUsers = targetUsers.filter((u) => blocks.includes(String(u.block || '').toUpperCase()));
++      } else if (targetAudience === 'specific_flats') {
++        targetUsers = targetUsers.filter((u) => matchesFlat(u, flats));
+       }
+ 
+       const userIds = targetUsers.map(u => u._id);
+@@ -126,11 +139,15 @@ router.get('/', protect, async (req, res) => {
+       query.societyId = req.user.societyId;
+     }
+ 
+-    // Filter expired notices
+-    query.$or = [
+-      { expiresAt: { $exists: false } },
+-      { expiresAt: null },
+-      { expiresAt: { $gt: new Date() } }
++    // Not expired, and (for residents) meant for them: everyone, their block, or their flat.
++    query.$and = [
++      {
++        $or: [
++          { expiresAt: { $exists: false } },
++          { expiresAt: null },
++          { expiresAt: { $gt: new Date() } }
++        ]
++      }
+     ];
+ 
+     if (req.query.type) {
+@@ -141,14 +158,16 @@ router.get('/', protect, async (req, res) => {
+       query.category = req.query.category;
+     }
+ 
+-    // Filter by target audience
+     if (req.user.role === 'resident') {
+-      query.$or.push(
+-        { targetAudience: 'all' },
+-        { targetAudience: 'residents' },
+-        { targetBlocks: { $in: [req.user.block] } },
+-        { targetFlats: { $in: [req.user.flatNo] } }
+-      );
++      const block = String(req.user.block || '').toUpperCase();
++      const flat = String(req.user.flatNo || '').toUpperCase();
++      query.$and.push({
++        $or: [
++          { targetAudience: { $in: ['all', 'residents', 'owners', 'tenants'] } },
++          { targetAudience: 'specific_blocks', targetBlocks: block },
++          { targetAudience: 'specific_flats', targetFlats: { $in: [flat, `${block}-${flat}`] } }
++        ]
++      });
+     }
+ 
+     if (req.user.role !== 'super_admin') query.societyId = req.user.societyId;
+@@ -156,7 +175,7 @@ router.get('/', protect, async (req, res) => {
+     const notices = await Notice.find(query)
+       .populate('createdBy', 'name')
+       .sort({ createdAt: -1 })
+-      .limit(parseInt(req.query.limit) || 50)
++      .limit(Math.min(parseInt(req.query.limit) || 200, 500))
+       .skip(parseInt(req.query.skip) || 0);
+ 
+     res.json({
+diff --git a/backend/routes/payments.js b/backend/routes/payments.js
+index 8687926..346236e 100644
+--- a/backend/routes/payments.js
++++ b/backend/routes/payments.js
+@@ -259,7 +259,7 @@ router.get('/', protect, async (req, res) => {
+     const payments = await Payment.find(query)
+       .populate('residentId', 'name flatNo')
+       .sort({ createdAt: -1 })
+-      .limit(parseInt(req.query.limit) || 50)
++      .limit(Math.min(parseInt(req.query.limit) || 200, 500))
+       .skip(parseInt(req.query.skip) || 0);
+ 
+     res.json({
+@@ -346,6 +346,7 @@ router.post('/generate', protect, authorize(...ADMINS), [
+             societyId,
+             type: 'payment_due',
+             title: 'New payment due',
++            sms: true,
+             message: `₹${p.amount} is due${p.month ? ` for ${p.month}` : ''}${p.description && !p.month ? `: ${p.description}` : ''}`,
+             relatedId: p._id,
+             relatedModel: 'Payment',
+diff --git a/backend/routes/push.js b/backend/routes/push.js
+new file mode 100644
+index 0000000..9008166
+--- /dev/null
++++ b/backend/routes/push.js
+@@ -0,0 +1,82 @@
++const express = require('express');
++const { body, validationResult } = require('express-validator');
++const User = require('../models/User');
++const { protect } = require('../middleware/auth');
++const { isPushConfigured } = require('../utils/push');
++const { isSmsConfigured } = require('../utils/sms');
++
++const router = express.Router();
++
++// @route   GET /api/push/config
++// @desc    What this server can do (browser push key, SMS) and the user's own choices
++// @access  Private
++router.get('/config', protect, (req, res) => {
++  res.json({
++    success: true,
++    pushEnabled: isPushConfigured(),
++    publicKey: isPushConfigured() ? process.env.VAPID_PUBLIC_KEY : null,
++    smsEnabled: isSmsConfigured(),
++    prefs: { push: req.user.notificationPrefs?.push !== false, sms: req.user.notificationPrefs?.sms !== false }
++  });
++});
++
++// @route   POST /api/push/subscribe
++// @desc    Save this browser so it can receive push notifications
++// @access  Private
++router.post('/subscribe', protect, [
++  body('endpoint').isURL({ require_tld: false }).withMessage('Invalid subscription'),
++  body('keys.p256dh').notEmpty(),
++  body('keys.auth').notEmpty()
++], async (req, res) => {
++  try {
++    const errors = validationResult(req);
++    if (!errors.isEmpty()) return res.status(400).json({ success: false, errors: errors.array() });
++    const { endpoint, keys } = req.body;
++
++    // One entry per browser; replace if it is already saved.
++    await User.updateOne({ _id: req.user.id }, { $pull: { pushSubscriptions: { endpoint } } });
++    await User.updateOne(
++      { _id: req.user.id },
++      { $push: { pushSubscriptions: { $each: [{ endpoint, keys: { p256dh: keys.p256dh, auth: keys.auth } }], $slice: -5 } } }
++    );
++    res.status(201).json({ success: true, message: 'Notifications are on for this device' });
++  } catch (error) {
++    console.error('Push subscribe error:', error);
++    res.status(500).json({ success: false, message: 'Server error' });
++  }
++});
++
++// @route   POST /api/push/unsubscribe
++// @access  Private
++router.post('/unsubscribe', protect, [body('endpoint').notEmpty()], async (req, res) => {
++  try {
++    await User.updateOne({ _id: req.user.id }, { $pull: { pushSubscriptions: { endpoint: req.body.endpoint } } });
++    res.json({ success: true, message: 'Notifications are off for this device' });
++  } catch (error) {
++    console.error('Push unsubscribe error:', error);
++    res.status(500).json({ success: false, message: 'Server error' });
++  }
++});
++
++// @route   PUT /api/push/prefs
++// @desc    Turn SMS or push on or off for this account
++// @access  Private
++router.put('/prefs', protect, [
++  body('sms').optional().isBoolean(),
++  body('push').optional().isBoolean()
++], async (req, res) => {
++  try {
++    const errors = validationResult(req);
++    if (!errors.isEmpty()) return res.status(400).json({ success: false, errors: errors.array() });
++    const set = {};
++    if (req.body.sms !== undefined) set['notificationPrefs.sms'] = req.body.sms === true || req.body.sms === 'true';
++    if (req.body.push !== undefined) set['notificationPrefs.push'] = req.body.push === true || req.body.push === 'true';
++    if (Object.keys(set).length) await User.updateOne({ _id: req.user.id }, { $set: set });
++    res.json({ success: true, message: 'Preferences saved' });
++  } catch (error) {
++    console.error('Prefs error:', error);
++    res.status(500).json({ success: false, message: 'Server error' });
++  }
++});
++
++module.exports = router;
+diff --git a/backend/routes/uploads.js b/backend/routes/uploads.js
+new file mode 100644
+index 0000000..1e9b760
+--- /dev/null
++++ b/backend/routes/uploads.js
+@@ -0,0 +1,78 @@
++const express = require('express');
++const crypto = require('crypto');
++const fs = require('fs');
++const path = require('path');
++const multer = require('multer');
++const { protect } = require('../middleware/auth');
++
++const router = express.Router();
++
++const UPLOAD_DIR = path.join(__dirname, '..', 'uploads');
++const MAX_BYTES = 5 * 1024 * 1024;
++
++const upload = multer({
++  storage: multer.memoryStorage(),
++  limits: { fileSize: MAX_BYTES, files: 1 }
++});
++
++// Work out the real image type from the first bytes, not from what the client claims.
++const sniff = (buf) => {
++  if (buf.length < 12) return null;
++  if (buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return { ext: 'jpg', mime: 'image/jpeg' };
++  if (buf.slice(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return { ext: 'png', mime: 'image/png' };
++  if (buf.slice(0, 4).toString('ascii') === 'GIF8') return { ext: 'gif', mime: 'image/gif' };
++  if (buf.slice(0, 4).toString('ascii') === 'RIFF' && buf.slice(8, 12).toString('ascii') === 'WEBP') return { ext: 'webp', mime: 'image/webp' };
++  return null;
++};
++
++const cloudinaryReady = () => !!(process.env.CLOUDINARY_CLOUD_NAME && process.env.CLOUDINARY_API_KEY && process.env.CLOUDINARY_API_SECRET);
++
++const toCloudinary = (buffer, folder) =>
++  new Promise((resolve, reject) => {
++    const cloudinary = require('cloudinary').v2;
++    cloudinary.config({
++      cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
++      api_key: process.env.CLOUDINARY_API_KEY,
++      api_secret: process.env.CLOUDINARY_API_SECRET,
++      secure: true
++    });
++    cloudinary.uploader
++      .upload_stream({ folder, resource_type: 'image' }, (err, result) => (err ? reject(err) : resolve(result)))
++      .end(buffer);
++  });
++
++// @route   POST /api/uploads
++// @desc    Upload one image (field name "file"). Returns its URL.
++// @access  Private
++router.post('/', protect, (req, res) => {
++  upload.single('file')(req, res, async (err) => {
++    if (err) {
++      const message = err.code === 'LIMIT_FILE_SIZE' ? 'That image is larger than 5 MB.' : 'The upload failed. Try again.';
++      return res.status(400).json({ success: false, message });
++    }
++    try {
++      if (!req.file) return res.status(400).json({ success: false, message: 'Choose an image to upload.' });
++      const type = sniff(req.file.buffer);
++      if (!type) return res.status(400).json({ success: false, message: 'Only JPG, PNG, GIF or WebP images are allowed.' });
++
++      const name = String(req.file.originalname || 'image').replace(/[^\w.\- ]/g, '').slice(0, 80) || 'image';
++
++      if (cloudinaryReady()) {
++        const result = await toCloudinary(req.file.buffer, `mygate/${req.user.societyId || 'platform'}`);
++        return res.status(201).json({ success: true, url: result.secure_url, name });
++      }
++
++      // No Cloudinary keys: keep files on this server's disk. Fine for development;
++      // many hosts wipe the disk on redeploy, so configure Cloudinary for production.
++      fs.mkdirSync(UPLOAD_DIR, { recursive: true });
++      const file = `${crypto.randomBytes(16).toString('hex')}.${type.ext}`;
++      fs.writeFileSync(path.join(UPLOAD_DIR, file), req.file.buffer);
++      res.status(201).json({ success: true, url: `/uploads/${file}`, name });
++    } catch (e) {
++      console.error('Upload error:', e.message);
++      res.status(500).json({ success: false, message: 'Could not save the image.' });
++    }
++  });
++});
++
++module.exports = router;
+diff --git a/backend/routes/users.js b/backend/routes/users.js
+index 4c34c78..8b28fd8 100644
+--- a/backend/routes/users.js
++++ b/backend/routes/users.js
+@@ -5,6 +5,7 @@ const User = require('../models/User');
+ const Notification = require('../models/Notification');
+ const { protect, authorize } = require('../middleware/auth');
+ const { notifyUser } = require('../utils/notifyUser');
++const { isSafeUrl } = require('../utils/imageUrl');
+ 
+ // @route   GET /api/users/notifications
+ // @desc    Get user notifications
+@@ -14,7 +15,7 @@ router.get('/notifications', protect, async (req, res) => {
+     const notifications = await Notification.find({ userId: req.user.id })
+       .populate('relatedId')
+       .sort({ createdAt: -1 })
+-      .limit(parseInt(req.query.limit) || 50)
++      .limit(Math.min(parseInt(req.query.limit) || 200, 500))
+       .skip(parseInt(req.query.skip) || 0);
+ 
+     const unreadCount = await Notification.countDocuments({
+@@ -181,6 +182,7 @@ router.put('/approve/:id', protect, authorize('society_admin', 'super_admin'), a
+         societyId: user.societyId,
+         type: 'general',
+         title: 'Account Approved',
++        sms: true,
+         message: 'Your account has been approved by the admin',
+         priority: 'high'
+       });
+@@ -269,7 +271,8 @@ router.get('/pending-approvals', protect, authorize('society_admin', 'super_admi
+ // @access  Private
+ router.put('/profile', protect, [
+   body('name').optional().trim().notEmpty(),
+-  body('phone').optional().matches(/^[0-9]{10}$/)
++  body('phone').optional().matches(/^[0-9]{10}$/),
++  body('profilePic').optional({ values: 'falsy' }).custom((v) => isSafeUrl(v)).withMessage('Invalid picture')
+ ], async (req, res) => {
+   try {
+     const errors = validationResult(req);
+diff --git a/backend/routes/visitors.js b/backend/routes/visitors.js
+index b84a3dd..9a81e33 100644
+--- a/backend/routes/visitors.js
++++ b/backend/routes/visitors.js
+@@ -147,7 +147,7 @@ router.get('/', protect, async (req, res) => {
+       .populate('approvedBy', 'name')
+       .populate('loggedBy', 'name')
+       .sort({ createdAt: -1 })
+-      .limit(parseInt(req.query.limit) || 50)
++      .limit(Math.min(parseInt(req.query.limit) || 200, 500))
+       .skip(parseInt(req.query.skip) || 0);
+ 
+     res.json({
+@@ -573,6 +573,7 @@ router.post('/walk-in', protect, authorize('security', 'society_admin'), [
+           societyId: req.user.societyId,
+           type: 'visitor_approval',
+           title: 'Visitor at the gate',
++          sms: true,
+           message: `${name} is at the gate for you. Approve or reject in Visitors.`,
+           priority: 'high',
+           relatedId: visitor._id,
+diff --git a/backend/server.js b/backend/server.js
+index 5c1334c..2a8cd1f 100644
+--- a/backend/server.js
++++ b/backend/server.js
+@@ -44,6 +44,8 @@ const complaintRoutes = require('./routes/complaints');
+ const paymentRoutes = require('./routes/payments');
+ const bookingRoutes = require('./routes/bookings');
+ const userRoutes = require('./routes/users');
++const uploadRoutes = require('./routes/uploads');
++const pushRoutes = require('./routes/push');
+ 
+ // Middleware
+ app.use(helmet());
+@@ -112,6 +114,18 @@ app.use('/api/complaints', complaintRoutes);
+ app.use('/api/payments', paymentRoutes);
+ app.use('/api/bookings', bookingRoutes);
+ app.use('/api/users', userRoutes);
++app.use('/api/uploads', uploadRoutes);
++app.use('/api/push', pushRoutes);
++
++// Uploaded images (used only when Cloudinary is not configured). Images must be loadable from the frontend's origin.
++app.use('/uploads', express.static(require('path').join(__dirname, 'uploads'), {
++  maxAge: '7d',
++  index: false,
++  setHeaders: (res) => {
++    res.set('Cross-Origin-Resource-Policy', 'cross-origin');
++    res.set('X-Content-Type-Options', 'nosniff');
++  }
++}));
+ 
+ // Health check
+ app.get('/api/health', (req, res) => {
+diff --git a/backend/utils/imageUrl.js b/backend/utils/imageUrl.js
+new file mode 100644
+index 0000000..b713bf8
+--- /dev/null
++++ b/backend/utils/imageUrl.js
+@@ -0,0 +1,19 @@
++// Accept only http(s) image URLs (our own uploads or Cloudinary). Anything else is dropped.
++const isSafeUrl = (value) => {
++  if (typeof value !== 'string' || value.length > 500) return false;
++  if (/^\/uploads\/[\w.-]+$/.test(value)) return true; // file saved on this server
++  try {
++    const u = new URL(value);
++    return u.protocol === 'https:' || u.protocol === 'http:';
++  } catch (e) {
++    return false;
++  }
++};
++
++const cleanImages = (list, max = 5) =>
++  (Array.isArray(list) ? list : [])
++    .filter((i) => i && isSafeUrl(i.url))
++    .slice(0, max)
++    .map((i) => ({ url: i.url, name: typeof i.name === 'string' ? i.name.slice(0, 80) : undefined }));
++
++module.exports = { isSafeUrl, cleanImages };
+diff --git a/backend/utils/notifyUser.js b/backend/utils/notifyUser.js
+index ea070ac..170c21d 100644
+--- a/backend/utils/notifyUser.js
++++ b/backend/utils/notifyUser.js
+@@ -1,23 +1,32 @@
+ const Notification = require('../models/Notification');
++const User = require('../models/User');
++const { sendSms } = require('./sms');
++const { sendPush } = require('./push');
+ 
+-// Send notification to user (creates DB record and emits socket event)
++// Send notification to user: saves it, emits it live, and (when set up) sends a browser push.
++// Pass `sms: true` for the few events worth a text message (visitor at the gate, dues, approval).
+ const notifyUser = async (io, userId, notificationData) => {
+   try {
++    const { sms, ...data } = notificationData;
++
+     // Create notification in database
+     const notification = await Notification.create({
+       userId,
+-      ...notificationData
++      ...data
+     });
+ 
+     // Emit socket event to user's room
+     if (io) {
+       io.to(`user-${userId}`).emit('notification', {
+         id: notification._id,
+-        ...notificationData,
++        ...data,
+         createdAt: notification.createdAt
+       });
+     }
+ 
++    // Push and SMS are best effort: they must never make the original action fail.
++    deliverExternally(userId, data, sms).catch((e) => console.error('Notification delivery error:', e.message));
++
+     return notification;
+   } catch (error) {
+     console.error('Error sending notification:', error);
+@@ -25,6 +34,27 @@ const notifyUser = async (io, userId, notificationData) => {
+   }
+ };
+ 
++const deliverExternally = async (userId, data, wantsSms) => {
++  const user = await User.findById(userId).select('phone notificationPrefs +pushSubscriptions');
++  if (!user) return;
++  const prefs = user.notificationPrefs || {};
++
++  if (prefs.push !== false && user.pushSubscriptions?.length) {
++    const dead = await sendPush(user.pushSubscriptions, {
++      title: data.title,
++      body: data.message,
++      url: data.actionUrl || '/'
++    });
++    if (dead.length) {
++      await User.updateOne({ _id: userId }, { $pull: { pushSubscriptions: { endpoint: { $in: dead } } } });
++    }
++  }
++
++  if (wantsSms && prefs.sms !== false && user.phone) {
++    await sendSms(user.phone, `MyGate: ${data.title}. ${data.message}`);
++  }
++};
++
+ // Send notification to multiple users
+ const notifyUsers = async (io, userIds, notificationData) => {
+   try {
+diff --git a/backend/utils/push.js b/backend/utils/push.js
+new file mode 100644
+index 0000000..a2bde48
+--- /dev/null
++++ b/backend/utils/push.js
+@@ -0,0 +1,32 @@
++// Web push (browser notifications even when the app is closed). Needs VAPID keys; without them it does nothing.
++const webpush = require('web-push');
++
++let ready = false;
++if (process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY) {
++  webpush.setVapidDetails(
++    process.env.VAPID_SUBJECT || `mailto:${process.env.EMAIL_USER || 'admin@example.com'}`,
++    process.env.VAPID_PUBLIC_KEY,
++    process.env.VAPID_PRIVATE_KEY
++  );
++  ready = true;
++}
++
++const isPushConfigured = () => ready;
++
++// Sends to every saved device of a user. Returns the endpoints that are gone so the caller can delete them.
++const sendPush = async (subscriptions, payload) => {
++  if (!ready || !subscriptions?.length) return [];
++  const dead = [];
++  await Promise.all(
++    subscriptions.map(async (sub) => {
++      try {
++        await webpush.sendNotification({ endpoint: sub.endpoint, keys: sub.keys }, JSON.stringify(payload));
++      } catch (err) {
++        if (err.statusCode === 404 || err.statusCode === 410) dead.push(sub.endpoint);
++      }
++    })
++  );
++  return dead;
++};
++
++module.exports = { sendPush, isPushConfigured };
+diff --git a/backend/utils/sms.js b/backend/utils/sms.js
+new file mode 100644
+index 0000000..4ea1400
+--- /dev/null
++++ b/backend/utils/sms.js
+@@ -0,0 +1,32 @@
++// SMS through Twilio's REST API. With no Twilio settings, nothing is sent (the text is logged in development).
++const isSmsConfigured = () => !!(process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN && process.env.TWILIO_FROM);
++
++const toE164 = (phone) => {
++  const digits = String(phone || '').replace(/\D/g, '');
++  if (!digits) return null;
++  if (String(phone).trim().startsWith('+')) return `+${digits}`;
++  if (digits.length === 10) return `${process.env.SMS_DEFAULT_COUNTRY_CODE || '+91'}${digits}`;
++  return `+${digits}`;
++};
++
++const sendSms = async (phone, text) => {
++  const to = toE164(phone);
++  if (!to) return false;
++  if (!isSmsConfigured()) {
++    if (process.env.NODE_ENV !== 'production') console.log(`[dev] SMS to ${to}: ${text}`);
++    return false;
++  }
++  const sid = process.env.TWILIO_ACCOUNT_SID;
++  const res = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${sid}/Messages.json`, {
++    method: 'POST',
++    headers: {
++      Authorization: `Basic ${Buffer.from(`${sid}:${process.env.TWILIO_AUTH_TOKEN}`).toString('base64')}`,
++      'Content-Type': 'application/x-www-form-urlencoded'
++    },
++    body: new URLSearchParams({ To: to, From: process.env.TWILIO_FROM, Body: String(text).slice(0, 300) })
++  });
++  if (!res.ok) throw new Error(`Twilio responded ${res.status}`);
++  return true;
++};
++
++module.exports = { sendSms, isSmsConfigured };
+diff --git a/frontend/package-lock.json b/frontend/package-lock.json
+index 52f08b0..46d3feb 100644
+--- a/frontend/package-lock.json
++++ b/frontend/package-lock.json
+@@ -10,6 +10,9 @@
+       "dependencies": {
+         "axios": "^1.5.0",
+         "date-fns": "^2.30.0",
++        "html5-qrcode": "^2.3.8",
++        "jspdf": "^4.2.1",
++        "jspdf-autotable": "^5.0.8",
+         "qrcode.react": "^3.1.0",
+         "react": "^18.2.0",
+         "react-dom": "^18.2.0",
+@@ -859,6 +862,26 @@
+         "@babel/types": "^7.28.2"
+       }
+     },
++    "node_modules/@types/pako": {
++      "version": "2.0.4",
++      "resolved": "https://registry.npmjs.org/@types/pako/-/pako-2.0.4.tgz",
++      "integrity": "sha512-VWDCbrLeVXJM9fihYodcLiIv0ku+AlOa/TQ1SvYOaBuyrSKgEcro95LJyIsJ4vSo6BXIxOKxiJAat04CmST9Fw==",
++      "license": "MIT"
++    },
++    "node_modules/@types/raf": {
++      "version": "3.4.3",
++      "resolved": "https://registry.npmjs.org/@types/raf/-/raf-3.4.3.tgz",
++      "integrity": "sha512-c4YAvMedbPZ5tEyxzQdMoOhhJ4RD3rngZIdwC2/qDN3d7JpEhB6fiBRKVY1lg5B7Wk+uPBjn5f39j1/2MY1oOw==",
++      "license": "MIT",
++      "optional": true
++    },
++    "node_modules/@types/trusted-types": {
++      "version": "2.0.7",
++      "resolved": "https://registry.npmjs.org/@types/trusted-types/-/trusted-types-2.0.7.tgz",
++      "integrity": "sha512-ScaPdn1dQczgbl0QFTeTOmVHFULt394XJgOQNoyVhZ6r2vLnMLJfBPd53SB52T/3G36VI1/g2MZaX0cwDuXsfw==",
++      "license": "MIT",
++      "optional": true
++    },
+     "node_modules/@vitejs/plugin-react": {
+       "version": "4.7.0",
+       "resolved": "https://registry.npmjs.org/@vitejs/plugin-react/-/plugin-react-4.7.0.tgz",
+@@ -962,6 +985,16 @@
+         "proxy-from-env": "^1.1.0"
+       }
+     },
++    "node_modules/base64-arraybuffer": {
++      "version": "1.0.2",
++      "resolved": "https://registry.npmjs.org/base64-arraybuffer/-/base64-arraybuffer-1.0.2.tgz",
++      "integrity": "sha512-I3yl4r9QB5ZRY3XuJVEPfc2XhZO6YweFPI+UovAzn+8/hb3oJ6lnysaFcjVpkCPfVWFUDvoZ8kmVDP7WyRtYtQ==",
++      "license": "MIT",
++      "optional": true,
++      "engines": {
++        "node": ">= 0.6.0"
++      }
++    },
+     "node_modules/baseline-browser-mapping": {
+       "version": "2.9.19",
+       "resolved": "https://registry.npmjs.org/baseline-browser-mapping/-/baseline-browser-mapping-2.9.19.tgz",
+@@ -1076,6 +1109,26 @@
+       ],
+       "license": "CC-BY-4.0"
+     },
++    "node_modules/canvg": {
++      "version": "3.0.11",
++      "resolved": "https://registry.npmjs.org/canvg/-/canvg-3.0.11.tgz",
++      "integrity": "sha512-5ON+q7jCTgMp9cjpu4Jo6XbvfYwSB2Ow3kzHKfIyJfaCAOHLbdKPQqGKgfED/R5B+3TFFfe8pegYA+b423SRyA==",
++      "license": "MIT",
++      "optional": true,
++      "dependencies": {
++        "@babel/runtime": "^7.12.5",
++        "@types/raf": "^3.4.0",
++        "core-js": "^3.8.3",
++        "raf": "^3.4.1",
++        "regenerator-runtime": "^0.13.7",
++        "rgbcolor": "^1.0.1",
++        "stackblur-canvas": "^2.0.0",
++        "svg-pathdata": "^6.0.3"
++      },
++      "engines": {
++        "node": ">=10.0.0"
++      }
++    },
+     "node_modules/chokidar": {
+       "version": "3.6.0",
+       "resolved": "https://registry.npmjs.org/chokidar/-/chokidar-3.6.0.tgz",
+@@ -1143,6 +1196,31 @@
+       "dev": true,
+       "license": "MIT"
+     },
++    "node_modules/core-js": {
++      "version": "3.50.0",
++      "resolved": "https://registry.npmjs.org/core-js/-/core-js-3.50.0.tgz",
++      "integrity": "sha512-BRWgOLKkFeCgRudR6zrs8p9XJZcE14grzKMMssoYrk6krtuEZ7MTKPIY5RzOnqsEKIR9kst7wNzphttraT+Yqw==",
++      "hasInstallScript": true,
++      "license": "MIT",
++      "optional": true,
++      "engines": {
++        "node": "*"
++      },
++      "funding": {
++        "type": "opencollective",
++        "url": "https://opencollective.com/core-js"
++      }
++    },
++    "node_modules/css-line-break": {
++      "version": "2.1.0",
++      "resolved": "https://registry.npmjs.org/css-line-break/-/css-line-break-2.1.0.tgz",
++      "integrity": "sha512-FHcKFCZcAha3LwfVBhCQbW2nCNbkZXn7KVUJcsT5/P8YmfsVja0FMPJr0B903j/E69HUphKiV9iQArX8SDYA4w==",
++      "license": "MIT",
++      "optional": true,
++      "dependencies": {
++        "utrie": "^1.0.2"
++      }
++    },
+     "node_modules/cssesc": {
+       "version": "3.0.0",
+       "resolved": "https://registry.npmjs.org/cssesc/-/cssesc-3.0.0.tgz",
+@@ -1218,6 +1296,16 @@
+       "dev": true,
+       "license": "MIT"
+     },
++    "node_modules/dompurify": {
++      "version": "3.4.16",
++      "resolved": "https://registry.npmjs.org/dompurify/-/dompurify-3.4.16.tgz",
++      "integrity": "sha512-sqo+pNp3qRhCIpbgRi1y8Tgk27Bo2Ry7w0dC1NBeNTdZChWjz9Xb/KOoZbRP/R6pQZ80Qw8YhXw13hWWBbMRnQ==",
++      "license": "(MPL-2.0 OR Apache-2.0)",
++      "optional": true,
++      "optionalDependencies": {
++        "@types/trusted-types": "^2.0.7"
++      }
++    },
+     "node_modules/dunder-proto": {
+       "version": "1.0.1",
+       "resolved": "https://registry.npmjs.org/dunder-proto/-/dunder-proto-1.0.1.tgz",
+@@ -1384,6 +1472,17 @@
+         "node": ">= 6"
+       }
+     },
++    "node_modules/fast-png": {
++      "version": "6.4.0",
++      "resolved": "https://registry.npmjs.org/fast-png/-/fast-png-6.4.0.tgz",
++      "integrity": "sha512-kAqZq1TlgBjZcLr5mcN6NP5Rv4V2f22z00c3g8vRrwkcqjerx7BEhPbOnWCPqaHUl2XWQBJQvOT/FQhdMT7X/Q==",
++      "license": "MIT",
++      "dependencies": {
++        "@types/pako": "^2.0.3",
++        "iobuffer": "^5.3.2",
++        "pako": "^2.1.0"
++      }
++    },
+     "node_modules/fastq": {
+       "version": "1.20.1",
+       "resolved": "https://registry.npmjs.org/fastq/-/fastq-1.20.1.tgz",
+@@ -1394,6 +1493,12 @@
+         "reusify": "^1.0.4"
+       }
+     },
++    "node_modules/fflate": {
++      "version": "0.8.3",
++      "resolved": "https://registry.npmjs.org/fflate/-/fflate-0.8.3.tgz",
++      "integrity": "sha512-tbZNuJrLwGUp3zshBtdy4W+ORxZuIh8a5ilyIEQDC5rY1f3U20JMry0Ll3WBzU58EZKsEuJFXhb5gwv8CsPvgA==",
++      "license": "MIT"
++    },
+     "node_modules/fill-range": {
+       "version": "7.1.1",
+       "resolved": "https://registry.npmjs.org/fill-range/-/fill-range-7.1.1.tgz",
+@@ -1601,6 +1706,32 @@
+         "node": ">= 0.4"
+       }
+     },
++    "node_modules/html2canvas": {
++      "version": "1.4.1",
++      "resolved": "https://registry.npmjs.org/html2canvas/-/html2canvas-1.4.1.tgz",
++      "integrity": "sha512-fPU6BHNpsyIhr8yyMpTLLxAbkaK8ArIBcmZIRiBLiDhjeqvXolaEmDGmELFuX9I4xDcaKKcJl+TKZLqruBbmWA==",
++      "license": "MIT",
++      "optional": true,
++      "dependencies": {
++        "css-line-break": "^2.1.0",
++        "text-segmentation": "^1.0.3"
++      },
++      "engines": {
++        "node": ">=8.0.0"
++      }
++    },
++    "node_modules/html5-qrcode": {
++      "version": "2.3.8",
++      "resolved": "https://registry.npmjs.org/html5-qrcode/-/html5-qrcode-2.3.8.tgz",
++      "integrity": "sha512-jsr4vafJhwoLVEDW3n1KvPnCCXWaQfRng0/EEYk1vNcQGcG/htAdhJX0be8YyqMoSz7+hZvOZSTAepsabiuhiQ==",
++      "license": "Apache-2.0"
++    },
++    "node_modules/iobuffer": {
++      "version": "5.4.0",
++      "resolved": "https://registry.npmjs.org/iobuffer/-/iobuffer-5.4.0.tgz",
++      "integrity": "sha512-DRebOWuqDvxunfkNJAlc3IzWIPD5xVxwUNbHr7xKB8E6aLJxIPfNX3CoMJghcFjpv6RWQsrcJbghtEwSPoJqMA==",
++      "license": "MIT"
++    },
+     "node_modules/is-binary-path": {
+       "version": "2.1.0",
+       "resolved": "https://registry.npmjs.org/is-binary-path/-/is-binary-path-2.1.0.tgz",
+@@ -1705,6 +1836,32 @@
+         "node": ">=6"
+       }
+     },
++    "node_modules/jspdf": {
++      "version": "4.2.1",
++      "resolved": "https://registry.npmjs.org/jspdf/-/jspdf-4.2.1.tgz",
++      "integrity": "sha512-YyAXyvnmjTbR4bHQRLzex3CuINCDlQnBqoSYyjJwTP2x9jDLuKDzy7aKUl0hgx3uhcl7xzg32agn5vlie6HIlQ==",
++      "license": "MIT",
++      "dependencies": {
++        "@babel/runtime": "^7.28.6",
++        "fast-png": "^6.2.0",
++        "fflate": "^0.8.1"
++      },
++      "optionalDependencies": {
++        "canvg": "^3.0.11",
++        "core-js": "^3.6.0",
++        "dompurify": "^3.3.1",
++        "html2canvas": "^1.0.0-rc.5"
++      }
++    },
++    "node_modules/jspdf-autotable": {
++      "version": "5.0.8",
++      "resolved": "https://registry.npmjs.org/jspdf-autotable/-/jspdf-autotable-5.0.8.tgz",
++      "integrity": "sha512-Hy05N86yBO7CXBrnSLOge7i1ZYpKH2DjQ94iybaP7vBhSInjvRBgDc99ngKzSbSO8Jc98ZCally8I6n0tj2RJQ==",
++      "license": "MIT",
++      "peerDependencies": {
++        "jspdf": "^2 || ^3 || ^4"
++      }
++    },
+     "node_modules/lilconfig": {
+       "version": "3.1.3",
+       "resolved": "https://registry.npmjs.org/lilconfig/-/lilconfig-3.1.3.tgz",
+@@ -1875,6 +2032,22 @@
+         "node": ">= 6"
+       }
+     },
++    "node_modules/pako": {
++      "version": "2.2.0",
++      "resolved": "https://registry.npmjs.org/pako/-/pako-2.2.0.tgz",
++      "integrity": "sha512-zJq6RP/5q+TO2OpFV3FHzlPnFjmkb7Nc99a5SNjJE+uu/PkpChs+NIZSSzbBoD+6kjiISXjfYdwj1ZRQ81dz/w==",
++      "funding": [
++        {
++          "type": "github",
++          "url": "https://github.com/sponsors/puzrin"
++        },
++        {
++          "type": "github",
++          "url": "https://github.com/sponsors/nodeca"
++        }
++      ],
++      "license": "(MIT AND Zlib)"
++    },
+     "node_modules/path-parse": {
+       "version": "1.0.7",
+       "resolved": "https://registry.npmjs.org/path-parse/-/path-parse-1.0.7.tgz",
+@@ -1882,6 +2055,13 @@
+       "dev": true,
+       "license": "MIT"
+     },
++    "node_modules/performance-now": {
++      "version": "2.1.0",
++      "resolved": "https://registry.npmjs.org/performance-now/-/performance-now-2.1.0.tgz",
++      "integrity": "sha512-7EAHlyLHI56VEIdK57uwHdHKIaAGbnXPiw0yWbarQZOKaKpvUIgW0jWRVLiatnM+XXlSwsanIBH/hzGMJulMow==",
++      "license": "MIT",
++      "optional": true
++    },
+     "node_modules/picocolors": {
+       "version": "1.1.1",
+       "resolved": "https://registry.npmjs.org/picocolors/-/picocolors-1.1.1.tgz",
+@@ -2121,6 +2301,16 @@
+       ],
+       "license": "MIT"
+     },
++    "node_modules/raf": {
++      "version": "3.4.1",
++      "resolved": "https://registry.npmjs.org/raf/-/raf-3.4.1.tgz",
++      "integrity": "sha512-Sq4CW4QhwOHE8ucn6J34MqtZCeWFP2aQSmrlroYgqAV1PjStIhJXxYuTgUIfkEk7zTLjmIjLmU5q+fbD1NnOJA==",
++      "license": "MIT",
++      "optional": true,
++      "dependencies": {
++        "performance-now": "^2.1.0"
++      }
++    },
+     "node_modules/react": {
+       "version": "18.3.1",
+       "resolved": "https://registry.npmjs.org/react/-/react-18.3.1.tgz",
+@@ -2237,6 +2427,13 @@
+         "node": ">=8.10.0"
+       }
+     },
++    "node_modules/regenerator-runtime": {
++      "version": "0.13.11",
++      "resolved": "https://registry.npmjs.org/regenerator-runtime/-/regenerator-runtime-0.13.11.tgz",
++      "integrity": "sha512-kY1AZVr2Ra+t+piVaJ4gxaFaReZVH40AKNo7UCX6W+dEwBo/2oZJzqfuN1qLq1oL45o56cPaTXELwrTh8Fpggg==",
++      "license": "MIT",
++      "optional": true
++    },
+     "node_modules/resolve": {
+       "version": "1.22.11",
+       "resolved": "https://registry.npmjs.org/resolve/-/resolve-1.22.11.tgz",
+@@ -2269,6 +2466,16 @@
+         "node": ">=0.10.0"
+       }
+     },
++    "node_modules/rgbcolor": {
++      "version": "1.0.1",
++      "resolved": "https://registry.npmjs.org/rgbcolor/-/rgbcolor-1.0.1.tgz",
++      "integrity": "sha512-9aZLIrhRaD97sgVhtJOW6ckOEh6/GnvQtdVNfdZ6s67+3/XwLS9lBcQYzEEhYVeUowN7pRzMLsyGhK2i/xvWbw==",
++      "license": "MIT OR SEE LICENSE IN FEEL-FREE.md",
++      "optional": true,
++      "engines": {
++        "node": ">= 0.8.15"
++      }
++    },
+     "node_modules/rollup": {
+       "version": "3.29.5",
+       "resolved": "https://registry.npmjs.org/rollup/-/rollup-3.29.5.tgz",
+@@ -2367,6 +2574,16 @@
+         "node": ">=0.10.0"
+       }
+     },
++    "node_modules/stackblur-canvas": {
++      "version": "2.7.0",
++      "resolved": "https://registry.npmjs.org/stackblur-canvas/-/stackblur-canvas-2.7.0.tgz",
++      "integrity": "sha512-yf7OENo23AGJhBriGx0QivY5JP6Y1HbrrDI6WLt6C5auYZXlQrheoY8hD4ibekFKz1HOfE48Ww8kMWMnJD/zcQ==",
++      "license": "MIT",
++      "optional": true,
++      "engines": {
++        "node": ">=0.1.14"
++      }
++    },
+     "node_modules/sucrase": {
+       "version": "3.35.1",
+       "resolved": "https://registry.npmjs.org/sucrase/-/sucrase-3.35.1.tgz",
+@@ -2403,6 +2620,16 @@
+         "url": "https://github.com/sponsors/ljharb"
+       }
+     },
++    "node_modules/svg-pathdata": {
++      "version": "6.0.3",
++      "resolved": "https://registry.npmjs.org/svg-pathdata/-/svg-pathdata-6.0.3.tgz",
++      "integrity": "sha512-qsjeeq5YjBZ5eMdFuUa4ZosMLxgr5RZ+F+Y1OrDhuOCEInRMA3x74XdBtggJcj9kOeInz0WE+LgCPDkZFlBYJw==",
++      "license": "MIT",
++      "optional": true,
++      "engines": {
++        "node": ">=12.0.0"
++      }
++    },
+     "node_modules/tailwindcss": {
+       "version": "3.4.19",
+       "resolved": "https://registry.npmjs.org/tailwindcss/-/tailwindcss-3.4.19.tgz",
+@@ -2441,6 +2668,16 @@
+         "node": ">=14.0.0"
+       }
+     },
++    "node_modules/text-segmentation": {
++      "version": "1.0.3",
++      "resolved": "https://registry.npmjs.org/text-segmentation/-/text-segmentation-1.0.3.tgz",
++      "integrity": "sha512-iOiPUo/BGnZ6+54OsWxZidGCsdU8YbE4PSpdPinp7DeMtUJNJBoJ/ouUSTJjHkh1KntHaltHl/gDs2FC4i5+Nw==",
++      "license": "MIT",
++      "optional": true,
++      "dependencies": {
++        "utrie": "^1.0.2"
++      }
++    },
+     "node_modules/thenify": {
+       "version": "3.3.1",
+       "resolved": "https://registry.npmjs.org/thenify/-/thenify-3.3.1.tgz",
+@@ -2570,6 +2807,16 @@
+       "dev": true,
+       "license": "MIT"
+     },
++    "node_modules/utrie": {
++      "version": "1.0.2",
++      "resolved": "https://registry.npmjs.org/utrie/-/utrie-1.0.2.tgz",
++      "integrity": "sha512-1MLa5ouZiOmQzUbjbu9VmjLzn1QLXBhwpUa7kdLUQK+KQ5KA9I1vk5U4YHe/X2Ch7PYnJfWuWT+VbuxbGwljhw==",
++      "license": "MIT",
++      "optional": true,
++      "dependencies": {
++        "base64-arraybuffer": "^1.0.2"
++      }
++    },
+     "node_modules/vite": {
+       "version": "4.5.14",
+       "resolved": "https://registry.npmjs.org/vite/-/vite-4.5.14.tgz",
+diff --git a/frontend/package.json b/frontend/package.json
+index f5487ac..72c85a8 100644
+--- a/frontend/package.json
++++ b/frontend/package.json
+@@ -5,22 +5,25 @@
+   "type": "module",
+   "private": true,
+   "dependencies": {
++    "axios": "^1.5.0",
++    "date-fns": "^2.30.0",
++    "html5-qrcode": "^2.3.8",
++    "jspdf": "^4.2.1",
++    "jspdf-autotable": "^5.0.8",
++    "qrcode.react": "^3.1.0",
+     "react": "^18.2.0",
+     "react-dom": "^18.2.0",
+-    "react-router-dom": "^6.16.0",
+-    "axios": "^1.5.0",
+-    "socket.io-client": "^4.6.1",
+     "react-hot-toast": "^2.4.1",
+     "react-icons": "^4.11.0",
+-    "qrcode.react": "^3.1.0",
+-    "date-fns": "^2.30.0"
++    "react-router-dom": "^6.16.0",
++    "socket.io-client": "^4.6.1"
+   },
+   "devDependencies": {
+     "@vitejs/plugin-react": "^4.1.0",
+-    "vite": "^4.4.9",
+     "autoprefixer": "^10.4.15",
+     "postcss": "^8.4.29",
+-    "tailwindcss": "^3.3.3"
++    "tailwindcss": "^3.3.3",
++    "vite": "^4.4.9"
+   },
+   "scripts": {
+     "dev": "vite",
+diff --git a/frontend/public/sw.js b/frontend/public/sw.js
+new file mode 100644
+index 0000000..ecbc485
+--- /dev/null
++++ b/frontend/public/sw.js
+@@ -0,0 +1,31 @@
++// Shows push notifications and opens the right page when one is tapped.
++self.addEventListener('push', (event) => {
++  let data = {}
++  try {
++    data = event.data ? event.data.json() : {}
++  } catch (e) {
++    data = { title: 'MyGate', body: event.data ? event.data.text() : '' }
++  }
++  event.waitUntil(
++    self.registration.showNotification(data.title || 'MyGate', {
++      body: data.body || '',
++      data: { url: data.url || '/' }
++    })
++  )
++})
++
++self.addEventListener('notificationclick', (event) => {
++  event.notification.close()
++  const url = (event.notification.data && event.notification.data.url) || '/'
++  event.waitUntil(
++    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clients) => {
++      for (const client of clients) {
++        if ('focus' in client) {
++          client.navigate(url).catch(() => {})
++          return client.focus()
++        }
++      }
++      return self.clients.openWindow(url)
++    })
++  )
++})
+diff --git a/frontend/src/components/ExportButtons.jsx b/frontend/src/components/ExportButtons.jsx
+new file mode 100644
+index 0000000..f732ba0
+--- /dev/null
++++ b/frontend/src/components/ExportButtons.jsx
+@@ -0,0 +1,35 @@
++import { useState } from 'react'
++import toast from 'react-hot-toast'
++import { FiDownload } from 'react-icons/fi'
++import { downloadCsv, downloadPdf } from '../utils/exportData'
++import { Spinner } from './ui'
++
++/** Two small buttons that export `rows` as CSV or PDF. Shows nothing when there is nothing to export. */
++const ExportButtons = ({ filename, title, columns, rows }) => {
++  const [busy, setBusy] = useState(false)
++  if (!rows?.length) return null
++
++  const pdf = async () => {
++    setBusy(true)
++    try {
++      await downloadPdf(filename, title, columns, rows)
++    } catch (e) {
++      toast.error('Could not create the PDF.')
++    } finally {
++      setBusy(false)
++    }
++  }
++
++  return (
++    <div className="flex gap-2" role="group" aria-label="Export">
++      <button className="btn-secondary btn-sm" onClick={() => downloadCsv(filename, columns, rows)}>
++        <FiDownload size={14} /> CSV
++      </button>
++      <button className="btn-secondary btn-sm" onClick={pdf} disabled={busy}>
++        {busy ? <Spinner className="h-3.5 w-3.5" /> : <FiDownload size={14} />} PDF
++      </button>
++    </div>
++  )
++}
++
++export default ExportButtons
+diff --git a/frontend/src/components/ImageUpload.jsx b/frontend/src/components/ImageUpload.jsx
+new file mode 100644
+index 0000000..4a9d580
+--- /dev/null
++++ b/frontend/src/components/ImageUpload.jsx
+@@ -0,0 +1,101 @@
++import { useRef, useState } from 'react'
++import { FiImage, FiX } from 'react-icons/fi'
++import toast from 'react-hot-toast'
++import api from '../services/api'
++import { imgSrc } from '../utils/media'
++import { Spinner, errorMessage } from './ui'
++
++// Shrinks big phone photos before upload so they send quickly on mobile data.
++const shrink = (file, maxSide = 1600) =>
++  new Promise((resolve) => {
++    if (!file.type.startsWith('image/') || file.type === 'image/gif') return resolve(file)
++    const img = new Image()
++    const url = URL.createObjectURL(file)
++    img.onload = () => {
++      const scale = Math.min(1, maxSide / Math.max(img.width, img.height))
++      if (scale === 1 && file.size < 1.5 * 1024 * 1024) {
++        URL.revokeObjectURL(url)
++        return resolve(file)
++      }
++      const canvas = document.createElement('canvas')
++      canvas.width = Math.round(img.width * scale)
++      canvas.height = Math.round(img.height * scale)
++      canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height)
++      canvas.toBlob(
++        (blob) => {
++          URL.revokeObjectURL(url)
++          resolve(blob ? new File([blob], file.name.replace(/\.\w+$/, '') + '.jpg', { type: 'image/jpeg' }) : file)
++        },
++        'image/jpeg',
++        0.85
++      )
++    }
++    img.onerror = () => {
++      URL.revokeObjectURL(url)
++      resolve(file)
++    }
++    img.src = url
++  })
++
++export const uploadImage = async (file) => {
++  const body = new FormData()
++  body.append('file', await shrink(file))
++  const { data } = await api.post('/uploads', body, { headers: { 'Content-Type': undefined }, timeout: 60000 })
++  return { url: data.url, name: data.name }
++}
++
++/** Picks and uploads up to `max` images. `value` is [{url, name}], `onChange` gets the new list. */
++const ImageUpload = ({ value = [], onChange, max = 4, label = 'Add photos' }) => {
++  const input = useRef(null)
++  const [busy, setBusy] = useState(false)
++
++  const pick = async (e) => {
++    const files = Array.from(e.target.files || []).slice(0, max - value.length)
++    e.target.value = ''
++    if (!files.length) return
++    setBusy(true)
++    const added = []
++    for (const file of files) {
++      try {
++        added.push(await uploadImage(file))
++      } catch (err) {
++        toast.error(errorMessage(err, 'Could not upload that image.'))
++      }
++    }
++    setBusy(false)
++    if (added.length) onChange([...value, ...added])
++  }
++
++  return (
++    <div>
++      <div className="flex flex-wrap gap-2">
++        {value.map((img, i) => (
++          <div key={img.url} className="relative h-20 w-20 overflow-hidden rounded-md ring-1 ring-line">
++            <img src={imgSrc(img.url)} alt={img.name || `Photo ${i + 1}`} className="h-full w-full object-cover" />
++            <button
++              type="button"
++              aria-label="Remove photo"
++              onClick={() => onChange(value.filter((_, j) => j !== i))}
++              className="absolute right-0.5 top-0.5 grid h-6 w-6 place-items-center rounded-full bg-black/60 text-white"
++            >
++              <FiX size={14} />
++            </button>
++          </div>
++        ))}
++        {value.length < max && (
++          <button
++            type="button"
++            onClick={() => input.current?.click()}
++            disabled={busy}
++            className="grid h-20 w-20 place-items-center rounded-md border border-dashed border-line text-muted hover:border-brand hover:text-brand"
++          >
++            {busy ? <Spinner className="h-5 w-5" /> : <span className="grid place-items-center gap-1 text-xs"><FiImage size={18} />{label}</span>}
++          </button>
++        )}
++      </div>
++      <input ref={input} type="file" accept="image/jpeg,image/png,image/webp,image/gif" multiple={max - value.length > 1} className="sr-only" onChange={pick} aria-label={label} />
++    </div>
++  )
++}
++
++export default ImageUpload
+diff --git a/frontend/src/components/Layout.jsx b/frontend/src/components/Layout.jsx
+index 2d1761a..055c1f4 100644
+--- a/frontend/src/components/Layout.jsx
++++ b/frontend/src/components/Layout.jsx
+@@ -1,3 +1,4 @@
++import { imgSrc } from '../utils/media'
+ import { useCallback, useEffect, useRef, useState } from 'react'
+ import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
+ import {
+@@ -257,7 +258,7 @@ const Layout = () => {
+           className="flex items-center gap-3 rounded-md px-2 py-2 hover:bg-white/5"
+         >
+           <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-amber font-display text-sm font-bold text-[#1b1400]">
+-            {(user?.name || '?').trim().charAt(0).toUpperCase()}
++            {user?.profilePic ? <img src={imgSrc(user.profilePic)} alt="" className="h-full w-full rounded-full object-cover" /> : (user?.name || '?').trim().charAt(0).toUpperCase()}
+           </span>
+           <span className="min-w-0">
+             <span className="block truncate text-sm font-semibold">{user?.name}</span>
+diff --git a/frontend/src/components/QrScanner.jsx b/frontend/src/components/QrScanner.jsx
+new file mode 100644
+index 0000000..a80013a
+--- /dev/null
++++ b/frontend/src/components/QrScanner.jsx
+@@ -0,0 +1,68 @@
++import { useEffect, useRef, useState } from 'react'
++import { Spinner } from './ui'
++
++/**
++ * Opens the camera and calls onScan(text) once when a QR code is read.
++ * Cameras only work on https:// pages or on localhost.
++ */
++const QrScanner = ({ onScan }) => {
++  const id = useRef(`qr-${Math.random().toString(36).slice(2)}`)
++  const onScanRef = useRef(onScan)
++  onScanRef.current = onScan
++  const [state, setState] = useState('starting') // starting | scanning | error
++  const [message, setMessage] = useState('')
++
++  useEffect(() => {
++    let scanner
++    let cancelled = false
++    let done = false
++
++    ;(async () => {
++      try {
++        const { Html5Qrcode } = await import('html5-qrcode')
++        if (cancelled) return
++        scanner = new Html5Qrcode(id.current)
++        await scanner.start(
++          { facingMode: 'environment' },
++          { fps: 10, qrbox: (w, h) => { const s = Math.floor(Math.min(w, h) * 0.75); return { width: s, height: s } } },
++          (text) => {
++            if (done) return
++            done = true
++            onScanRef.current?.(text)
++          },
++          () => {}
++        )
++        if (!cancelled) setState('scanning')
++      } catch (err) {
++        if (cancelled) return
++        setState('error')
++        const text = String(err?.message || err)
++        if (!window.isSecureContext) setMessage('The camera only works on a secure (https) page. Type the pass code instead.')
++        else if (/permission|denied|NotAllowed/i.test(text)) setMessage('Camera access was blocked. Allow the camera for this site in your browser settings, then try again.')
++        else if (/NotFound|no camera|Requested device/i.test(text)) setMessage('No camera was found on this device.')
++        else setMessage('The camera could not be started. Type the pass code instead.')
++      }
++    })()
++
++    return () => {
++      cancelled = true
++      if (scanner) {
++        const stop = scanner.isScanning ? scanner.stop() : Promise.resolve()
++        stop.catch(() => {}).finally(() => { try { scanner.clear() } catch (e) { /* already cleared */ } })
++      }
++    }
++  }, [])
++
++  return (
++    <div>
++      <div id={id.current} className="mx-auto w-full max-w-sm overflow-hidden rounded-lg bg-black/80" style={{ minHeight: state === 'error' ? 0 : 260 }} />
++      {state === 'starting' && (
++        <p className="mt-3 flex items-center justify-center gap-2 text-sm text-muted"><Spinner className="h-4 w-4" /> Starting the camera…</p>
++      )}
++      {state === 'scanning' && <p className="mt-3 text-center text-sm text-muted">Point the camera at the visitor's QR code.</p>}
++      {state === 'error' && <p role="alert" className="text-sm font-medium text-danger">{message}</p>}
++    </div>
++  )
++}
++
++export default QrScanner
+diff --git a/frontend/src/components/ui.jsx b/frontend/src/components/ui.jsx
+index c739f0e..b2db6a9 100644
+--- a/frontend/src/components/ui.jsx
++++ b/frontend/src/components/ui.jsx
+@@ -1,4 +1,4 @@
+-import { useEffect, useRef } from 'react'
++import { useEffect, useRef, useState } from 'react'
+ import { FiX, FiAlertCircle, FiInbox } from 'react-icons/fi'
+ 
+ /* ---------- Formatting helpers ---------- */
+@@ -216,7 +216,16 @@ export const ConfirmDialog = ({ open, title, text, confirmLabel = 'Confirm', dan
+ /* ---------- Data list ---------- */
+ /* A register-style list: a table from md up, stacked rows on phones. */
+ 
+-export const DataList = ({ columns, rows, rowKey = (r) => r._id, loading, error, onRetry, empty }) => {
++export const DataList = ({ columns, rows, rowKey = (r) => r._id, loading, error, onRetry, empty, pageSize = 15 }) => {
++  const [page, setPage] = useState(1)
++  const total = rows?.length || 0
++  const pages = Math.max(1, Math.ceil(total / pageSize))
++  // Filtering or reloading can leave the current page past the end.
++  useEffect(() => {
++    if (page > pages) setPage(pages)
++  }, [page, pages])
++  const shown = pageSize ? (rows || []).slice((page - 1) * pageSize, page * pageSize) : rows
++
+   if (loading) return <div className="panel"><ListSkeleton /></div>
+   if (error) return <div className="panel"><ErrorState message={error} onRetry={onRetry} /></div>
+   if (!rows?.length) return <div className="panel">{empty}</div>
+@@ -234,7 +243,7 @@ export const DataList = ({ columns, rows, rowKey = (r) => r._id, loading, error,
+           </tr>
+         </thead>
+         <tbody className="divide-y divide-line">
+-          {rows.map((row) => (
++          {shown.map((row) => (
+             <tr key={rowKey(row)} className="align-middle hover:bg-sunken/60">
+               {columns.map((c) => (
+                 <td key={c.key} className={`px-4 py-3 text-sm ${c.className || ''}`}>
+@@ -247,7 +256,7 @@ export const DataList = ({ columns, rows, rowKey = (r) => r._id, loading, error,
+       </table>
+ 
+       <ul className="divide-y divide-line md:hidden">
+-        {rows.map((row) => (
++        {shown.map((row) => (
+           <li key={rowKey(row)} className="space-y-2 px-4 py-3.5">
+             {columns.map((c) => (
+               <div key={c.key} className="flex items-start justify-between gap-4 text-sm">
+@@ -258,6 +267,17 @@ export const DataList = ({ columns, rows, rowKey = (r) => r._id, loading, error,
+           </li>
+         ))}
+       </ul>
++      {total > pageSize && (
++        <nav className="flex items-center justify-between gap-3 border-t border-line px-4 py-2.5 text-sm" aria-label="Pagination">
++          <p className="text-muted">
++            {(page - 1) * pageSize + 1}–{Math.min(page * pageSize, total)} of {total}
++          </p>
++          <div className="flex gap-2">
++            <button className="btn-secondary btn-sm" disabled={page <= 1} onClick={() => setPage(page - 1)}>Previous</button>
++            <button className="btn-secondary btn-sm" disabled={page >= pages} onClick={() => setPage(page + 1)}>Next</button>
++          </div>
++        </nav>
++      )}
+     </div>
+   )
+ }
+diff --git a/frontend/src/pages/AdminResidents.jsx b/frontend/src/pages/AdminResidents.jsx
+index 065bdb5..39b9a73 100644
+--- a/frontend/src/pages/AdminResidents.jsx
++++ b/frontend/src/pages/AdminResidents.jsx
+@@ -4,6 +4,7 @@ import { useAuth } from '../contexts/AuthContext'
+ import api from '../services/api'
+ import useApi from '../hooks/useApi'
+ import useAction from '../hooks/useAction'
++import ExportButtons from '../components/ExportButtons'
+ import { ConfirmDialog, DataList, EmptyState, Field, Modal, PageHeader, StatusTag, formatDate, titleCase } from '../components/ui'
+ 
+ const ROLE_LABEL = { resident: 'Resident', security: 'Guard', staff: 'Staff', vendor: 'Vendor' }
+@@ -102,7 +103,26 @@ const AdminResidents = () => {
+ 
+   return (
+     <>
+-      <PageHeader title="People" subtitle="Approve or reject new sign-ups, and see who lives in your society." />
++      <PageHeader
++        title="People"
++        subtitle="Approve or reject new sign-ups, and see who lives in your society."
++        action={
++          <ExportButtons
++            filename="people"
++            title="People"
++            rows={rows}
++            columns={[
++              { header: 'Name', value: (u) => u.name },
++              { header: 'Role', value: (u) => ROLE_LABEL[u.role] || titleCase(u.role) },
++              { header: 'Email', value: (u) => u.email },
++              { header: 'Phone', value: (u) => u.phone },
++              { header: 'Flat', value: (u) => (u.flatNo ? flatOf(u) : '') },
++              { header: 'Registered', value: (u) => formatDate(u.createdAt) },
++              { header: 'Status', value: (u) => titleCase(stateOf(u)) }
++            ]}
++          />
++        }
++      />
+ 
+       <div className="mb-4 flex flex-wrap items-center gap-3">
+         <div className="flex gap-1 rounded-lg bg-sunken p-1" role="tablist" aria-label="Resident lists">
+diff --git a/frontend/src/pages/Complaints.jsx b/frontend/src/pages/Complaints.jsx
+index c30e134..21c3117 100644
+--- a/frontend/src/pages/Complaints.jsx
++++ b/frontend/src/pages/Complaints.jsx
+@@ -4,14 +4,27 @@ import { useAuth } from '../contexts/AuthContext'
+ import api from '../services/api'
+ import useApi from '../hooks/useApi'
+ import useAction from '../hooks/useAction'
++import ImageUpload from '../components/ImageUpload'
++import ExportButtons from '../components/ExportButtons'
++import { imgSrc } from '../utils/media'
+ import { DataList, EmptyState, Field, Modal, PageHeader, Spinner, StatusTag, formatDate, titleCase } from '../components/ui'
+ 
+ const CATEGORIES = ['maintenance', 'security', 'cleaning', 'amenities', 'billing', 'noise', 'parking', 'other']
+ const PRIORITIES = ['low', 'medium', 'high', 'urgent']
+ const STATUSES = ['open', 'in_progress', 'resolved', 'closed', 'rejected']
+-const EMPTY_FORM = { title: '', description: '', category: 'maintenance', priority: 'medium', location: '' }
++const EMPTY_FORM = { title: '', description: '', category: 'maintenance', priority: 'medium', location: '', images: [] }
+ const FILTERS = [{ key: 'all', label: 'All' }, ...['open', 'in_progress', 'resolved'].map((s) => ({ key: s, label: titleCase(s) }))]
+ 
++const EXPORT_COLUMNS = [
++  { header: 'Raised', value: (c) => formatDate(c.createdAt) },
++  { header: 'Title', value: (c) => c.title },
++  { header: 'Flat', value: (c) => `${c.block ? `${c.block}-` : ''}${c.flatNo || ''}` },
++  { header: 'Category', value: (c) => titleCase(c.category) },
++  { header: 'Priority', value: (c) => titleCase(c.priority) },
++  { header: 'Status', value: (c) => titleCase(c.status) },
++  { header: 'Rating', value: (c) => c.rating || '' }
++]
++
+ const Complaints = () => {
+   const { user, isResident, isAdmin } = useAuth()
+   const canManage = isAdmin || user?.role === 'staff'
+@@ -48,6 +61,7 @@ const Complaints = () => {
+     e.preventDefault()
+     const payload = { ...form, title: form.title.trim(), description: form.description.trim() }
+     if (!payload.location.trim()) delete payload.location
++    if (!payload.images.length) delete payload.images
+     const ok = await run('create', () => api.post('/complaints', payload), 'Complaint submitted')
+     if (ok) {
+       setCreateOpen(false)
+@@ -79,11 +93,14 @@ const Complaints = () => {
+         title="Complaints"
+         subtitle={isResident ? 'Raise an issue and follow it until it is fixed.' : 'Issues raised by residents.'}
+         action={
+-          isResident && (
+-            <button className="btn-primary" onClick={() => setCreateOpen(true)}>
+-              <FiPlus size={16} /> Raise complaint
+-            </button>
+-          )
++          <div className="flex flex-wrap items-center gap-2">
++            <ExportButtons filename="complaints" title="Complaints" rows={rows} columns={EXPORT_COLUMNS} />
++            {isResident && (
++              <button className="btn-primary" onClick={() => setCreateOpen(true)}>
++                <FiPlus size={16} /> Raise complaint
++              </button>
++            )}
++          </div>
+         }
+       />
+ 
+@@ -154,6 +171,10 @@ const Complaints = () => {
+           <Field label="Where in the society" htmlFor="c-loc" hint="Optional">
+             <input id="c-loc" className="input" value={form.location} onChange={(e) => setForm({ ...form, location: e.target.value })} />
+           </Field>
++          <div>
++            <p className="label">Photos <span className="font-normal text-muted">(optional, up to 4)</span></p>
++            <ImageUpload value={form.images} onChange={(images) => setForm({ ...form, images })} max={4} />
++          </div>
+         </form>
+       </Modal>
+ 
+@@ -175,6 +196,15 @@ const Complaints = () => {
+                 Raised by {detail.residentId?.name || 'resident'} · Flat {detail.block ? `${detail.block}-` : ''}{detail.flatNo}
+                 {detail.assignedTo?.name ? ` · Assigned to ${detail.assignedTo.name}` : ''}
+               </p>
++              {detail.images?.length > 0 && (
++                <div className="mt-3 flex flex-wrap gap-2">
++                  {detail.images.map((img) => (
++                    <a key={img.url} href={imgSrc(img.url)} target="_blank" rel="noreferrer" aria-label="Open photo">
++                      <img src={imgSrc(img.url)} alt={img.name || 'Complaint photo'} className="h-24 w-24 rounded-md object-cover ring-1 ring-line" loading="lazy" />
++                    </a>
++                  ))}
++                </div>
++              )}
+               {detail.resolution && <p className="mt-3 rounded-md bg-ok-soft px-3 py-2 text-sm text-ok"><strong>Resolution:</strong> {detail.resolution}</p>}
+             </div>
+ 
+diff --git a/frontend/src/pages/Deliveries.jsx b/frontend/src/pages/Deliveries.jsx
+index 9c0170c..e1d7670 100644
+--- a/frontend/src/pages/Deliveries.jsx
++++ b/frontend/src/pages/Deliveries.jsx
+@@ -4,13 +4,24 @@ import { useAuth } from '../contexts/AuthContext'
+ import api from '../services/api'
+ import useApi from '../hooks/useApi'
+ import useAction from '../hooks/useAction'
+-import { DataList, EmptyState, Field, Modal, PageHeader, Spinner, StatusTag, formatDate } from '../components/ui'
++import ExportButtons from '../components/ExportButtons'
++import { DataList, EmptyState, Field, Modal, PageHeader, Spinner, StatusTag, formatDate, titleCase } from '../components/ui'
+ 
+ const EMPTY_FORM = { deliveryPersonName: '', deliveryPersonPhone: '', company: '', trackingNumber: '', items: '', notes: '' }
+ 
++const EXPORT_COLUMNS = [
++  { header: 'Date', value: (d) => formatDate(d.createdAt, true) },
++  { header: 'Courier', value: (d) => d.deliveryPersonName },
++  { header: 'Phone', value: (d) => d.deliveryPersonPhone },
++  { header: 'Company', value: (d) => d.company || '' },
++  { header: 'Flat', value: (d) => `${d.block ? `${d.block}-` : ''}${d.flatNo || ''}` },
++  { header: 'Resident', value: (d) => d.residentId?.name || '' },
++  { header: 'Status', value: (d) => titleCase(d.status) }
++]
++
+ const Deliveries = () => {
+   const { isResident, isSecurity, isAdmin } = useAuth()
+-  const { data, loading, error, reload } = useApi('/deliveries', { params: { limit: 100 }, select: (d) => d.deliveries || [] })
++  const { data, loading, error, reload } = useApi('/deliveries', { params: { limit: 500 }, select: (d) => d.deliveries || [] })
+   const { busy, run } = useAction(reload)
+   const [open, setOpen] = useState(false)
+   const [form, setForm] = useState(EMPTY_FORM)
+@@ -100,11 +111,14 @@ const Deliveries = () => {
+         title="Deliveries"
+         subtitle={isResident ? 'Tell the gate what you are expecting so couriers are not held up.' : 'Parcels and food orders expected across the society.'}
+         action={
+-          isResident && (
+-            <button className="btn-primary" onClick={() => setOpen(true)}>
+-              <FiPlus size={16} /> Expect delivery
+-            </button>
+-          )
++          <div className="flex flex-wrap items-center gap-2">
++            <ExportButtons filename="deliveries" title="Deliveries" rows={data} columns={EXPORT_COLUMNS} />
++            {isResident && (
++              <button className="btn-primary" onClick={() => setOpen(true)}>
++                <FiPlus size={16} /> Expect delivery
++              </button>
++            )}
++          </div>
+         }
+       />
+ 
+diff --git a/frontend/src/pages/GateConsole.jsx b/frontend/src/pages/GateConsole.jsx
+index 200c9be..ea174f2 100644
+--- a/frontend/src/pages/GateConsole.jsx
++++ b/frontend/src/pages/GateConsole.jsx
+@@ -1,11 +1,12 @@
+ import { useState } from 'react'
+ import toast from 'react-hot-toast'
+-import { FiLogIn, FiLogOut, FiSearch, FiUserPlus } from 'react-icons/fi'
++import { FiCamera, FiLogIn, FiLogOut, FiSearch, FiUserPlus } from 'react-icons/fi'
+ import { useAuth } from '../contexts/AuthContext'
+ import api from '../services/api'
+ import useApi from '../hooks/useApi'
+ import useAction from '../hooks/useAction'
+ import { passCode } from '../utils/pass'
++import QrScanner from '../components/QrScanner'
+ import { EmptyState, ErrorState, Field, ListSkeleton, Modal, PageHeader, Spinner, StatusTag, errorMessage, formatDate, titleCase } from '../components/ui'
+ 
+ const PURPOSES = ['personal', 'business', 'delivery', 'service', 'other']
+@@ -60,13 +61,28 @@ const GateConsole = () => {
+   const [lookupError, setLookupError] = useState('')
+   const [looking, setLooking] = useState(false)
+ 
+-  const findPass = async (e) => {
+-    e.preventDefault()
++  const [scanning, setScanning] = useState(false)
++  const onScan = (text) => {
++    setScanning(false)
++    let value = ''
++    try {
++      value = JSON.parse(text)?.visitorId?.slice(0, 8) || ''
++    } catch (e) {
++      value = String(text).trim()
++    }
++    if (!value) return setLookupError('That QR code is not a MyGate visitor pass.')
++    setCode(value.toUpperCase())
++    findPass(null, value)
++  }
++
++  const findPass = async (e, override) => {
++    e?.preventDefault()
++    const query = (override ?? code).trim()
+     setLookupError('')
+     setLookup(null)
+     setLooking(true)
+     try {
+-      const { data } = await api.get(`/visitors/lookup/${encodeURIComponent(code.trim())}`)
++      const { data } = await api.get(`/visitors/lookup/${encodeURIComponent(query)}`)
+       setLookup(data.visitor)
+     } catch (err) {
+       setLookupError(errorMessage(err, 'Could not look up that code.'))
+@@ -171,6 +187,10 @@ const GateConsole = () => {
+         ))}
+       </div>
+ 
++      <Modal open={scanning} onClose={() => setScanning(false)} title="Scan visitor pass" size="sm">
++        {scanning && <QrScanner onScan={onScan} />}
++      </Modal>
++
+       {tab === 'visitors' && (
+         <div className="space-y-5">
+           <form onSubmit={findPass} className="panel p-4">
+@@ -180,6 +200,9 @@ const GateConsole = () => {
+               <button className="btn-primary" disabled={looking || code.trim().length < 6}>
+                 {looking ? <Spinner className="h-4 w-4" /> : <FiSearch size={16} />} Find
+               </button>
++              <button type="button" className="btn-secondary" onClick={() => setScanning(true)} aria-label="Scan QR code with camera">
++                <FiCamera size={16} /> <span className="hidden sm:inline">Scan</span>
++              </button>
+             </div>
+             {lookupError && <p role="alert" className="mt-2 text-sm font-medium text-danger">{lookupError}</p>}
+             {lookup && (
+diff --git a/frontend/src/pages/Notices.jsx b/frontend/src/pages/Notices.jsx
+index 80766cf..5e3d68e 100644
+--- a/frontend/src/pages/Notices.jsx
++++ b/frontend/src/pages/Notices.jsx
+@@ -19,7 +19,9 @@ const EMPTY_FORM = {
+   eventDate: '',
+   eventLocation: '',
+   expiresAt: '',
+-  societyId: ''
++  societyId: '',
++  audience: 'all',
++  targets: ''
+ }
+ 
+ const PRIORITY_TAG = { urgent: 'tag-danger', high: 'tag-warn', medium: 'tag-neutral', low: 'tag-neutral' }
+@@ -65,6 +67,7 @@ const Notices = () => {
+   const [form, setForm] = useState(EMPTY_FORM)
+   const [formError, setFormError] = useState('')
+   const [deleting, setDeleting] = useState(null)
++  const [visible, setVisible] = useState(10)
+ 
+   const submit = async (e) => {
+     e.preventDefault()
+@@ -85,6 +88,13 @@ const Notices = () => {
+       if (form.eventDate) payload.eventDate = new Date(form.eventDate).toISOString()
+       if (form.eventLocation) payload.eventLocation = form.eventLocation.trim()
+     }
++    const targets = form.targets.split(/[\n,]/).map((t) => t.trim()).filter(Boolean)
++    if (form.audience === 'specific_blocks' || form.audience === 'specific_flats') {
++      if (!targets.length) return setFormError(form.audience === 'specific_blocks' ? 'Enter at least one block, for example A, B.' : 'Enter at least one flat, for example A-101, 202.')
++      payload.targetAudience = form.audience
++      if (form.audience === 'specific_blocks') payload.targetBlocks = targets
++      else payload.targetFlats = targets
++    }
+     if (form.expiresAt) payload.expiresAt = new Date(form.expiresAt).toISOString()
+     if (isSuperAdmin) {
+       const id = form.societyId || societies?.[0]?._id
+@@ -128,12 +138,14 @@ const Notices = () => {
+         </div>
+       ) : (
+         <ul className="space-y-3">
+-          {data.map((n) => (
++          {data.slice(0, visible).map((n) => (
+             <li key={n._id} className="panel p-5">
+               <div className="flex flex-wrap items-start justify-between gap-3">
+                 <div className="min-w-0">
+                   <div className="mb-1.5 flex flex-wrap items-center gap-2">
+                     <span className="tag-info">{titleCase(n.type)}</span>
++                    {n.targetAudience === 'specific_blocks' && n.targetBlocks?.length > 0 && <span className="tag-neutral">Block {n.targetBlocks.join(', ')}</span>}
++                    {n.targetAudience === 'specific_flats' && n.targetFlats?.length > 0 && <span className="tag-neutral">Flats {n.targetFlats.join(', ')}</span>}
+                     {['urgent', 'high'].includes(n.priority) && <span className={PRIORITY_TAG[n.priority]}>{titleCase(n.priority)} priority</span>}
+                     <span className="text-xs text-muted">{formatDate(n.publishedAt || n.createdAt, true)}</span>
+                   </div>
+@@ -167,6 +179,11 @@ const Notices = () => {
+           ))}
+         </ul>
+       )}
++      {data?.length > visible && (
++        <div className="mt-4 text-center">
++          <button className="btn-secondary" onClick={() => setVisible(visible + 10)}>Show older notices ({data.length - visible} more)</button>
++        </div>
++      )}
+ 
+       <Modal
+         open={open}
+@@ -197,6 +214,18 @@ const Notices = () => {
+           <Field label="Message" htmlFor="n-content">
+             <textarea id="n-content" required rows={4} className="input" value={form.content} onChange={(e) => setForm({ ...form, content: e.target.value })} />
+           </Field>
++          <Field label="Who should see it" htmlFor="n-audience">
++            <select id="n-audience" className="input" value={form.audience} onChange={(e) => setForm({ ...form, audience: e.target.value })}>
++              <option value="all">Everyone in the society</option>
++              <option value="specific_blocks">Only certain blocks</option>
++              <option value="specific_flats">Only certain flats</option>
++            </select>
++          </Field>
++          {form.audience !== 'all' && (
++            <Field label={form.audience === 'specific_blocks' ? 'Blocks' : 'Flats'} htmlFor="n-targets" hint={form.audience === 'specific_blocks' ? 'Separate with commas, for example A, B.' : 'Separate with commas. Use A-101 for block and flat, or just 101.'}>
++              <input id="n-targets" className="input" value={form.targets} onChange={(e) => setForm({ ...form, targets: e.target.value })} />
++            </Field>
++          )}
+           <div className="grid gap-4 sm:grid-cols-3">
+             <Field label="Type" htmlFor="n-type">
+               <select id="n-type" className="input" value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })}>
+diff --git a/frontend/src/pages/Payments.jsx b/frontend/src/pages/Payments.jsx
+index e1856bc..00369ce 100644
+--- a/frontend/src/pages/Payments.jsx
++++ b/frontend/src/pages/Payments.jsx
+@@ -4,6 +4,8 @@ import { FiAlertTriangle, FiCheckCircle, FiCreditCard, FiFileText, FiPlus } from
+ import { useAuth } from '../contexts/AuthContext'
+ import api from '../services/api'
+ import useApi from '../hooks/useApi'
++import ExportButtons from '../components/ExportButtons'
++import { downloadReceiptPdf } from '../utils/receipt'
+ import { openCheckout } from '../utils/razorpay'
+ import { DataList, EmptyState, Field, Modal, PageHeader, Spinner, StatusTag, errorMessage, formatDate, formatINR, titleCase } from '../components/ui'
+ 
+@@ -11,6 +13,18 @@ const TYPES = ['maintenance', 'fine', 'amenity_booking', 'other']
+ const thisMonth = () => new Date().toISOString().slice(0, 7)
+ const EMPTY_FORM = { amount: '', type: 'maintenance', month: thisMonth(), description: '' }
+ 
++const EXPORT_COLUMNS = [
++  { header: 'Date', value: (p) => formatDate(p.paidAt || p.createdAt) },
++  { header: 'Resident', value: (p) => p.residentId?.name || '' },
++  { header: 'Flat', value: (p) => `${p.block ? `${p.block}-` : ''}${p.flatNo || ''}` },
++  { header: 'Type', value: (p) => titleCase(p.type) },
++  { header: 'Month', value: (p) => p.month || '' },
++  { header: 'Amount (Rs.)', value: (p) => p.amount },
++  { header: 'Method', value: (p) => (p.status === 'completed' ? titleCase(p.paymentMethod || 'online') : '') },
++  { header: 'Reference', value: (p) => p.transactionId || p.razorpayPaymentId || '' },
++  { header: 'Status', value: (p) => titleCase(p.status) }
++]
++
+ const Payments = () => {
+   const { user, isResident } = useAuth()
+   const isSocAdmin = user?.role === 'society_admin' || user?.role === 'super_admin'
+@@ -18,7 +32,7 @@ const Payments = () => {
+   const { data: societies } = useApi('/societies', { enabled: isSuper, live: false, select: (d) => d.societies || [] })
+   const [month, setMonth] = useState('')
+   const { data, loading, error, reload } = useApi('/payments', {
+-    params: { limit: 100, ...(!isResident && month ? { month } : {}) },
++    params: { limit: 500, ...(!isResident && month ? { month } : {}) },
+     select: (d) => d.payments || []
+   })
+   const summary = useApi('/payments/admin/summary', {
+@@ -224,15 +238,18 @@ const Payments = () => {
+         title="Payments"
+         subtitle={isResident ? 'Pay maintenance and other dues online. Every payment is kept on record.' : 'Create dues, record cash or cheque payments and see what has been collected.'}
+         action={
+-          isResident ? (
+-            <button className="btn-primary" disabled={!online} onClick={() => setOpen(true)}>
+-              <FiPlus size={16} /> Make payment
+-            </button>
+-          ) : isSocAdmin ? (
+-            <button className="btn-primary" onClick={() => setDuesOpen(true)}>
+-              <FiPlus size={16} /> Create dues
+-            </button>
+-          ) : null
++          <div className="flex flex-wrap items-center gap-2">
++            <ExportButtons filename="payments" title="Payments" rows={data} columns={EXPORT_COLUMNS} />
++            {isResident ? (
++              <button className="btn-primary" disabled={!online} onClick={() => setOpen(true)}>
++                <FiPlus size={16} /> Make payment
++              </button>
++            ) : isSocAdmin ? (
++              <button className="btn-primary" onClick={() => setDuesOpen(true)}>
++                <FiPlus size={16} /> Create dues
++              </button>
++            ) : null}
++          </div>
+         }
+       />
+ 
+@@ -403,7 +420,7 @@ const Payments = () => {
+         footer={
+           <>
+             <button className="btn-secondary" onClick={() => setReceipt(null)}>Close</button>
+-            <button className="btn-primary" onClick={() => window.print()}>Print</button>
++            <button className="btn-primary" onClick={() => downloadReceiptPdf(receipt, user?.name).catch(() => toast.error('Could not create the PDF.'))}>Download PDF</button>
+           </>
+         }
+       >
+diff --git a/frontend/src/pages/Profile.jsx b/frontend/src/pages/Profile.jsx
+index b1de4a3..0303e9c 100644
+--- a/frontend/src/pages/Profile.jsx
++++ b/frontend/src/pages/Profile.jsx
+@@ -1,8 +1,11 @@
+-import { useState } from 'react'
++import { useEffect, useRef, useState } from 'react'
+ import toast from 'react-hot-toast'
+ import { useAuth } from '../contexts/AuthContext'
+ import api from '../services/api'
+ import { Field, PageHeader, Spinner, errorMessage, titleCase } from '../components/ui'
++import { uploadImage } from '../components/ImageUpload'
++import { imgSrc } from '../utils/media'
++import { currentSubscription, disablePush, enablePush, pushSupported } from '../utils/push'
+ 
+ const Profile = () => {
+   const { user, refreshUser } = useAuth()
+@@ -14,6 +17,74 @@ const Profile = () => {
+   const [savingPw, setSavingPw] = useState(false)
+   const [pwError, setPwError] = useState('')
+ 
++  // Profile photo
++  const photoInput = useRef(null)
++  const [photoBusy, setPhotoBusy] = useState(false)
++  const changePhoto = async (e) => {
++    const file = e.target.files?.[0]
++    e.target.value = ''
++    if (!file) return
++    setPhotoBusy(true)
++    try {
++      const { url } = await uploadImage(file)
++      await api.put('/users/profile', { profilePic: url })
++      await refreshUser()
++      toast.success('Photo updated')
++    } catch (err) {
++      toast.error(errorMessage(err, 'Could not update your photo.'))
++    } finally {
++      setPhotoBusy(false)
++    }
++  }
++  const removePhoto = async () => {
++    setPhotoBusy(true)
++    try {
++      await api.put('/users/profile', { profilePic: '' })
++      await refreshUser()
++    } catch (err) {
++      toast.error(errorMessage(err, 'Could not remove your photo.'))
++    } finally {
++      setPhotoBusy(false)
++    }
++  }
++
++  // Notification settings
++  const [notif, setNotif] = useState(null) // server abilities + this user's choices
++  const [deviceOn, setDeviceOn] = useState(false)
++  const [notifBusy, setNotifBusy] = useState(false)
++  useEffect(() => {
++    api.get('/push/config').then(({ data }) => setNotif(data)).catch(() => {})
++    currentSubscription().then((s) => setDeviceOn(!!s)).catch(() => {})
++  }, [])
++  const toggleDevice = async () => {
++    setNotifBusy(true)
++    try {
++      if (deviceOn) {
++        await disablePush()
++        setDeviceOn(false)
++        toast.success('Notifications are off for this device')
++      } else {
++        await enablePush(notif.publicKey)
++        setDeviceOn(true)
++        toast.success('Notifications are on for this device')
++      }
++    } catch (err) {
++      toast.error(err?.response ? errorMessage(err) : err?.message || 'Could not change notifications.')
++    } finally {
++      setNotifBusy(false)
++    }
++  }
++  const toggleSms = async () => {
++    const next = !notif.prefs.sms
++    setNotif({ ...notif, prefs: { ...notif.prefs, sms: next } })
++    try {
++      await api.put('/push/prefs', { sms: next })
++    } catch (err) {
++      setNotif({ ...notif, prefs: { ...notif.prefs, sms: !next } })
++      toast.error(errorMessage(err, 'Could not save that.'))
++    }
++  }
++
+   const saveProfile = async (e) => {
+     e.preventDefault()
+     setProfileError('')
+@@ -62,12 +133,23 @@ const Profile = () => {
+       <div className="grid gap-6 lg:grid-cols-[1fr_1fr]">
+         <section className="panel p-5">
+           <div className="mb-5 flex items-center gap-4">
+-            <span className="grid h-14 w-14 place-items-center rounded-full bg-brand font-display text-xl font-bold text-brand-ink">
+-              {(user?.name || '?').trim().charAt(0).toUpperCase()}
+-            </span>
++            {user?.profilePic ? (
++              <img src={imgSrc(user.profilePic)} alt="" className="h-14 w-14 rounded-full object-cover ring-1 ring-line" />
++            ) : (
++              <span className="grid h-14 w-14 place-items-center rounded-full bg-brand font-display text-xl font-bold text-brand-ink">
++                {(user?.name || '?').trim().charAt(0).toUpperCase()}
++              </span>
++            )}
+             <div className="min-w-0">
+               <p className="truncate font-display text-lg font-bold">{user?.name}</p>
+               <p className="truncate text-sm text-muted">{user?.email}</p>
++              <div className="mt-1 flex gap-3 text-sm">
++                <button type="button" className="font-semibold text-brand hover:underline" disabled={photoBusy} onClick={() => photoInput.current?.click()}>
++                  {photoBusy ? 'Uploading…' : user?.profilePic ? 'Change photo' : 'Add photo'}
++                </button>
++                {user?.profilePic && !photoBusy && <button type="button" className="text-muted hover:underline" onClick={removePhoto}>Remove</button>}
++              </div>
++              <input ref={photoInput} type="file" accept="image/jpeg,image/png,image/webp" className="sr-only" aria-label="Profile photo" onChange={changePhoto} />
+             </div>
+           </div>
+           <dl className="mb-5 grid grid-cols-2 gap-3 text-sm">
+@@ -93,6 +175,43 @@ const Profile = () => {
+           </form>
+         </section>
+ 
++        <div className="space-y-6">
++        <section className="panel h-fit p-5">
++          <h2 className="mb-1 text-lg font-bold">Notifications</h2>
++          <p className="mb-4 text-sm text-muted">In-app alerts are always on. You can also get alerts on this device and by text message.</p>
++          {!notif ? (
++            <p className="text-sm text-muted">Loading…</p>
++          ) : (
++            <ul className="space-y-3 text-sm">
++              <li className="flex items-center justify-between gap-4">
++                <span>
++                  <span className="block font-semibold">This device</span>
++                  <span className="text-muted">
++                    {!notif.pushEnabled
++                      ? 'Not set up on this server yet.'
++                      : !pushSupported()
++                        ? 'This browser does not support notifications.'
++                        : 'Alerts even when the app is closed.'}
++                  </span>
++                </span>
++                <button className={deviceOn ? 'btn-secondary btn-sm' : 'btn-primary btn-sm'} disabled={notifBusy || !notif.pushEnabled || !pushSupported()} onClick={toggleDevice}>
++                  {notifBusy && <Spinner className="h-3.5 w-3.5" />}
++                  {deviceOn ? 'Turn off' : 'Turn on'}
++                </button>
++              </li>
++              <li className="flex items-center justify-between gap-4">
++                <span>
++                  <span className="block font-semibold">Text messages</span>
++                  <span className="text-muted">{notif.smsEnabled ? 'Visitor at the gate, deliveries, dues and approvals.' : 'Not set up on this server yet.'}</span>
++                </span>
++                <button className={notif.prefs.sms ? 'btn-secondary btn-sm' : 'btn-primary btn-sm'} disabled={!notif.smsEnabled} onClick={toggleSms}>
++                  {notif.prefs.sms ? 'Turn off' : 'Turn on'}
++                </button>
++              </li>
++            </ul>
++          )}
++        </section>
++
+         <section className="panel h-fit p-5">
+           <h2 className="mb-4 text-lg font-bold">Change password</h2>
+           <form onSubmit={changePassword} className="space-y-4">
+@@ -112,6 +231,7 @@ const Profile = () => {
+             </button>
+           </form>
+         </section>
++        </div>
+       </div>
+     </>
+   )
+diff --git a/frontend/src/pages/Vehicles.jsx b/frontend/src/pages/Vehicles.jsx
+index 8abbe6b..7053b66 100644
+--- a/frontend/src/pages/Vehicles.jsx
++++ b/frontend/src/pages/Vehicles.jsx
+@@ -4,11 +4,21 @@ import { useAuth } from '../contexts/AuthContext'
+ import api from '../services/api'
+ import useApi from '../hooks/useApi'
+ import useAction from '../hooks/useAction'
++import ExportButtons from '../components/ExportButtons'
+ import { ConfirmDialog, DataList, EmptyState, Field, Modal, PageHeader, Spinner, titleCase } from '../components/ui'
+ 
+ const TYPES = ['car', 'bike', 'scooter', 'bicycle', 'other']
+ const EMPTY_FORM = { vehicleNumber: '', vehicleType: 'car', brand: '', model: '', color: '' }
+ 
++const EXPORT_COLUMNS = [
++  { header: 'Vehicle number', value: (v) => v.vehicleNumber },
++  { header: 'Type', value: (v) => titleCase(v.vehicleType) },
++  { header: 'Make', value: (v) => [v.brand, v.model, v.color].filter(Boolean).join(' ') },
++  { header: 'Owner', value: (v) => v.residentId?.name || '' },
++  { header: 'Flat', value: (v) => `${v.block ? `${v.block}-` : ''}${v.flatNo || ''}` },
++  { header: 'Status', value: (v) => (v.isInside ? 'Inside' : 'Outside') }
++]
++
+ const Vehicles = () => {
+   const { isResident, isSecurity, isAdmin } = useAuth()
+   const { data, loading, error, reload } = useApi('/vehicles', { select: (d) => d.vehicles || [] })
+@@ -108,11 +118,14 @@ const Vehicles = () => {
+         title="Vehicles"
+         subtitle={isResident ? 'Register your vehicles so the gate recognises them.' : 'Registered vehicles and who is parked inside right now.'}
+         action={
+-          isResident && (
+-            <button className="btn-primary" onClick={() => { setEditing(null); setForm(EMPTY_FORM); setOpen(true) }}>
+-              <FiPlus size={16} /> Register vehicle
+-            </button>
+-          )
++          <div className="flex flex-wrap items-center gap-2">
++            <ExportButtons filename="vehicles" title="Vehicles" rows={rows} columns={EXPORT_COLUMNS} />
++            {isResident && (
++              <button className="btn-primary" onClick={() => { setEditing(null); setForm(EMPTY_FORM); setOpen(true) }}>
++                <FiPlus size={16} /> Register vehicle
++              </button>
++            )}
++          </div>
+         }
+       />
+ 
+diff --git a/frontend/src/pages/Visitors.jsx b/frontend/src/pages/Visitors.jsx
+index 6f168c5..02e0fa4 100644
+--- a/frontend/src/pages/Visitors.jsx
++++ b/frontend/src/pages/Visitors.jsx
+@@ -6,6 +6,7 @@ import api from '../services/api'
+ import useApi from '../hooks/useApi'
+ import useAction from '../hooks/useAction'
+ import { passCode } from '../utils/pass'
++import ExportButtons from '../components/ExportButtons'
+ import { ConfirmDialog, DataList, EmptyState, Field, Modal, PageHeader, Spinner, StatusTag, formatDate, titleCase } from '../components/ui'
+ 
+ const PURPOSES = ['personal', 'business', 'delivery', 'service', 'other']
+@@ -19,10 +20,21 @@ const FILTERS = [
+   { key: 'checked_out', label: 'Left' }
+ ]
+ 
++const EXPORT_COLUMNS = [
++  { header: 'Date', value: (v) => formatDate(v.entryTime || v.expectedArrival || v.createdAt, true) },
++  { header: 'Visitor', value: (v) => v.name },
++  { header: 'Phone', value: (v) => v.phone },
++  { header: 'Visiting', value: (v) => `${v.block ? `${v.block}-` : ''}${v.flatNo || ''}` },
++  { header: 'Resident', value: (v) => v.residentId?.name || '' },
++  { header: 'Purpose', value: (v) => titleCase(v.purpose) },
++  { header: 'People', value: (v) => v.numberOfVisitors || 1 },
++  { header: 'Status', value: (v) => titleCase(v.status) }
++]
++
+ const Visitors = () => {
+   const { isResident, isSecurity, isAdmin } = useAuth()
+   const [filter, setFilter] = useState('all')
+-  const { data, loading, error, reload } = useApi('/visitors', { params: { limit: 100 }, select: (d) => d.visitors || [] })
++  const { data, loading, error, reload } = useApi('/visitors', { params: { limit: 500 }, select: (d) => d.visitors || [] })
+   const { busy, run } = useAction(reload)
+ 
+   const [inviteOpen, setInviteOpen] = useState(false)
+@@ -176,11 +188,14 @@ const Visitors = () => {
+             : 'Everyone who has been invited or logged at the gate.'
+         }
+         action={
+-          isResident && (
+-            <button className="btn-primary" onClick={() => { setEditing(null); setForm(EMPTY_FORM); setFormError(''); setInviteOpen(true) }}>
+-              <FiPlus size={16} /> Invite visitor
+-            </button>
+-          )
++          <div className="flex flex-wrap items-center gap-2">
++            <ExportButtons filename="visitors" title="Visitors" rows={visitors} columns={EXPORT_COLUMNS} />
++            {isResident && (
++              <button className="btn-primary" onClick={() => { setEditing(null); setForm(EMPTY_FORM); setFormError(''); setInviteOpen(true) }}>
++                <FiPlus size={16} /> Invite visitor
++              </button>
++            )}
++          </div>
+         }
+       />
+ 
+diff --git a/frontend/src/utils/exportData.js b/frontend/src/utils/exportData.js
+new file mode 100644
+index 0000000..c67e8de
+--- /dev/null
++++ b/frontend/src/utils/exportData.js
+@@ -0,0 +1,51 @@
++// CSV and PDF downloads built from the rows already on screen.
++// A column is { header: 'Name', value: (row) => 'text' }.
++
++const stamp = () => new Date().toISOString().slice(0, 10)
++
++// A cell starting with = + - @ would run as a formula when the CSV is opened in Excel, so neutralise it.
++const cell = (v) => {
++  let s = v === null || v === undefined ? '' : String(v)
++  if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`
++  return `"${s.replace(/"/g, '""')}"`
++}
++
++const save = (blob, name) => {
++  const url = URL.createObjectURL(blob)
++  const a = document.createElement('a')
++  a.href = url
++  a.download = name
++  document.body.appendChild(a)
++  a.click()
++  a.remove()
++  setTimeout(() => URL.revokeObjectURL(url), 1000)
++}
++
++export const downloadCsv = (filename, columns, rows) => {
++  const lines = [columns.map((c) => cell(c.header)).join(',')]
++  rows.forEach((r) => lines.push(columns.map((c) => cell(c.value(r))).join(',')))
++  // The BOM makes Excel read ₹ and other characters correctly.
++  save(new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' }), `${filename}-${stamp()}.csv`)
++}
++
++export const downloadPdf = async (filename, title, columns, rows) => {
++  const [{ jsPDF }, { default: autoTable }] = await Promise.all([import('jspdf'), import('jspdf-autotable')])
++  const doc = new jsPDF({ orientation: columns.length > 6 ? 'landscape' : 'portrait', unit: 'pt', format: 'a4' })
++  doc.setFontSize(16)
++  doc.text(title, 40, 44)
++  doc.setFontSize(9)
++  doc.setTextColor(110)
++  doc.text(`Exported ${new Date().toLocaleString()} · ${rows.length} row${rows.length === 1 ? '' : 's'}`, 40, 60)
++  autoTable(doc, {
++    startY: 74,
++    head: [columns.map((c) => c.header)],
++    body: rows.map((r) => columns.map((c) => String(c.value(r) ?? ''))),
++    styles: { fontSize: 8, cellPadding: 4 },
++    headStyles: { fillColor: [10, 58, 57] },
++    margin: { left: 40, right: 40 }
++  })
++  doc.save(`${filename}-${stamp()}.pdf`)
++}
++
++// jsPDF's built-in fonts have no ₹ glyph, so amounts in PDFs are written as "Rs. 1,200".
++export const pdfMoney = (n) => `Rs. ${Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`
+diff --git a/frontend/src/utils/media.js b/frontend/src/utils/media.js
+new file mode 100644
+index 0000000..064c01e
+--- /dev/null
++++ b/frontend/src/utils/media.js
+@@ -0,0 +1,10 @@
++// Uploaded images may be stored by the API itself ("/uploads/x.jpg") or on Cloudinary (a full URL).
++const API_ORIGIN = (() => {
++  try {
++    return import.meta.env.VITE_API_URL ? new URL(import.meta.env.VITE_API_URL, window.location.origin).origin : ''
++  } catch (e) {
++    return ''
++  }
++})()
++
++export const imgSrc = (url) => (url && url.startsWith('/') ? `${API_ORIGIN}${url}` : url)
+diff --git a/frontend/src/utils/push.js b/frontend/src/utils/push.js
+new file mode 100644
+index 0000000..51f8fe0
+--- /dev/null
++++ b/frontend/src/utils/push.js
+@@ -0,0 +1,33 @@
++import api from '../services/api'
++
++export const pushSupported = () => 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window
++
++const toKey = (base64) => {
++  const pad = '='.repeat((4 - (base64.length % 4)) % 4)
++  const raw = atob((base64 + pad).replace(/-/g, '+').replace(/_/g, '/'))
++  return Uint8Array.from([...raw].map((c) => c.charCodeAt(0)))
++}
++
++export const currentSubscription = async () => {
++  if (!pushSupported()) return null
++  const reg = await navigator.serviceWorker.getRegistration('/sw.js')
++  return reg ? reg.pushManager.getSubscription() : null
++}
++
++export const enablePush = async (publicKey) => {
++  const permission = await Notification.requestPermission()
++  if (permission !== 'granted') throw new Error('Notifications are blocked for this site. Allow them in your browser settings.')
++  const reg = await navigator.serviceWorker.register('/sw.js')
++  await navigator.serviceWorker.ready
++  const sub =
++    (await reg.pushManager.getSubscription()) ||
++    (await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: toKey(publicKey) }))
++  await api.post('/push/subscribe', sub.toJSON())
++}
++
++export const disablePush = async () => {
++  const sub = await currentSubscription()
++  if (!sub) return
++  await api.post('/push/unsubscribe', { endpoint: sub.endpoint }).catch(() => {})
++  await sub.unsubscribe()
++}
+diff --git a/frontend/src/utils/receipt.js b/frontend/src/utils/receipt.js
+new file mode 100644
+index 0000000..96584d3
+--- /dev/null
++++ b/frontend/src/utils/receipt.js
+@@ -0,0 +1,50 @@
++import { pdfMoney } from './exportData'
++
++const label = (s) => String(s || '').replace(/_/g, ' ').replace(/^\w/, (c) => c.toUpperCase())
++
++// A one-page payment receipt as a PDF.
++export const downloadReceiptPdf = async (p, resident) => {
++  const { jsPDF } = await import('jspdf')
++  const doc = new jsPDF({ unit: 'pt', format: 'a5' })
++  const w = doc.internal.pageSize.getWidth()
++
++  doc.setFillColor(10, 58, 57)
++  doc.rect(0, 0, w, 64, 'F')
++  doc.setTextColor(255)
++  doc.setFontSize(18)
++  doc.text('Payment receipt', 32, 40)
++
++  doc.setTextColor(30)
++  doc.setFontSize(26)
++  doc.text(pdfMoney(p.amount), 32, 112)
++  doc.setFontSize(10)
++  doc.setTextColor(46, 125, 50)
++  doc.text('PAID', 32, 130)
++
++  const rows = [
++    ['Received from', resident || p.residentId?.name || '-'],
++    ['Flat', `${p.block ? `${p.block}-` : ''}${p.flatNo || '-'}`],
++    ['For', `${label(p.type)}${p.month ? ` - ${p.month}` : ''}`],
++    ['Paid on', p.paidAt ? new Date(p.paidAt).toLocaleString() : '-'],
++    ['Method', label(p.paymentMethod || 'online')],
++    ['Reference', p.transactionId || p.razorpayPaymentId || '-'],
++    ['Receipt no.', String(p._id || '').slice(-8).toUpperCase()]
++  ]
++  let y = 168
++  rows.forEach(([k, v]) => {
++    doc.setTextColor(120)
++    doc.setFontSize(9)
++    doc.text(k, 32, y)
++    doc.setTextColor(30)
++    doc.setFontSize(11)
++    doc.text(doc.splitTextToSize(String(v), w - 160), 140, y)
++    doc.setDrawColor(225)
++    doc.line(32, y + 10, w - 32, y + 10)
++    y += 30
++  })
++
++  doc.setFontSize(8)
++  doc.setTextColor(150)
++  doc.text('This is a computer-generated receipt.', 32, y + 14)
++  doc.save(`receipt-${String(p._id || '').slice(-8)}.pdf`)
++}
+diff --git a/frontend/vite.config.js b/frontend/vite.config.js
+index 7c08444..71ed72b 100644
+--- a/frontend/vite.config.js
++++ b/frontend/vite.config.js
+@@ -13,6 +13,10 @@ export default defineConfig({
+         changeOrigin: true,
+         secure: false
+       },
++      '/uploads': {
++        target: 'http://127.0.0.1:5000',
++        changeOrigin: true
++      },
+       '/socket.io': {
+         target: 'http://127.0.0.1:5000',
+         ws: true,

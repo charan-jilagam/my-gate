@@ -1,0 +1,231 @@
+diff --git a/backend/.env.example b/backend/.env.example
+index d010e53..bbadacd 100644
+--- a/backend/.env.example
++++ b/backend/.env.example
+@@ -3,7 +3,11 @@ PORT=5000
+ NODE_ENV=development
+ 
+ # MongoDB
++# Local:
+ MONGODB_URI=mongodb://localhost:27017/mygate
++# MongoDB Atlas (online, free tier). Replace USER, PASSWORD and the cluster host from Atlas > Connect > Drivers.
++# Keep "/mygate" before the "?" so your data goes into a database named mygate.
++# MONGODB_URI=mongodb+srv://USER:PASSWORD@cluster0.xxxxx.mongodb.net/mygate?retryWrites=true&w=majority&appName=Cluster0
+ 
+ # JWT
+ JWT_SECRET=your_super_secret_jwt_key_change_in_production
+diff --git a/backend/server.js b/backend/server.js
+index f17fecf..f7e98e5 100644
+--- a/backend/server.js
++++ b/backend/server.js
+@@ -104,8 +104,7 @@ app.use((req, res) => {
+ 
+ // Connect to MongoDB
+ mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/mygate', {
+-  useNewUrlParser: true,
+-  useUnifiedTopology: true,
++  serverSelectionTimeoutMS: 10000 // fail fast with a clear message instead of hanging
+ })
+ .then(() => {
+   console.log('MongoDB connected successfully');
+@@ -116,7 +115,15 @@ mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/mygate',
+   });
+ })
+ .catch((error) => {
+-  console.error('MongoDB connection error:', error);
++  console.error('\nMongoDB connection error:', error.message);
++  const uri = process.env.MONGODB_URI || '';
++  if (!uri) {
++    console.error('Hint: MONGODB_URI is not set. Create backend/.env (copy .env.example) and set it.');
++  } else if (/bad auth|authentication failed/i.test(error.message)) {
++    console.error('Hint: wrong database username or password. If the password has special characters (@ : / ? # %), URL-encode them.');
++  } else if (/ENOTFOUND|querySrv|ETIMEOUT|ECONNREFUSED|Server selection timed out|whitelist|IP/i.test(error.message)) {
++    console.error('Hint: cannot reach the database. For MongoDB Atlas, open Network Access and allow your current IP address (or 0.0.0.0/0 while testing).');
++  }
+   process.exit(1);
+ });
+ 
+diff --git a/frontend/index.html b/frontend/index.html
+index 64e352b..ce9e80a 100644
+--- a/frontend/index.html
++++ b/frontend/index.html
+@@ -7,7 +7,7 @@
+       type="image/svg+xml"
+       href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230F4C4A'/%3E%3Cpath d='M7 24V12l9-6 9 6v12' fill='none' stroke='%23F5A800' stroke-width='2.4' stroke-linejoin='round'/%3E%3Cpath d='M12 24v-7h8v7' fill='none' stroke='%23fff' stroke-width='2.4'/%3E%3C/svg%3E"
+     />
+-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
++    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+     <meta name="theme-color" content="#0F4C4A" />
+     <meta name="description" content="MyGate: visitors, deliveries, payments and notices for your society." />
+     <link rel="preconnect" href="https://fonts.googleapis.com" />
+diff --git a/frontend/src/components/AuthShell.jsx b/frontend/src/components/AuthShell.jsx
+index f8fceae..eee7877 100644
+--- a/frontend/src/components/AuthShell.jsx
++++ b/frontend/src/components/AuthShell.jsx
+@@ -10,7 +10,7 @@ const POINTS = [
+ /** Two-column sign-in layout: the brand panel on the left, the form on the right. */
+ const AuthShell = ({ title, subtitle, children, footer }) => (
+   <div className="grid min-h-screen lg:grid-cols-[minmax(0,5fr)_minmax(0,6fr)]">
+-    <aside className="relative hidden flex-col justify-between overflow-hidden bg-brand-strong p-12 text-white lg:flex">
++    <aside className="relative hidden flex-col justify-between overflow-hidden bg-side p-12 text-white lg:flex">
+       <div className="hazard absolute inset-x-0 top-0 h-2" aria-hidden="true" />
+       <Logo />
+       <div>
+diff --git a/frontend/src/components/Layout.jsx b/frontend/src/components/Layout.jsx
+index c9ba1c2..630aaaa 100644
+--- a/frontend/src/components/Layout.jsx
++++ b/frontend/src/components/Layout.jsx
+@@ -225,7 +225,7 @@ const Layout = () => {
+   }
+ 
+   const sidebar = (
+-    <div className="flex h-full flex-col bg-brand-strong text-white">
++    <div className="flex h-full flex-col border-r border-white/10 bg-side text-white">
+       <div className="hazard h-1.5 shrink-0" aria-hidden="true" />
+       <div className="px-5 pb-4 pt-5 text-white">
+         <Logo />
+diff --git a/frontend/src/components/ui.jsx b/frontend/src/components/ui.jsx
+index 6b7ab09..acbef7f 100644
+--- a/frontend/src/components/ui.jsx
++++ b/frontend/src/components/ui.jsx
+@@ -145,21 +145,25 @@ export const Field = ({ label, hint, error, children, htmlFor, className = '' })
+ 
+ export const Modal = ({ open, onClose, title, children, footer, size = 'md' }) => {
+   const panelRef = useRef(null)
++  const onCloseRef = useRef(onClose)
++  onCloseRef.current = onClose
+ 
+   useEffect(() => {
+     if (!open) return undefined
+     const previous = document.activeElement
+-    const onKey = (e) => e.key === 'Escape' && onClose?.()
++    // Read the latest onClose through a ref. Callers pass a new inline function on every render, and
++    // depending on it here would re-run this effect (and refocus the first field) on every keystroke.
++    const onKey = (e) => e.key === 'Escape' && onCloseRef.current?.()
+     document.addEventListener('keydown', onKey)
+     document.body.style.overflow = 'hidden'
+-    const first = panelRef.current?.querySelector('input, select, textarea, button:not([data-close])')
++    const first = panelRef.current?.querySelector('input:not([type="hidden"]), select, textarea, button:not([data-close])')
+     first?.focus()
+     return () => {
+       document.removeEventListener('keydown', onKey)
+       document.body.style.overflow = ''
+       previous?.focus?.()
+     }
+-  }, [open, onClose])
++  }, [open])
+ 
+   if (!open) return null
+   const width = { sm: 'max-w-sm', md: 'max-w-lg', lg: 'max-w-2xl' }[size]
+@@ -181,7 +185,7 @@ export const Modal = ({ open, onClose, title, children, footer, size = 'md' }) =
+           </button>
+         </div>
+         <div className="overflow-y-auto px-5 py-4">{children}</div>
+-        {footer && <div className="flex justify-end gap-2 border-t border-line px-5 py-3">{footer}</div>}
++        {footer && <div className="flex flex-wrap justify-end gap-2 border-t border-line px-5 pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-3">{footer}</div>}
+       </div>
+     </div>
+   )
+diff --git a/frontend/src/index.css b/frontend/src/index.css
+index d90db85..9dbc725 100644
+--- a/frontend/src/index.css
++++ b/frontend/src/index.css
+@@ -20,26 +20,32 @@
+   --danger-soft: 252 228 228;
+   --info: 30 90 160;
+   --info-soft: 221 233 249;
++  --side: 10 58 57;
++  --on-solid: 255 255 255;
+ }
+ 
++/* Dark theme: a calm slate with a hint of teal. Surfaces step up in lightness (bg < sunken < surface)
++   so cards read as raised without needing shadows, and coloured fills are muted to avoid glare. */
+ .dark {
+-  --bg: 8 24 24;
+-  --surface: 15 37 36;
+-  --sunken: 11 30 29;
+-  --ink: 228 238 236;
+-  --muted: 143 168 165;
+-  --line: 33 62 60;
+-  --brand: 74 190 182;
+-  --brand-strong: 120 214 207;
+-  --brand-soft: 20 62 60;
+-  --brand-ink: 6 30 29;
+-  --amber-soft: 70 52 8;
+-  --ok: 92 200 142;
+-  --ok-soft: 18 62 40;
+-  --danger: 244 120 120;
+-  --danger-soft: 72 24 24;
+-  --info: 120 170 240;
+-  --info-soft: 22 44 80;
++  --bg: 12 20 22;
++  --surface: 21 32 35;
++  --sunken: 16 26 28;
++  --ink: 231 238 238;
++  --muted: 150 166 168;
++  --line: 44 60 63;
++  --brand: 78 196 187;
++  --brand-strong: 112 214 205;
++  --brand-soft: 24 54 56;
++  --brand-ink: 4 28 28;
++  --amber-soft: 62 48 12;
++  --ok: 88 190 138;
++  --ok-soft: 20 54 40;
++  --danger: 240 118 118;
++  --danger-soft: 66 28 30;
++  --info: 124 172 238;
++  --info-soft: 26 42 74;
++  --side: 8 17 19;
++  --on-solid: 6 24 24;
+ }
+ 
+ @layer base {
+@@ -78,16 +84,17 @@
+     @apply btn text-muted hover:bg-sunken hover:text-ink;
+   }
+   .btn-danger {
+-    @apply btn bg-danger text-white hover:opacity-90;
++    @apply btn bg-danger text-on-solid hover:opacity-90;
+   }
+   .btn-ok {
+-    @apply btn bg-ok text-white hover:opacity-90;
++    @apply btn bg-ok text-on-solid hover:opacity-90;
+   }
+   .btn-sm {
+-    @apply min-h-[32px] px-3 text-xs;
++    @apply min-h-[36px] px-3 text-xs sm:min-h-[32px];
+   }
++  /* 16px on phones: anything smaller makes iOS zoom the page when a field is focused. */
+   .input {
+-    @apply block w-full rounded-md border border-line bg-surface px-3 py-2 text-sm text-ink placeholder:text-muted/70 transition-colors focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/25 disabled:bg-sunken;
++    @apply block min-h-[42px] w-full rounded-md border border-line bg-surface px-3 py-2 text-base text-ink sm:text-sm placeholder:text-muted/70 transition-colors focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/25 disabled:bg-sunken;
+   }
+   .label {
+     @apply mb-1 block text-sm font-semibold text-ink;
+@@ -117,11 +124,7 @@
+ 
+ /* The one signature element: a boom-barrier stripe, used on the sidebar edge and active nav state. */
+ .hazard {
+-  background-image: repeating-linear-gradient(
+-    -45deg,
+-    #f5a800 0 10px,
+-    rgb(var(--brand-strong)) 10px 20px
+-  );
++  background-image: repeating-linear-gradient(-45deg, #f5a800 0 10px, #0a3a39 10px 20px);
+ }
+ 
+ @keyframes skeleton {
+diff --git a/frontend/tailwind.config.js b/frontend/tailwind.config.js
+index e43f300..f3619ec 100644
+--- a/frontend/tailwind.config.js
++++ b/frontend/tailwind.config.js
+@@ -11,6 +11,9 @@ export default {
+         sunken: 'rgb(var(--sunken) / <alpha-value>)',
+         ink: 'rgb(var(--ink) / <alpha-value>)',
+         muted: 'rgb(var(--muted) / <alpha-value>)',
++        // Sidebar and auth panel: a fixed deep teal in both themes (brand-strong turns light in dark mode).
++        side: 'rgb(var(--side) / <alpha-value>)',
++        'on-solid': 'rgb(var(--on-solid) / <alpha-value>)',
+         line: 'rgb(var(--line) / <alpha-value>)',
+         brand: {
+           DEFAULT: 'rgb(var(--brand) / <alpha-value>)',

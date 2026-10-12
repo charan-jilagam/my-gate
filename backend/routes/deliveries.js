@@ -2,7 +2,8 @@ const express = require('express');
 const router = express.Router();
 const { body, validationResult } = require('express-validator');
 const Delivery = require('../models/Delivery');
-const { protect, authorize, checkSocietyAccess } = require('../middleware/auth');
+const { protect, authorize, checkSocietyAccess , scopeToSociety } = require('../middleware/auth');
+router.param('id', scopeToSociety(require('../models/Delivery')));
 const { generateQRCode } = require('../utils/generateQR');
 const { notifyUser } = require('../utils/notifyUser');
 const { generateOTP, generateOTPExpiry } = require('../utils/generateOTP');
@@ -105,8 +106,7 @@ router.post('/invite', protect, authorize('resident'), [
     console.error('Delivery invite error:', error);
     res.status(500).json({
       success: false,
-      message: 'Server error',
-      error: error.message
+      message: 'Server error'
     });
   }
 });
@@ -130,12 +130,14 @@ router.get('/', protect, async (req, res) => {
       query.status = req.query.status;
     }
 
+    if (req.user.role !== 'super_admin') query.societyId = req.user.societyId;
+
     const deliveries = await Delivery.find(query)
       .populate('residentId', 'name email phone flatNo')
       .populate('approvedBy', 'name')
       .populate('receivedBy', 'name')
       .sort({ createdAt: -1 })
-      .limit(parseInt(req.query.limit) || 50)
+      .limit(Math.min(parseInt(req.query.limit) || 200, 500))
       .skip(parseInt(req.query.skip) || 0);
 
     res.json({
@@ -146,8 +148,7 @@ router.get('/', protect, async (req, res) => {
   } catch (error) {
     res.status(500).json({
       success: false,
-      message: 'Server error',
-      error: error.message
+      message: 'Server error'
     });
   }
 });
@@ -183,8 +184,7 @@ router.get('/:id', protect, async (req, res) => {
   } catch (error) {
     res.status(500).json({
       success: false,
-      message: 'Server error',
-      error: error.message
+      message: 'Server error'
     });
   }
 });
@@ -239,9 +239,57 @@ router.put('/:id/approve', protect, authorize('resident', 'security', 'society_a
   } catch (error) {
     res.status(500).json({
       success: false,
-      message: 'Server error',
-      error: error.message
+      message: 'Server error'
     });
+  }
+});
+
+// @route   PUT /api/deliveries/:id/reject
+// @desc    Reject or cancel a delivery that has not reached the gate yet
+// @access  Private (Residents, Security, Admins)
+router.put('/:id/reject', protect, authorize('resident', 'security', 'society_admin'), [
+  body('reason').optional().trim().isLength({ max: 200 })
+], async (req, res) => {
+  try {
+    const delivery = await Delivery.findById(req.params.id);
+    if (!delivery) {
+      return res.status(404).json({ success: false, message: 'Delivery not found' });
+    }
+    if (req.user.role === 'resident' && delivery.residentId.toString() !== req.user.id) {
+      return res.status(403).json({ success: false, message: 'Not authorized to reject this delivery' });
+    }
+    if (req.user.role !== 'resident' && delivery.societyId.toString() !== req.user.societyId?.toString()) {
+      return res.status(403).json({ success: false, message: 'Not authorized' });
+    }
+    if (!['pending', 'approved'].includes(delivery.status)) {
+      return res.status(400).json({ success: false, message: 'This delivery has already been handled and cannot be rejected' });
+    }
+
+    delivery.rejected = true;
+    delivery.rejectedReason = req.body.reason || 'No reason provided';
+    delivery.status = 'rejected';
+    delivery.approved = false;
+    await delivery.save();
+
+    const io = req.app.get('io');
+    if (io) {
+      try {
+        await notifyUser(io, delivery.residentId, {
+          societyId: delivery.societyId,
+          type: 'delivery_approval',
+          title: 'Delivery rejected',
+          message: req.user.role === 'resident' ? 'You cancelled an expected delivery' : 'A delivery for you was turned away at the gate',
+          relatedId: delivery._id,
+          relatedModel: 'Delivery',
+          actionUrl: '/deliveries'
+        });
+      } catch (e) { /* notification failure must not fail the action */ }
+    }
+
+    res.json({ success: true, delivery, message: 'Delivery rejected' });
+  } catch (error) {
+    console.error('Reject delivery error:', error);
+    res.status(500).json({ success: false, message: 'Server error' });
   }
 });
 
@@ -281,6 +329,7 @@ router.put('/:id/check-in', protect, authorize('security', 'society_admin', 'sup
         societyId: delivery.societyId,
         type: 'delivery_entry',
         title: 'Delivery Arrived',
+        sms: true,
         message: `Your delivery has arrived at the gate`,
         relatedId: delivery._id,
         relatedModel: 'Delivery',
@@ -296,8 +345,7 @@ router.put('/:id/check-in', protect, authorize('security', 'society_admin', 'sup
   } catch (error) {
     res.status(500).json({
       success: false,
-      message: 'Server error',
-      error: error.message
+      message: 'Server error'
     });
   }
 });
@@ -309,7 +357,7 @@ router.put('/:id/deliver', protect, authorize('resident', 'security', 'society_a
   body('otp').optional().trim()
 ], async (req, res) => {
   try {
-    const delivery = await Delivery.findById(req.params.id);
+    const delivery = await Delivery.findById(req.params.id).select('+otp');
 
     if (!delivery) {
       return res.status(404).json({
@@ -349,8 +397,7 @@ router.put('/:id/deliver', protect, authorize('resident', 'security', 'society_a
   } catch (error) {
     res.status(500).json({
       success: false,
-      message: 'Server error',
-      error: error.message
+      message: 'Server error'
     });
   }
 });

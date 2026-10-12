@@ -3,7 +3,8 @@ const router = express.Router();
 const { body, validationResult } = require('express-validator');
 const Booking = require('../models/Booking');
 const Society = require('../models/Society');
-const { protect, authorize } = require('../middleware/auth');
+const { protect, authorize , scopeToSociety } = require('../middleware/auth');
+router.param('id', scopeToSociety(require('../models/Booking')));
 const { notifyUser } = require('../utils/notifyUser');
 
 // @route   POST /api/bookings
@@ -110,8 +111,7 @@ router.post('/', protect, authorize('resident'), [
     console.error('Booking creation error:', error);
     res.status(500).json({
       success: false,
-      message: 'Server error',
-      error: error.message
+      message: 'Server error'
     });
   }
 });
@@ -137,11 +137,13 @@ router.get('/', protect, async (req, res) => {
       query.amenity = req.query.amenity;
     }
 
+    if (req.user.role !== 'super_admin') query.societyId = req.user.societyId;
+
     const bookings = await Booking.find(query)
       .populate('residentId', 'name flatNo')
       .populate('approvedBy', 'name')
       .sort({ slotDate: -1, startTime: -1 })
-      .limit(parseInt(req.query.limit) || 50)
+      .limit(Math.min(parseInt(req.query.limit) || 200, 500))
       .skip(parseInt(req.query.skip) || 0);
 
     res.json({
@@ -152,8 +154,7 @@ router.get('/', protect, async (req, res) => {
   } catch (error) {
     res.status(500).json({
       success: false,
-      message: 'Server error',
-      error: error.message
+      message: 'Server error'
     });
   }
 });
@@ -188,8 +189,7 @@ router.get('/availability', protect, [
   } catch (error) {
     res.status(500).json({
       success: false,
-      message: 'Server error',
-      error: error.message
+      message: 'Server error'
     });
   }
 });
@@ -236,8 +236,7 @@ router.put('/:id/approve', protect, authorize('society_admin', 'super_admin'), a
   } catch (error) {
     res.status(500).json({
       success: false,
-      message: 'Server error',
-      error: error.message
+      message: 'Server error'
     });
   }
 });
@@ -285,8 +284,7 @@ router.put('/:id/reject', protect, authorize('society_admin', 'super_admin'), [
   } catch (error) {
     res.status(500).json({
       success: false,
-      message: 'Server error',
-      error: error.message
+      message: 'Server error'
     });
   }
 });
@@ -335,8 +333,7 @@ router.put('/:id/cancel', protect, authorize('resident'), [
   } catch (error) {
     res.status(500).json({
       success: false,
-      message: 'Server error',
-      error: error.message
+      message: 'Server error'
     });
   }
 });

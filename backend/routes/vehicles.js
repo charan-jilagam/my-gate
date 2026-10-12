@@ -2,7 +2,8 @@ const express = require('express');
 const router = express.Router();
 const { body, validationResult } = require('express-validator');
 const Vehicle = require('../models/Vehicle');
-const { protect, authorize, checkSocietyAccess } = require('../middleware/auth');
+const { protect, authorize, checkSocietyAccess , scopeToSociety } = require('../middleware/auth');
+router.param('id', scopeToSociety(require('../models/Vehicle')));
 const { notifyUser } = require('../utils/notifyUser');
 
 // @route   POST /api/vehicles/register
@@ -64,8 +65,7 @@ router.post('/register', protect, authorize('resident'), [
     console.error('Vehicle registration error:', error);
     res.status(500).json({
       success: false,
-      message: 'Server error',
-      error: error.message
+      message: 'Server error'
     });
   }
 });
@@ -89,6 +89,8 @@ router.get('/', protect, async (req, res) => {
       query.isInside = req.query.isInside === 'true';
     }
 
+    if (req.user.role !== 'super_admin') query.societyId = req.user.societyId;
+
     const vehicles = await Vehicle.find(query)
       .populate('residentId', 'name phone flatNo')
       .sort({ createdAt: -1 });
@@ -101,9 +103,71 @@ router.get('/', protect, async (req, res) => {
   } catch (error) {
     res.status(500).json({
       success: false,
-      message: 'Server error',
-      error: error.message
+      message: 'Server error'
     });
+  }
+});
+
+const canManageVehicle = (user, vehicle) =>
+  user.role === 'super_admin' ||
+  (user.role === 'society_admin' && vehicle.societyId.toString() === user.societyId?.toString()) ||
+  (user.role === 'resident' && vehicle.residentId.toString() === user.id);
+
+// @route   PUT /api/vehicles/:id
+// @desc    Edit vehicle details
+// @access  Private (owner, society admin)
+router.put('/:id', protect, authorize('resident', 'society_admin', 'super_admin'), [
+  body('vehicleNumber').optional().trim().notEmpty().withMessage('Vehicle number is required'),
+  body('vehicleType').optional().isIn(['car', 'bike', 'scooter', 'bicycle', 'other']).withMessage('Invalid vehicle type')
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ success: false, errors: errors.array() });
+
+    const vehicle = await Vehicle.findById(req.params.id);
+    if (!vehicle) return res.status(404).json({ success: false, message: 'Vehicle not found' });
+    if (!canManageVehicle(req.user, vehicle)) {
+      return res.status(403).json({ success: false, message: 'Not authorized' });
+    }
+
+    if (req.body.vehicleNumber) {
+      const number = req.body.vehicleNumber.toUpperCase().trim();
+      if (number !== vehicle.vehicleNumber) {
+        const clash = await Vehicle.findOne({ vehicleNumber: number, societyId: vehicle.societyId, _id: { $ne: vehicle._id } });
+        if (clash) return res.status(400).json({ success: false, message: 'Another vehicle already uses that number' });
+        vehicle.vehicleNumber = number;
+      }
+    }
+    ['vehicleType', 'brand', 'model', 'color'].forEach((f) => {
+      if (req.body[f] !== undefined) vehicle[f] = req.body[f];
+    });
+    await vehicle.save();
+
+    res.json({ success: true, vehicle, message: 'Vehicle updated' });
+  } catch (error) {
+    console.error('Edit vehicle error:', error);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// @route   DELETE /api/vehicles/:id
+// @desc    Remove a vehicle
+// @access  Private (owner, society admin)
+router.delete('/:id', protect, authorize('resident', 'society_admin', 'super_admin'), async (req, res) => {
+  try {
+    const vehicle = await Vehicle.findById(req.params.id);
+    if (!vehicle) return res.status(404).json({ success: false, message: 'Vehicle not found' });
+    if (!canManageVehicle(req.user, vehicle)) {
+      return res.status(403).json({ success: false, message: 'Not authorized' });
+    }
+    if (vehicle.isInside) {
+      return res.status(400).json({ success: false, message: 'This vehicle is inside the society right now. Ask the guard to log its exit first.' });
+    }
+    await vehicle.deleteOne();
+    res.json({ success: true, message: 'Vehicle removed' });
+  } catch (error) {
+    console.error('Delete vehicle error:', error);
+    res.status(500).json({ success: false, message: 'Server error' });
   }
 });
 
@@ -136,8 +200,7 @@ router.get('/:id', protect, async (req, res) => {
   } catch (error) {
     res.status(500).json({
       success: false,
-      message: 'Server error',
-      error: error.message
+      message: 'Server error'
     });
   }
 });
@@ -203,8 +266,7 @@ router.post('/:id/entry', protect, authorize('security', 'society_admin', 'super
   } catch (error) {
     res.status(500).json({
       success: false,
-      message: 'Server error',
-      error: error.message
+      message: 'Server error'
     });
   }
 });
@@ -268,8 +330,7 @@ router.post('/:id/exit', protect, authorize('security', 'society_admin', 'super_
   } catch (error) {
     res.status(500).json({
       success: false,
-      message: 'Server error',
-      error: error.message
+      message: 'Server error'
     });
   }
 });
@@ -299,8 +360,7 @@ router.get('/search/:vehicleNumber', protect, authorize('security', 'society_adm
   } catch (error) {
     res.status(500).json({
       success: false,
-      message: 'Server error',
-      error: error.message
+      message: 'Server error'
     });
   }
 });

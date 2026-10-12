@@ -1,12 +1,13 @@
 import { useMemo, useState } from 'react'
 import { QRCodeSVG } from 'qrcode.react'
-import { FiCheck, FiLogIn, FiLogOut, FiPlus, FiUsers, FiX } from 'react-icons/fi'
+import { FiCheck, FiEdit2, FiLogIn, FiLogOut, FiPlus, FiUsers, FiX } from 'react-icons/fi'
 import { useAuth } from '../contexts/AuthContext'
 import api from '../services/api'
 import useApi from '../hooks/useApi'
 import useAction from '../hooks/useAction'
 import { passCode } from '../utils/pass'
-import { DataList, EmptyState, Field, Modal, PageHeader, Spinner, StatusTag, formatDate, titleCase } from '../components/ui'
+import ExportButtons from '../components/ExportButtons'
+import { ConfirmDialog, DataList, EmptyState, Field, Modal, PageHeader, Spinner, StatusTag, formatDate, titleCase } from '../components/ui'
 
 const PURPOSES = ['personal', 'business', 'delivery', 'service', 'other']
 const EMPTY_FORM = { name: '', phone: '', purpose: 'personal', numberOfVisitors: 1, vehicleNumber: '', expectedArrival: '' }
@@ -19,10 +20,21 @@ const FILTERS = [
   { key: 'checked_out', label: 'Left' }
 ]
 
+const EXPORT_COLUMNS = [
+  { header: 'Date', value: (v) => formatDate(v.entryTime || v.expectedArrival || v.createdAt, true) },
+  { header: 'Visitor', value: (v) => v.name },
+  { header: 'Phone', value: (v) => v.phone },
+  { header: 'Visiting', value: (v) => `${v.block ? `${v.block}-` : ''}${v.flatNo || ''}` },
+  { header: 'Resident', value: (v) => v.residentId?.name || '' },
+  { header: 'Purpose', value: (v) => titleCase(v.purpose) },
+  { header: 'People', value: (v) => v.numberOfVisitors || 1 },
+  { header: 'Status', value: (v) => titleCase(v.status) }
+]
+
 const Visitors = () => {
   const { isResident, isSecurity, isAdmin } = useAuth()
   const [filter, setFilter] = useState('all')
-  const { data, loading, error, reload } = useApi('/visitors', { params: { limit: 100 }, select: (d) => d.visitors || [] })
+  const { data, loading, error, reload } = useApi('/visitors', { params: { limit: 500 }, select: (d) => d.visitors || [] })
   const { busy, run } = useAction(reload)
 
   const [inviteOpen, setInviteOpen] = useState(false)
@@ -30,6 +42,8 @@ const Visitors = () => {
   const [formError, setFormError] = useState('')
   const [passFor, setPassFor] = useState(null)
   const [rejecting, setRejecting] = useState(null)
+  const [editing, setEditing] = useState(null)
+  const [cancelling, setCancelling] = useState(null)
   const [reason, setReason] = useState('')
 
   const visitors = useMemo(
@@ -54,12 +68,40 @@ const Visitors = () => {
     else payload.expectedArrival = new Date(payload.expectedArrival).toISOString()
     if (!payload.vehicleNumber) delete payload.vehicleNumber
 
+    if (editing) {
+      const done = await run('invite', () => api.put(`/visitors/${editing._id}`, { ...payload, expectedArrival: payload.expectedArrival || null }), 'Invitation updated')
+      if (done) {
+        setInviteOpen(false)
+        setEditing(null)
+        setForm(EMPTY_FORM)
+      }
+      return
+    }
     const res = await run('invite', () => api.post('/visitors/invite', payload), 'Invitation sent. Your guest can now enter.')
     if (res) {
       setInviteOpen(false)
       setForm(EMPTY_FORM)
       setPassFor(res.data.visitor)
     }
+  }
+
+  const toLocalInput = (d) => {
+    if (!d) return ''
+    const dt = new Date(d)
+    return new Date(dt.getTime() - dt.getTimezoneOffset() * 60000).toISOString().slice(0, 16)
+  }
+  const openEdit = (v) => {
+    setEditing(v)
+    setFormError('')
+    setForm({
+      name: v.name || '',
+      phone: v.phone || '',
+      purpose: v.purpose || 'personal',
+      numberOfVisitors: v.numberOfVisitors || 1,
+      vehicleNumber: v.vehicleNumber || '',
+      expectedArrival: toLocalInput(v.expectedArrival)
+    })
+    setInviteOpen(true)
   }
 
   const columns = [
@@ -103,6 +145,18 @@ const Visitors = () => {
                 </button>
               </>
             )}
+            {isResident && ['pending', 'approved'].includes(v.status) && (
+              <>
+                <button className="btn-secondary btn-sm" disabled={isBusy} onClick={() => openEdit(v)}>
+                  <FiEdit2 size={14} /> Edit
+                </button>
+                {v.status === 'approved' && (
+                  <button className="btn-secondary btn-sm" disabled={isBusy} onClick={() => setCancelling(v)}>
+                    <FiX size={14} /> Cancel
+                  </button>
+                )}
+              </>
+            )}
             {isResident && ['approved', 'checked_in'].includes(v.status) && (
               <button className="btn-secondary btn-sm" onClick={() => setPassFor(v)}>
                 Show pass
@@ -134,11 +188,14 @@ const Visitors = () => {
             : 'Everyone who has been invited or logged at the gate.'
         }
         action={
-          isResident && (
-            <button className="btn-primary" onClick={() => setInviteOpen(true)}>
-              <FiPlus size={16} /> Invite visitor
-            </button>
-          )
+          <div className="flex flex-wrap items-center gap-2">
+            <ExportButtons filename="visitors" title="Visitors" rows={visitors} columns={EXPORT_COLUMNS} />
+            {isResident && (
+              <button className="btn-primary" onClick={() => { setEditing(null); setForm(EMPTY_FORM); setFormError(''); setInviteOpen(true) }}>
+                <FiPlus size={16} /> Invite visitor
+              </button>
+            )}
+          </div>
         }
       />
 
@@ -183,16 +240,16 @@ const Visitors = () => {
 
       <Modal
         open={inviteOpen}
-        onClose={() => setInviteOpen(false)}
-        title="Invite visitor"
+        onClose={() => { setInviteOpen(false); setEditing(null) }}
+        title={editing ? 'Edit invitation' : 'Invite visitor'}
         footer={
           <>
-            <button className="btn-secondary" onClick={() => setInviteOpen(false)}>
+            <button className="btn-secondary" onClick={() => { setInviteOpen(false); setEditing(null) }}>
               Cancel
             </button>
             <button className="btn-primary" form="invite-form" type="submit" disabled={busy === 'invite'}>
               {busy === 'invite' && <Spinner className="h-4 w-4" />}
-              Send invitation
+              {editing ? 'Save changes' : 'Send invitation'}
             </button>
           </>
         }
@@ -229,6 +286,20 @@ const Visitors = () => {
           {formError && <p role="alert" className="text-sm font-medium text-danger">{formError}</p>}
         </form>
       </Modal>
+
+      <ConfirmDialog
+        open={!!cancelling}
+        title="Cancel this invitation?"
+        text={`${cancelling?.name}'s pass will stop working at the gate.`}
+        confirmLabel="Cancel invitation"
+        danger
+        busy={busy === cancelling?._id}
+        onClose={() => setCancelling(null)}
+        onConfirm={async () => {
+          const ok = await run(cancelling._id, () => api.put(`/visitors/${cancelling._id}/reject`, { reason: 'Cancelled by resident' }), 'Invitation cancelled')
+          if (ok) setCancelling(null)
+        }}
+      />
 
       <Modal open={!!passFor} onClose={() => setPassFor(null)} title="Gate pass" size="sm" footer={<button className="btn-primary" onClick={() => setPassFor(null)}>Done</button>}>
         {passFor && (

@@ -1,9 +1,11 @@
 import { useMemo, useState } from 'react'
 import toast from 'react-hot-toast'
-import { FiAlertTriangle, FiCreditCard, FiFileText, FiPlus } from 'react-icons/fi'
+import { FiAlertTriangle, FiCheckCircle, FiCreditCard, FiFileText, FiPlus } from 'react-icons/fi'
 import { useAuth } from '../contexts/AuthContext'
 import api from '../services/api'
 import useApi from '../hooks/useApi'
+import ExportButtons from '../components/ExportButtons'
+import { downloadReceiptPdf } from '../utils/receipt'
 import { openCheckout } from '../utils/razorpay'
 import { DataList, EmptyState, Field, Modal, PageHeader, Spinner, StatusTag, errorMessage, formatDate, formatINR, titleCase } from '../components/ui'
 
@@ -11,9 +13,33 @@ const TYPES = ['maintenance', 'fine', 'amenity_booking', 'other']
 const thisMonth = () => new Date().toISOString().slice(0, 7)
 const EMPTY_FORM = { amount: '', type: 'maintenance', month: thisMonth(), description: '' }
 
+const EXPORT_COLUMNS = [
+  { header: 'Date', value: (p) => formatDate(p.paidAt || p.createdAt) },
+  { header: 'Resident', value: (p) => p.residentId?.name || '' },
+  { header: 'Flat', value: (p) => `${p.block ? `${p.block}-` : ''}${p.flatNo || ''}` },
+  { header: 'Type', value: (p) => titleCase(p.type) },
+  { header: 'Month', value: (p) => p.month || '' },
+  { header: 'Amount (Rs.)', value: (p) => p.amount },
+  { header: 'Method', value: (p) => (p.status === 'completed' ? titleCase(p.paymentMethod || 'online') : '') },
+  { header: 'Reference', value: (p) => p.transactionId || p.razorpayPaymentId || '' },
+  { header: 'Status', value: (p) => titleCase(p.status) }
+]
+
 const Payments = () => {
   const { user, isResident } = useAuth()
-  const { data, loading, error, reload } = useApi('/payments', { params: { limit: 100 }, select: (d) => d.payments || [] })
+  const isSocAdmin = user?.role === 'society_admin' || user?.role === 'super_admin'
+  const isSuper = user?.role === 'super_admin'
+  const { data: societies } = useApi('/societies', { enabled: isSuper, live: false, select: (d) => d.societies || [] })
+  const [month, setMonth] = useState('')
+  const { data, loading, error, reload } = useApi('/payments', {
+    params: { limit: 500, ...(!isResident && month ? { month } : {}) },
+    select: (d) => d.payments || []
+  })
+  const summary = useApi('/payments/admin/summary', {
+    enabled: !isResident,
+    params: month ? { month } : {},
+    select: (d) => d.summary
+  })
   const { data: config } = useApi('/payments/config', { live: false })
   const online = config?.enabled !== false
 
@@ -24,9 +50,65 @@ const Payments = () => {
   const [receipt, setReceipt] = useState(null)
 
   const totals = useMemo(() => {
+    if (!isResident && summary.data) return { paid: summary.data.collected, pending: summary.data.pending }
     const sum = (status) => (data || []).filter((p) => p.status === status).reduce((n, p) => n + (p.amount || 0), 0)
     return { paid: sum('completed'), pending: sum('pending') }
-  }, [data])
+  }, [data, isResident, summary.data])
+
+  // Admin: create dues for every approved resident
+  const [duesOpen, setDuesOpen] = useState(false)
+  const [dues, setDues] = useState({ societyId: '', type: 'maintenance', amount: '', month: thisMonth(), dueDate: '', description: '' })
+  const [duesError, setDuesError] = useState('')
+  const createDues = async (e) => {
+    e.preventDefault()
+    setDuesError('')
+    const amount = parseFloat(dues.amount)
+    if (!amount || amount < 1) return setDuesError('Enter an amount of at least ₹1.')
+    setBusy('dues')
+    try {
+      const { data: res } = await api.post('/payments/generate', {
+        societyId: isSuper ? dues.societyId || societies?.[0]?._id : undefined,
+        type: dues.type,
+        amount,
+        month: dues.type === 'maintenance' ? dues.month : undefined,
+        dueDate: dues.dueDate || undefined,
+        description: dues.description.trim() || undefined
+      })
+      toast.success(res.message)
+      setDuesOpen(false)
+      reload()
+      summary.reload()
+    } catch (err) {
+      setDuesError(errorMessage(err, 'Could not create the dues.'))
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  // Admin: record cash / cheque / UPI received outside the app
+  const [recording, setRecording] = useState(null)
+  const [rec, setRec] = useState({ paymentMethod: 'cash', reference: '' })
+  const [recError, setRecError] = useState('')
+  const recordPayment = async (e) => {
+    e.preventDefault()
+    setRecError('')
+    setBusy('rec')
+    try {
+      await api.put(`/payments/${recording._id}/mark-paid`, {
+        paymentMethod: rec.paymentMethod,
+        reference: rec.reference.trim() || undefined
+      })
+      toast.success('Payment recorded')
+      setRecording(null)
+      setRec({ paymentMethod: 'cash', reference: '' })
+      reload()
+      summary.reload()
+    } catch (err) {
+      setRecError(errorMessage(err, 'Could not record the payment.'))
+    } finally {
+      setBusy(null)
+    }
+  }
 
   // Opens the Razorpay window for an order, then confirms the signed result with the server.
   const pay = async (payment, order) => {
@@ -80,10 +162,16 @@ const Payments = () => {
   }
 
   const payPending = async (p) => {
-    if (!p.razorpayOrderId) return toast.error('This payment has no open order. Start a new payment instead.')
     setBusy(p._id)
-    await pay(p, { id: p.razorpayOrderId, amount: Math.round(p.amount * 100), currency: 'INR' })
-    setBusy(null)
+    try {
+      const { data: res } = await api.post(`/payments/${p._id}/order`)
+      await pay(p, { ...res.order, keyId: res.keyId })
+    } catch (err) {
+      toast.error(errorMessage(err, 'Could not start the payment.'))
+      reload()
+    } finally {
+      setBusy(null)
+    }
   }
 
   const columns = [
@@ -101,6 +189,23 @@ const Payments = () => {
     { key: 'amount', header: 'Amount', className: 'md:text-right font-semibold', render: (p) => formatINR(p.amount) },
     { key: 'date', header: 'Date', render: (p) => formatDate(p.paidAt || p.createdAt) },
     { key: 'status', header: 'Status', render: (p) => <StatusTag status={p.status} /> },
+    ...(!isResident && isSocAdmin
+      ? [
+          {
+            key: 'actions',
+            header: '',
+            className: 'md:text-right',
+            render: (p) =>
+              p.status === 'pending' ? (
+                <div className="flex justify-end">
+                  <button className="btn-secondary btn-sm" onClick={() => setRecording(p)}>
+                    <FiCheckCircle size={14} /> Record payment
+                  </button>
+                </div>
+              ) : null
+          }
+        ]
+      : []),
     ...(isResident
       ? [
           {
@@ -131,13 +236,20 @@ const Payments = () => {
     <>
       <PageHeader
         title="Payments"
-        subtitle={isResident ? 'Pay maintenance and other dues online. Every payment is kept on record.' : 'Payments made by residents.'}
+        subtitle={isResident ? 'Pay maintenance and other dues online. Every payment is kept on record.' : 'Create dues, record cash or cheque payments and see what has been collected.'}
         action={
-          isResident && (
-            <button className="btn-primary" disabled={!online} onClick={() => setOpen(true)}>
-              <FiPlus size={16} /> Make payment
-            </button>
-          )
+          <div className="flex flex-wrap items-center gap-2">
+            <ExportButtons filename="payments" title="Payments" rows={data} columns={EXPORT_COLUMNS} />
+            {isResident ? (
+              <button className="btn-primary" disabled={!online} onClick={() => setOpen(true)}>
+                <FiPlus size={16} /> Make payment
+              </button>
+            ) : isSocAdmin ? (
+              <button className="btn-primary" onClick={() => setDuesOpen(true)}>
+                <FiPlus size={16} /> Create dues
+              </button>
+            ) : null}
+          </div>
         }
       />
 
@@ -148,9 +260,18 @@ const Payments = () => {
         </p>
       )}
 
+      {!isResident && (
+        <div className="mb-4 flex flex-wrap items-end gap-3">
+          <Field label="Month" htmlFor="pay-filter-month" className="w-44">
+            <input id="pay-filter-month" type="month" className="input" value={month} onChange={(e) => setMonth(e.target.value)} />
+          </Field>
+          {month && <button className="btn-secondary btn-sm mb-1" onClick={() => setMonth('')}>All months</button>}
+        </div>
+      )}
+
       <div className="mb-5 grid grid-cols-2 gap-3 sm:max-w-md">
         <div className="panel px-4 py-3">
-          <p className="text-xs text-muted">Paid</p>
+          <p className="text-xs text-muted">{isResident ? 'Paid' : 'Collected'}</p>
           <p className="font-display text-xl font-bold text-ok">{formatINR(totals.paid)}</p>
         </div>
         <div className="panel px-4 py-3">
@@ -206,6 +327,92 @@ const Payments = () => {
       </Modal>
 
       <Modal
+        open={duesOpen}
+        onClose={() => setDuesOpen(false)}
+        title="Create dues"
+        footer={
+          <>
+            <button className="btn-secondary" onClick={() => setDuesOpen(false)}>Cancel</button>
+            <button className="btn-primary" form="dues-form" type="submit" disabled={busy === 'dues'}>
+              {busy === 'dues' && <Spinner className="h-4 w-4" />}
+              Bill all residents
+            </button>
+          </>
+        }
+      >
+        <form id="dues-form" onSubmit={createDues} className="space-y-4">
+          {isSuper && (
+            <Field label="Society" htmlFor="dues-society">
+              <select id="dues-society" className="input" value={dues.societyId || societies?.[0]?._id || ''} onChange={(e) => setDues({ ...dues, societyId: e.target.value })}>
+                {(societies || []).map((s) => <option key={s._id} value={s._id}>{s.name}</option>)}
+              </select>
+            </Field>
+          )}
+          <p className="text-sm text-muted">Every approved resident gets this due and a notification. Flats already billed for the same month are skipped.</p>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field label="Amount per flat (₹)" htmlFor="dues-amount">
+              <input id="dues-amount" type="number" min="1" step="0.01" required className="input" value={dues.amount} onChange={(e) => setDues({ ...dues, amount: e.target.value })} />
+            </Field>
+            <Field label="Type" htmlFor="dues-type">
+              <select id="dues-type" className="input" value={dues.type} onChange={(e) => setDues({ ...dues, type: e.target.value })}>
+                {['maintenance', 'fine', 'other'].map((t) => <option key={t} value={t}>{titleCase(t)}</option>)}
+              </select>
+            </Field>
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2">
+            {dues.type === 'maintenance' && (
+              <Field label="For month" htmlFor="dues-month">
+                <input id="dues-month" type="month" required className="input" value={dues.month} onChange={(e) => setDues({ ...dues, month: e.target.value })} />
+              </Field>
+            )}
+            <Field label="Due date" htmlFor="dues-date" hint="Optional">
+              <input id="dues-date" type="date" className="input" value={dues.dueDate} onChange={(e) => setDues({ ...dues, dueDate: e.target.value })} />
+            </Field>
+          </div>
+          <Field label="Note" htmlFor="dues-desc" hint="Optional">
+            <input id="dues-desc" maxLength={200} className="input" value={dues.description} onChange={(e) => setDues({ ...dues, description: e.target.value })} />
+          </Field>
+          {duesError && <p role="alert" className="text-sm font-medium text-danger">{duesError}</p>}
+        </form>
+      </Modal>
+
+      <Modal
+        open={!!recording}
+        onClose={() => setRecording(null)}
+        title="Record a payment"
+        size="sm"
+        footer={
+          <>
+            <button className="btn-secondary" onClick={() => setRecording(null)}>Cancel</button>
+            <button className="btn-ok" form="record-form" type="submit" disabled={busy === 'rec'}>
+              {busy === 'rec' && <Spinner className="h-4 w-4" />}
+              Mark as paid
+            </button>
+          </>
+        }
+      >
+        {recording && (
+          <form id="record-form" onSubmit={recordPayment} className="space-y-4">
+            <p className="text-sm text-muted">
+              {formatINR(recording.amount)} from {recording.residentId?.name || 'resident'} ({recording.flatNo}) for {titleCase(recording.type)}{recording.month ? ` · ${recording.month}` : ''}.
+            </p>
+            <Field label="Received by" htmlFor="rec-method">
+              <select id="rec-method" className="input" value={rec.paymentMethod} onChange={(e) => setRec({ ...rec, paymentMethod: e.target.value })}>
+                <option value="cash">Cash</option>
+                <option value="cheque">Cheque</option>
+                <option value="upi">UPI (outside the app)</option>
+                <option value="card">Card</option>
+              </select>
+            </Field>
+            <Field label="Reference" htmlFor="rec-ref" hint="Optional. Cheque number or UPI transaction ID.">
+              <input id="rec-ref" maxLength={80} className="input" value={rec.reference} onChange={(e) => setRec({ ...rec, reference: e.target.value })} />
+            </Field>
+            {recError && <p role="alert" className="text-sm font-medium text-danger">{recError}</p>}
+          </form>
+        )}
+      </Modal>
+
+      <Modal
         open={!!receipt}
         onClose={() => setReceipt(null)}
         title="Payment receipt"
@@ -213,7 +420,7 @@ const Payments = () => {
         footer={
           <>
             <button className="btn-secondary" onClick={() => setReceipt(null)}>Close</button>
-            <button className="btn-primary" onClick={() => window.print()}>Print</button>
+            <button className="btn-primary" onClick={() => downloadReceiptPdf(receipt, user?.name).catch(() => toast.error('Could not create the PDF.'))}>Download PDF</button>
           </>
         }
       >
@@ -223,6 +430,7 @@ const Payments = () => {
               ['Amount', formatINR(receipt.amount)],
               ['For', `${titleCase(receipt.type)}${receipt.month ? ` · ${receipt.month}` : ''}`],
               ['Paid on', formatDate(receipt.paidAt, true)],
+              ['Method', titleCase(receipt.paymentMethod || 'online')],
               ['Flat', `${receipt.block ? `${receipt.block}-` : ''}${receipt.flatNo || '-'}`],
               ['Transaction', receipt.transactionId || receipt.razorpayPaymentId || '-']
             ].map(([k, v]) => (

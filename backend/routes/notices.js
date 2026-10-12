@@ -2,9 +2,17 @@ const express = require('express');
 const router = express.Router();
 const { body, validationResult } = require('express-validator');
 const Notice = require('../models/Notice');
-const { protect, authorize, checkSocietyAccess } = require('../middleware/auth');
+const { protect, authorize, checkSocietyAccess , scopeToSociety } = require('../middleware/auth');
+router.param('id', scopeToSociety(require('../models/Notice')));
 const { notifyUsers } = require('../utils/notifyUser');
 const User = require('../models/User');
+
+// A flat can be written as "101" or "A-101"; both match a resident in block A, flat 101.
+const matchesFlat = (user, flats) => {
+  const flat = String(user.flatNo || '').toUpperCase();
+  const full = `${String(user.block || '').toUpperCase()}-${flat}`;
+  return flats.includes(flat) || flats.includes(full);
+};
 
 // @route   POST /api/notices
 // @desc    Create a notice
@@ -14,7 +22,9 @@ router.post('/', protect, authorize('society_admin', 'super_admin'), [
   body('content').trim().notEmpty().withMessage('Content is required'),
   body('type').isIn(['notice', 'announcement', 'poll', 'event', 'maintenance']).withMessage('Invalid notice type'),
   body('priority').optional().isIn(['low', 'medium', 'high', 'urgent']),
-  body('targetAudience').optional().isIn(['all', 'residents', 'owners', 'tenants', 'specific_blocks'])
+  body('targetAudience').optional().isIn(['all', 'residents', 'owners', 'tenants', 'specific_blocks', 'specific_flats']),
+  body('targetBlocks').optional().isArray({ max: 50 }),
+  body('targetFlats').optional().isArray({ max: 500 })
 ], async (req, res) => {
   try {
     const errors = validationResult(req);
@@ -40,6 +50,16 @@ router.post('/', protect, authorize('society_admin', 'super_admin'), [
       societyId: bodySocietyId
     } = req.body;
 
+    const clean = (list) => [...new Set((Array.isArray(list) ? list : []).map((x) => String(x).trim().toUpperCase()).filter(Boolean))];
+    const blocks = targetAudience === 'specific_blocks' ? clean(targetBlocks) : [];
+    const flats = targetAudience === 'specific_flats' ? clean(targetFlats) : [];
+    if (targetAudience === 'specific_blocks' && !blocks.length) {
+      return res.status(400).json({ success: false, message: 'Enter at least one block' });
+    }
+    if (targetAudience === 'specific_flats' && !flats.length) {
+      return res.status(400).json({ success: false, message: 'Enter at least one flat' });
+    }
+
     const societyId = req.user.role === 'super_admin' ? bodySocietyId : req.user.societyId;
     if (!societyId) {
       return res.status(400).json({ success: false, message: 'Society is required' });
@@ -54,8 +74,8 @@ router.post('/', protect, authorize('society_admin', 'super_admin'), [
       category: category || 'general',
       attachments: attachments || [],
       targetAudience: targetAudience || 'all',
-      targetBlocks: targetBlocks || [],
-      targetFlats: targetFlats || [],
+      targetBlocks: blocks,
+      targetFlats: flats,
       pollOptions: type === 'poll' ? pollOptions : undefined,
       pollEndDate: pollEndDate ? new Date(pollEndDate) : undefined,
       eventDate: eventDate ? new Date(eventDate) : undefined,
@@ -69,18 +89,12 @@ router.post('/', protect, authorize('society_admin', 'super_admin'), [
     // Notify all relevant users
     const io = req.app.get('io');
     if (io) {
-      let targetUsers = [];
-
-      if (targetAudience === 'all') {
-        targetUsers = await User.find({ societyId, role: 'resident' });
-      } else if (targetAudience === 'residents') {
-        targetUsers = await User.find({ societyId, role: 'resident' });
-      } else if (targetAudience === 'specific_blocks' && targetBlocks.length > 0) {
-        targetUsers = await User.find({
-          societyId,
-          role: 'resident',
-          block: { $in: targetBlocks }
-        });
+      // Residents of the society, narrowed by block or flat when the notice is targeted.
+      let targetUsers = await User.find({ societyId, role: 'resident', isApproved: true, isActive: true }).select('_id block flatNo');
+      if (targetAudience === 'specific_blocks') {
+        targetUsers = targetUsers.filter((u) => blocks.includes(String(u.block || '').toUpperCase()));
+      } else if (targetAudience === 'specific_flats') {
+        targetUsers = targetUsers.filter((u) => matchesFlat(u, flats));
       }
 
       const userIds = targetUsers.map(u => u._id);
@@ -105,8 +119,7 @@ router.post('/', protect, authorize('society_admin', 'super_admin'), [
     console.error('Notice creation error:', error);
     res.status(500).json({
       success: false,
-      message: 'Server error',
-      error: error.message
+      message: 'Server error'
     });
   }
 });
@@ -126,11 +139,15 @@ router.get('/', protect, async (req, res) => {
       query.societyId = req.user.societyId;
     }
 
-    // Filter expired notices
-    query.$or = [
-      { expiresAt: { $exists: false } },
-      { expiresAt: null },
-      { expiresAt: { $gt: new Date() } }
+    // Not expired, and (for residents) meant for them: everyone, their block, or their flat.
+    query.$and = [
+      {
+        $or: [
+          { expiresAt: { $exists: false } },
+          { expiresAt: null },
+          { expiresAt: { $gt: new Date() } }
+        ]
+      }
     ];
 
     if (req.query.type) {
@@ -141,20 +158,24 @@ router.get('/', protect, async (req, res) => {
       query.category = req.query.category;
     }
 
-    // Filter by target audience
     if (req.user.role === 'resident') {
-      query.$or.push(
-        { targetAudience: 'all' },
-        { targetAudience: 'residents' },
-        { targetBlocks: { $in: [req.user.block] } },
-        { targetFlats: { $in: [req.user.flatNo] } }
-      );
+      const block = String(req.user.block || '').toUpperCase();
+      const flat = String(req.user.flatNo || '').toUpperCase();
+      query.$and.push({
+        $or: [
+          { targetAudience: { $in: ['all', 'residents', 'owners', 'tenants'] } },
+          { targetAudience: 'specific_blocks', targetBlocks: block },
+          { targetAudience: 'specific_flats', targetFlats: { $in: [flat, `${block}-${flat}`] } }
+        ]
+      });
     }
+
+    if (req.user.role !== 'super_admin') query.societyId = req.user.societyId;
 
     const notices = await Notice.find(query)
       .populate('createdBy', 'name')
       .sort({ createdAt: -1 })
-      .limit(parseInt(req.query.limit) || 50)
+      .limit(Math.min(parseInt(req.query.limit) || 200, 500))
       .skip(parseInt(req.query.skip) || 0);
 
     res.json({
@@ -165,8 +186,7 @@ router.get('/', protect, async (req, res) => {
   } catch (error) {
     res.status(500).json({
       success: false,
-      message: 'Server error',
-      error: error.message
+      message: 'Server error'
     });
   }
 });
@@ -207,8 +227,7 @@ router.get('/:id', protect, async (req, res) => {
   } catch (error) {
     res.status(500).json({
       success: false,
-      message: 'Server error',
-      error: error.message
+      message: 'Server error'
     });
   }
 });
@@ -280,8 +299,7 @@ router.post('/:id/vote', protect, authorize('resident'), [
   } catch (error) {
     res.status(500).json({
       success: false,
-      message: 'Server error',
-      error: error.message
+      message: 'Server error'
     });
   }
 });
@@ -325,8 +343,7 @@ router.put('/:id', protect, authorize('society_admin', 'super_admin'), async (re
   } catch (error) {
     res.status(500).json({
       success: false,
-      message: 'Server error',
-      error: error.message
+      message: 'Server error'
     });
   }
 });
@@ -355,8 +372,7 @@ router.delete('/:id', protect, authorize('society_admin', 'super_admin'), async 
   } catch (error) {
     res.status(500).json({
       success: false,
-      message: 'Server error',
-      error: error.message
+      message: 'Server error'
     });
   }
 });

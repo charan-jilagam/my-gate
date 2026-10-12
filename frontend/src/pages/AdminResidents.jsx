@@ -1,10 +1,16 @@
 import { useMemo, useState } from 'react'
-import { FiCheck, FiSearch, FiUsers } from 'react-icons/fi'
+import { FiCheck, FiSearch, FiSlash, FiUserCheck, FiUsers, FiX } from 'react-icons/fi'
 import { useAuth } from '../contexts/AuthContext'
 import api from '../services/api'
 import useApi from '../hooks/useApi'
 import useAction from '../hooks/useAction'
-import { DataList, EmptyState, Field, PageHeader, StatusTag, formatDate } from '../components/ui'
+import ExportButtons from '../components/ExportButtons'
+import { ConfirmDialog, DataList, EmptyState, Field, Modal, PageHeader, StatusTag, formatDate, titleCase } from '../components/ui'
+
+const ROLE_LABEL = { resident: 'Resident', security: 'Guard', staff: 'Staff', vendor: 'Vendor' }
+
+// One word for where a person stands: waiting, rejected, active or deactivated.
+const stateOf = (u) => (!u.isApproved ? (u.rejectedAt ? 'rejected' : 'pending') : u.isActive === false ? 'deactivated' : 'active')
 
 const flatOf = (u) => `${u.block ? `${u.block}-` : ''}${u.flatNo || '-'}`
 
@@ -33,6 +39,10 @@ const AdminResidents = () => {
 
   const approve = (u) => run(u._id, () => api.put(`/users/approve/${u._id}`), `${u.name} approved`)
 
+  const [deactivating, setDeactivating] = useState(null)
+  const [rejecting, setRejecting] = useState(null)
+  const [reason, setReason] = useState('')
+
   const columns = [
     {
       key: 'name',
@@ -44,32 +54,81 @@ const AdminResidents = () => {
         </div>
       )
     },
-    { key: 'flat', header: 'Flat', render: flatOf },
+    { key: 'role', header: tab === 'pending' ? 'Signed up as' : 'Role', render: (u) => ROLE_LABEL[u.role] || titleCase(u.role) },
+    { key: 'flat', header: 'Flat', render: (u) => (u.flatNo ? flatOf(u) : '-') },
     { key: 'phone', header: 'Phone', render: (u) => u.phone },
     { key: 'joined', header: 'Registered', render: (u) => formatDate(u.createdAt) },
-    ...(tab === 'all' ? [{ key: 'status', header: 'Status', render: (u) => <StatusTag status={u.isApproved ? 'approved' : 'pending'} /> }] : []),
+    ...(tab === 'all' ? [{ key: 'status', header: 'Status', render: (u) => <StatusTag status={stateOf(u)} /> }] : []),
     {
       key: 'actions',
       header: '',
       className: 'md:text-right',
-      render: (u) =>
-        tab === 'pending' || !u.isApproved ? (
-          <button className="btn-ok btn-sm" disabled={busy === u._id} onClick={() => approve(u)}>
-            <FiCheck size={14} /> Approve
-          </button>
-        ) : null
+      render: (u) => {
+        const state = stateOf(u)
+        if (state === 'pending')
+          return (
+            <div className="flex flex-wrap justify-end gap-2">
+              <button className="btn-ok btn-sm" disabled={busy === u._id} onClick={() => approve(u)}>
+                <FiCheck size={14} /> Approve
+              </button>
+              <button className="btn-secondary btn-sm" disabled={busy === u._id} onClick={() => setRejecting(u)}>
+                <FiX size={14} /> Reject
+              </button>
+            </div>
+          )
+        if (state === 'rejected')
+          return (
+            <div className="flex justify-end">
+              <button className="btn-ok btn-sm" disabled={busy === u._id} onClick={() => approve(u)}>
+                <FiCheck size={14} /> Approve instead
+              </button>
+            </div>
+          )
+        return (
+          <div className="flex justify-end">
+            {state === 'active' ? (
+              <button className="btn-secondary btn-sm" disabled={busy === u._id} onClick={() => setDeactivating(u)}>
+                <FiSlash size={14} /> Deactivate
+              </button>
+            ) : (
+              <button className="btn-secondary btn-sm" disabled={busy === u._id} onClick={() => run(u._id, () => api.put(`/users/${u._id}/active`, { active: true }), `${u.name} can sign in again`)}>
+                <FiUserCheck size={14} /> Reactivate
+              </button>
+            )}
+          </div>
+        )
+      }
     }
   ]
 
   return (
     <>
-      <PageHeader title="Residents" subtitle="Approve new residents and see who lives in your society." />
+      <PageHeader
+        title="People"
+        subtitle="Approve or reject new sign-ups, and see who lives in your society."
+        action={
+          <ExportButtons
+            filename="people"
+            title="People"
+            rows={rows}
+            columns={[
+              { header: 'Name', value: (u) => u.name },
+              { header: 'Role', value: (u) => ROLE_LABEL[u.role] || titleCase(u.role) },
+              { header: 'Email', value: (u) => u.email },
+              { header: 'Phone', value: (u) => u.phone },
+              { header: 'Flat', value: (u) => (u.flatNo ? flatOf(u) : '') },
+              { header: 'Registered', value: (u) => formatDate(u.createdAt) },
+              { header: 'Status', value: (u) => titleCase(stateOf(u)) }
+            ]}
+          />
+        }
+      />
 
       <div className="mb-4 flex flex-wrap items-center gap-3">
         <div className="flex gap-1 rounded-lg bg-sunken p-1" role="tablist" aria-label="Resident lists">
           {[
             { key: 'pending', label: `Waiting for approval${pending.data?.length ? ` (${pending.data.length})` : ''}` },
-            { key: 'all', label: 'All residents' }
+            { key: 'all', label: 'Everyone' }
           ].map((t) => (
             <button key={t.key} role="tab" aria-selected={tab === t.key} onClick={() => setTab(t.key)}
               className={`rounded-md px-3 py-1.5 text-sm font-semibold transition-colors ${tab === t.key ? 'bg-surface shadow-sm' : 'text-muted hover:text-ink'}`}>
@@ -99,11 +158,57 @@ const AdminResidents = () => {
         empty={
           <EmptyState
             icon={FiUsers}
-            title={query ? 'No residents match that search' : tab === 'pending' ? 'No one is waiting for approval' : 'No residents yet'}
-            text={tab === 'pending' && !query ? 'New sign-ups from residents will appear here for you to approve.' : undefined}
+            title={query ? 'No one matches that search' : tab === 'pending' ? 'No one is waiting for approval' : 'No residents yet'}
+            text={tab === 'pending' && !query ? 'Residents, guards and staff who sign up will appear here for you to approve.' : undefined}
           />
         }
       />
+
+      <ConfirmDialog
+        open={!!deactivating}
+        title="Deactivate this account?"
+        text={`${deactivating?.name} will be signed out and cannot sign in until you reactivate them. Their records are kept.`}
+        confirmLabel="Deactivate"
+        danger
+        busy={busy === deactivating?._id}
+        onClose={() => setDeactivating(null)}
+        onConfirm={async () => {
+          const ok = await run(deactivating._id, () => api.put(`/users/${deactivating._id}/active`, { active: false }), `${deactivating.name} deactivated`)
+          if (ok) setDeactivating(null)
+        }}
+      />
+
+      <Modal
+        open={!!rejecting}
+        onClose={() => setRejecting(null)}
+        title="Reject this sign-up?"
+        size="sm"
+        footer={
+          <>
+            <button className="btn-secondary" onClick={() => setRejecting(null)}>Cancel</button>
+            <button
+              className="btn-danger"
+              disabled={busy === rejecting?._id}
+              onClick={async () => {
+                const ok = await run(rejecting._id, () => api.put(`/users/reject/${rejecting._id}`, { reason: reason.trim() || undefined }), `${rejecting.name} rejected`)
+                if (ok) {
+                  setRejecting(null)
+                  setReason('')
+                }
+              }}
+            >
+              Reject sign-up
+            </button>
+          </>
+        }
+      >
+        <p className="mb-3 text-sm text-muted">
+          {rejecting?.name} will not be able to sign in. They will see your reason the next time they try.
+        </p>
+        <Field label="Reason" htmlFor="reject-reason" hint="Optional. For example: flat number not found.">
+          <input id="reject-reason" maxLength={200} className="input" value={reason} onChange={(e) => setReason(e.target.value)} />
+        </Field>
+      </Modal>
     </>
   )
 }

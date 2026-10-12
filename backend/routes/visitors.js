@@ -2,7 +2,8 @@ const express = require('express');
 const router = express.Router();
 const { body, validationResult } = require('express-validator');
 const Visitor = require('../models/Visitor');
-const { protect, authorize, checkSocietyAccess } = require('../middleware/auth');
+const { protect, authorize, checkSocietyAccess , scopeToSociety } = require('../middleware/auth');
+router.param('id', scopeToSociety(require('../models/Visitor')));
 const { generateQRCode } = require('../utils/generateQR');
 const { notifyUser } = require('../utils/notifyUser');
 const crypto = require('crypto');
@@ -103,8 +104,7 @@ router.post('/invite', protect, authorize('resident'), [
     console.error('Visitor invite error:', error);
     res.status(500).json({
       success: false,
-      message: 'Server error',
-      error: error.message
+      message: 'Server error'
     });
   }
 });
@@ -147,7 +147,7 @@ router.get('/', protect, async (req, res) => {
       .populate('approvedBy', 'name')
       .populate('loggedBy', 'name')
       .sort({ createdAt: -1 })
-      .limit(parseInt(req.query.limit) || 50)
+      .limit(Math.min(parseInt(req.query.limit) || 200, 500))
       .skip(parseInt(req.query.skip) || 0);
 
     res.json({
@@ -158,8 +158,7 @@ router.get('/', protect, async (req, res) => {
   } catch (error) {
     res.status(500).json({
       success: false,
-      message: 'Server error',
-      error: error.message
+      message: 'Server error'
     });
   }
 });
@@ -196,9 +195,47 @@ router.get('/:id', protect, async (req, res) => {
   } catch (error) {
     res.status(500).json({
       success: false,
-      message: 'Server error',
-      error: error.message
+      message: 'Server error'
     });
+  }
+});
+
+// @route   PUT /api/visitors/:id
+// @desc    Edit an invitation that has not been used yet
+// @access  Private (Residents, own visitors)
+router.put('/:id', protect, authorize('resident'), [
+  body('name').optional().trim().notEmpty().withMessage('Visitor name is required'),
+  body('phone').optional().matches(/^[0-9]{10}$/).withMessage('Please provide a valid phone number'),
+  body('purpose').optional().isIn(['personal', 'business', 'delivery', 'service', 'other']).withMessage('Invalid purpose'),
+  body('numberOfVisitors').optional().isInt({ min: 1, max: 50 }),
+  body('expectedArrival').optional({ nullable: true, checkFalsy: true }).isISO8601().withMessage('Invalid date format')
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ success: false, errors: errors.array() });
+    }
+    const visitor = await Visitor.findById(req.params.id);
+    if (!visitor) return res.status(404).json({ success: false, message: 'Visitor not found' });
+    if (visitor.residentId.toString() !== req.user.id) {
+      return res.status(403).json({ success: false, message: 'Not authorized to edit this visitor' });
+    }
+    if (!['pending', 'approved'].includes(visitor.status)) {
+      return res.status(400).json({ success: false, message: 'Only invitations that have not been used yet can be edited' });
+    }
+
+    ['name', 'phone', 'purpose', 'purposeDescription', 'numberOfVisitors', 'vehicleNumber', 'notes'].forEach((f) => {
+      if (req.body[f] !== undefined) visitor[f] = req.body[f];
+    });
+    if (req.body.expectedArrival !== undefined) {
+      visitor.expectedArrival = req.body.expectedArrival ? new Date(req.body.expectedArrival) : null;
+    }
+    await visitor.save();
+
+    res.json({ success: true, visitor, message: 'Invitation updated' });
+  } catch (error) {
+    console.error('Edit visitor error:', error);
+    res.status(500).json({ success: false, message: 'Server error' });
   }
 });
 
@@ -254,8 +291,7 @@ router.put('/:id/approve', protect, authorize('resident', 'security', 'society_a
   } catch (error) {
     res.status(500).json({
       success: false,
-      message: 'Server error',
-      error: error.message
+      message: 'Server error'
     });
   }
 });
@@ -281,6 +317,13 @@ router.put('/:id/reject', protect, authorize('resident', 'security', 'society_ad
       return res.status(403).json({
         success: false,
         message: 'Not authorized to reject this visitor'
+      });
+    }
+
+    if (!['pending', 'approved'].includes(visitor.status)) {
+      return res.status(400).json({
+        success: false,
+        message: 'This visit has already started or finished and cannot be rejected'
       });
     }
 
@@ -313,8 +356,7 @@ router.put('/:id/reject', protect, authorize('resident', 'security', 'society_ad
   } catch (error) {
     res.status(500).json({
       success: false,
-      message: 'Server error',
-      error: error.message
+      message: 'Server error'
     });
   }
 });
@@ -371,8 +413,7 @@ router.put('/:id/check-in', protect, authorize('security', 'society_admin', 'sup
   } catch (error) {
     res.status(500).json({
       success: false,
-      message: 'Server error',
-      error: error.message
+      message: 'Server error'
     });
   }
 });
@@ -428,8 +469,7 @@ router.put('/:id/check-out', protect, authorize('security', 'society_admin', 'su
   } catch (error) {
     res.status(500).json({
       success: false,
-      message: 'Server error',
-      error: error.message
+      message: 'Server error'
     });
   }
 });
@@ -465,8 +505,7 @@ router.get('/logs/today', protect, authorize('security', 'society_admin', 'super
   } catch (error) {
     res.status(500).json({
       success: false,
-      message: 'Server error',
-      error: error.message
+      message: 'Server error'
     });
   }
 });
@@ -534,6 +573,7 @@ router.post('/walk-in', protect, authorize('security', 'society_admin'), [
           societyId: req.user.societyId,
           type: 'visitor_approval',
           title: 'Visitor at the gate',
+          sms: true,
           message: `${name} is at the gate for you. Approve or reject in Visitors.`,
           priority: 'high',
           relatedId: visitor._id,

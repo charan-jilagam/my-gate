@@ -19,7 +19,9 @@ const EMPTY_FORM = {
   eventDate: '',
   eventLocation: '',
   expiresAt: '',
-  societyId: ''
+  societyId: '',
+  audience: 'all',
+  targets: ''
 }
 
 const PRIORITY_TAG = { urgent: 'tag-danger', high: 'tag-warn', medium: 'tag-neutral', low: 'tag-neutral' }
@@ -65,6 +67,7 @@ const Notices = () => {
   const [form, setForm] = useState(EMPTY_FORM)
   const [formError, setFormError] = useState('')
   const [deleting, setDeleting] = useState(null)
+  const [visible, setVisible] = useState(10)
 
   const submit = async (e) => {
     e.preventDefault()
@@ -84,6 +87,13 @@ const Notices = () => {
     if (form.type === 'event') {
       if (form.eventDate) payload.eventDate = new Date(form.eventDate).toISOString()
       if (form.eventLocation) payload.eventLocation = form.eventLocation.trim()
+    }
+    const targets = form.targets.split(/[\n,]/).map((t) => t.trim()).filter(Boolean)
+    if (form.audience === 'specific_blocks' || form.audience === 'specific_flats') {
+      if (!targets.length) return setFormError(form.audience === 'specific_blocks' ? 'Enter at least one block, for example A, B.' : 'Enter at least one flat, for example A-101, 202.')
+      payload.targetAudience = form.audience
+      if (form.audience === 'specific_blocks') payload.targetBlocks = targets
+      else payload.targetFlats = targets
     }
     if (form.expiresAt) payload.expiresAt = new Date(form.expiresAt).toISOString()
     if (isSuperAdmin) {
@@ -128,12 +138,14 @@ const Notices = () => {
         </div>
       ) : (
         <ul className="space-y-3">
-          {data.map((n) => (
+          {data.slice(0, visible).map((n) => (
             <li key={n._id} className="panel p-5">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="min-w-0">
                   <div className="mb-1.5 flex flex-wrap items-center gap-2">
                     <span className="tag-info">{titleCase(n.type)}</span>
+                    {n.targetAudience === 'specific_blocks' && n.targetBlocks?.length > 0 && <span className="tag-neutral">Block {n.targetBlocks.join(', ')}</span>}
+                    {n.targetAudience === 'specific_flats' && n.targetFlats?.length > 0 && <span className="tag-neutral">Flats {n.targetFlats.join(', ')}</span>}
                     {['urgent', 'high'].includes(n.priority) && <span className={PRIORITY_TAG[n.priority]}>{titleCase(n.priority)} priority</span>}
                     <span className="text-xs text-muted">{formatDate(n.publishedAt || n.createdAt, true)}</span>
                   </div>
@@ -167,6 +179,11 @@ const Notices = () => {
           ))}
         </ul>
       )}
+      {data?.length > visible && (
+        <div className="mt-4 text-center">
+          <button className="btn-secondary" onClick={() => setVisible(visible + 10)}>Show older notices ({data.length - visible} more)</button>
+        </div>
+      )}
 
       <Modal
         open={open}
@@ -197,6 +214,18 @@ const Notices = () => {
           <Field label="Message" htmlFor="n-content">
             <textarea id="n-content" required rows={4} className="input" value={form.content} onChange={(e) => setForm({ ...form, content: e.target.value })} />
           </Field>
+          <Field label="Who should see it" htmlFor="n-audience">
+            <select id="n-audience" className="input" value={form.audience} onChange={(e) => setForm({ ...form, audience: e.target.value })}>
+              <option value="all">Everyone in the society</option>
+              <option value="specific_blocks">Only certain blocks</option>
+              <option value="specific_flats">Only certain flats</option>
+            </select>
+          </Field>
+          {form.audience !== 'all' && (
+            <Field label={form.audience === 'specific_blocks' ? 'Blocks' : 'Flats'} htmlFor="n-targets" hint={form.audience === 'specific_blocks' ? 'Separate with commas, for example A, B.' : 'Separate with commas. Use A-101 for block and flat, or just 101.'}>
+              <input id="n-targets" className="input" value={form.targets} onChange={(e) => setForm({ ...form, targets: e.target.value })} />
+            </Field>
+          )}
           <div className="grid gap-4 sm:grid-cols-3">
             <Field label="Type" htmlFor="n-type">
               <select id="n-type" className="input" value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })}>

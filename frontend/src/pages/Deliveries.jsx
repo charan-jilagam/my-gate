@@ -1,16 +1,27 @@
 import { useState } from 'react'
-import { FiCheck, FiLogIn, FiPackage, FiPlus } from 'react-icons/fi'
+import { FiCheck, FiLogIn, FiPackage, FiPlus, FiX } from 'react-icons/fi'
 import { useAuth } from '../contexts/AuthContext'
 import api from '../services/api'
 import useApi from '../hooks/useApi'
 import useAction from '../hooks/useAction'
-import { DataList, EmptyState, Field, Modal, PageHeader, Spinner, StatusTag, formatDate } from '../components/ui'
+import ExportButtons from '../components/ExportButtons'
+import { DataList, EmptyState, Field, Modal, PageHeader, Spinner, StatusTag, formatDate, titleCase } from '../components/ui'
 
 const EMPTY_FORM = { deliveryPersonName: '', deliveryPersonPhone: '', company: '', trackingNumber: '', items: '', notes: '' }
 
+const EXPORT_COLUMNS = [
+  { header: 'Date', value: (d) => formatDate(d.createdAt, true) },
+  { header: 'Courier', value: (d) => d.deliveryPersonName },
+  { header: 'Phone', value: (d) => d.deliveryPersonPhone },
+  { header: 'Company', value: (d) => d.company || '' },
+  { header: 'Flat', value: (d) => `${d.block ? `${d.block}-` : ''}${d.flatNo || ''}` },
+  { header: 'Resident', value: (d) => d.residentId?.name || '' },
+  { header: 'Status', value: (d) => titleCase(d.status) }
+]
+
 const Deliveries = () => {
   const { isResident, isSecurity, isAdmin } = useAuth()
-  const { data, loading, error, reload } = useApi('/deliveries', { params: { limit: 100 }, select: (d) => d.deliveries || [] })
+  const { data, loading, error, reload } = useApi('/deliveries', { params: { limit: 500 }, select: (d) => d.deliveries || [] })
   const { busy, run } = useAction(reload)
   const [open, setOpen] = useState(false)
   const [form, setForm] = useState(EMPTY_FORM)
@@ -70,6 +81,19 @@ const Deliveries = () => {
                 <FiLogIn size={14} /> Check in
               </button>
             )}
+            {['pending', 'approved'].includes(d.status) && (
+              <button
+                className="btn-secondary btn-sm"
+                disabled={isBusy}
+                onClick={() => {
+                  if (window.confirm(isResident ? 'Cancel this expected delivery?' : 'Turn this delivery away?')) {
+                    run(d._id, () => api.put(`/deliveries/${d._id}/reject`), isResident ? 'Delivery cancelled' : 'Delivery rejected')
+                  }
+                }}
+              >
+                <FiX size={14} /> {isResident ? 'Cancel' : 'Reject'}
+              </button>
+            )}
             {(isResident || isSecurity || isAdmin) && ['approved', 'in_transit'].includes(d.status) && (
               <button className="btn-secondary btn-sm" disabled={isBusy} onClick={() => run(d._id, () => api.put(`/deliveries/${d._id}/deliver`), 'Marked as delivered')}>
                 {isResident ? 'Received' : 'Delivered'}
@@ -87,11 +111,14 @@ const Deliveries = () => {
         title="Deliveries"
         subtitle={isResident ? 'Tell the gate what you are expecting so couriers are not held up.' : 'Parcels and food orders expected across the society.'}
         action={
-          isResident && (
-            <button className="btn-primary" onClick={() => setOpen(true)}>
-              <FiPlus size={16} /> Expect delivery
-            </button>
-          )
+          <div className="flex flex-wrap items-center gap-2">
+            <ExportButtons filename="deliveries" title="Deliveries" rows={data} columns={EXPORT_COLUMNS} />
+            {isResident && (
+              <button className="btn-primary" onClick={() => setOpen(true)}>
+                <FiPlus size={16} /> Expect delivery
+              </button>
+            )}
+          </div>
         }
       />
 

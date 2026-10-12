@@ -1,13 +1,23 @@
 import { useMemo, useState } from 'react'
-import { FiLogIn, FiLogOut, FiPlus, FiSearch, FiTruck } from 'react-icons/fi'
+import { FiEdit2, FiLogIn, FiLogOut, FiPlus, FiSearch, FiTrash2, FiTruck } from 'react-icons/fi'
 import { useAuth } from '../contexts/AuthContext'
 import api from '../services/api'
 import useApi from '../hooks/useApi'
 import useAction from '../hooks/useAction'
-import { DataList, EmptyState, Field, Modal, PageHeader, Spinner, titleCase } from '../components/ui'
+import ExportButtons from '../components/ExportButtons'
+import { ConfirmDialog, DataList, EmptyState, Field, Modal, PageHeader, Spinner, titleCase } from '../components/ui'
 
 const TYPES = ['car', 'bike', 'scooter', 'bicycle', 'other']
 const EMPTY_FORM = { vehicleNumber: '', vehicleType: 'car', brand: '', model: '', color: '' }
+
+const EXPORT_COLUMNS = [
+  { header: 'Vehicle number', value: (v) => v.vehicleNumber },
+  { header: 'Type', value: (v) => titleCase(v.vehicleType) },
+  { header: 'Make', value: (v) => [v.brand, v.model, v.color].filter(Boolean).join(' ') },
+  { header: 'Owner', value: (v) => v.residentId?.name || '' },
+  { header: 'Flat', value: (v) => `${v.block ? `${v.block}-` : ''}${v.flatNo || ''}` },
+  { header: 'Status', value: (v) => (v.isInside ? 'Inside' : 'Outside') }
+]
 
 const Vehicles = () => {
   const { isResident, isSecurity, isAdmin } = useAuth()
@@ -16,6 +26,9 @@ const Vehicles = () => {
   const [open, setOpen] = useState(false)
   const [form, setForm] = useState(EMPTY_FORM)
   const [query, setQuery] = useState('')
+  const [editing, setEditing] = useState(null) // vehicle being edited
+  const [removing, setRemoving] = useState(null)
+  const canManage = isResident || isAdmin
 
   const rows = useMemo(() => {
     const q = query.trim().toLowerCase()
@@ -26,8 +39,11 @@ const Vehicles = () => {
   const submit = async (e) => {
     e.preventDefault()
     const payload = Object.fromEntries(Object.entries({ ...form, vehicleNumber: form.vehicleNumber.trim().toUpperCase() }).filter(([, v]) => v !== ''))
-    const ok = await run('create', () => api.post('/vehicles/register', payload), 'Vehicle registered')
+    const ok = editing
+      ? await run('create', () => api.put(`/vehicles/${editing._id}`, payload), 'Vehicle updated')
+      : await run('create', () => api.post('/vehicles/register', payload), 'Vehicle registered')
     if (ok) {
+      setEditing(null)
       setOpen(false)
       setForm(EMPTY_FORM)
     }
@@ -49,6 +65,29 @@ const Vehicles = () => {
     ...(isResident ? [] : [{ key: 'owner', header: 'Owner', render: (v) => `${v.residentId?.name || '-'}${v.residentId?.flatNo ? ` (${v.residentId.flatNo})` : ''}` }]),
     { key: 'type', header: 'Type', render: (v) => titleCase(v.vehicleType) },
     { key: 'status', header: 'Status', render: (v) => <span className={v.isInside ? 'tag-ok' : 'tag-neutral'}>{v.isInside ? 'Inside' : 'Outside'}</span> },
+    ...(canManage
+      ? [
+          {
+            key: 'manage',
+            header: '',
+            className: 'md:text-right',
+            render: (v) => (
+              <div className="flex justify-end gap-2">
+                <button className="btn-secondary btn-sm" aria-label={`Edit ${v.vehicleNumber}`} onClick={() => {
+                  setEditing(v)
+                  setForm({ vehicleNumber: v.vehicleNumber || '', vehicleType: v.vehicleType || 'car', brand: v.brand || '', model: v.model || '', color: v.color || '' })
+                  setOpen(true)
+                }}>
+                  <FiEdit2 size={14} /> Edit
+                </button>
+                <button className="btn-secondary btn-sm" aria-label={`Remove ${v.vehicleNumber}`} onClick={() => setRemoving(v)}>
+                  <FiTrash2 size={14} /> Remove
+                </button>
+              </div>
+            )
+          }
+        ]
+      : []),
     ...(canLog
       ? [
           {
@@ -79,11 +118,14 @@ const Vehicles = () => {
         title="Vehicles"
         subtitle={isResident ? 'Register your vehicles so the gate recognises them.' : 'Registered vehicles and who is parked inside right now.'}
         action={
-          isResident && (
-            <button className="btn-primary" onClick={() => setOpen(true)}>
-              <FiPlus size={16} /> Register vehicle
-            </button>
-          )
+          <div className="flex flex-wrap items-center gap-2">
+            <ExportButtons filename="vehicles" title="Vehicles" rows={rows} columns={EXPORT_COLUMNS} />
+            {isResident && (
+              <button className="btn-primary" onClick={() => { setEditing(null); setForm(EMPTY_FORM); setOpen(true) }}>
+                <FiPlus size={16} /> Register vehicle
+              </button>
+            )}
+          </div>
         }
       />
 
@@ -112,14 +154,14 @@ const Vehicles = () => {
 
       <Modal
         open={open}
-        onClose={() => setOpen(false)}
-        title="Register vehicle"
+        onClose={() => { setOpen(false); setEditing(null) }}
+        title={editing ? 'Edit vehicle' : 'Register vehicle'}
         footer={
           <>
-            <button className="btn-secondary" onClick={() => setOpen(false)}>Cancel</button>
+            <button className="btn-secondary" onClick={() => { setOpen(false); setEditing(null) }}>Cancel</button>
             <button className="btn-primary" form="vehicle-form" type="submit" disabled={busy === 'create'}>
               {busy === 'create' && <Spinner className="h-4 w-4" />}
-              Register
+              {editing ? 'Save changes' : 'Register'}
             </button>
           </>
         }
@@ -142,6 +184,20 @@ const Vehicles = () => {
           </div>
         </form>
       </Modal>
+
+      <ConfirmDialog
+        open={!!removing}
+        title="Remove this vehicle?"
+        text={`${removing?.vehicleNumber} will be removed from the register. You can add it again later.`}
+        confirmLabel="Remove"
+        danger
+        busy={busy === removing?._id}
+        onClose={() => setRemoving(null)}
+        onConfirm={async () => {
+          const ok = await run(removing._id, () => api.delete(`/vehicles/${removing._id}`), 'Vehicle removed')
+          if (ok) setRemoving(null)
+        }}
+      />
     </>
   )
 }

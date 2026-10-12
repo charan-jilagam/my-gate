@@ -11,6 +11,9 @@ export default {
         sunken: 'rgb(var(--sunken) / <alpha-value>)',
         ink: 'rgb(var(--ink) / <alpha-value>)',
         muted: 'rgb(var(--muted) / <alpha-value>)',
+        // Sidebar and auth panel: a fixed deep teal in both themes (brand-strong turns light in dark mode).
+        side: 'rgb(var(--side) / <alpha-value>)',
+        'on-solid': 'rgb(var(--on-solid) / <alpha-value>)',
         line: 'rgb(var(--line) / <alpha-value>)',
         brand: {
           DEFAULT: 'rgb(var(--brand) / <alpha-value>)',

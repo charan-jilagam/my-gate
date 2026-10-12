@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { FiX, FiAlertCircle, FiInbox } from 'react-icons/fi'
 
 /* ---------- Formatting helpers ---------- */
@@ -25,7 +25,7 @@ export const titleCase = (s = '') =>
 
 export const errorMessage = (error, fallback = 'Something went wrong. Try again.') => {
   const data = error?.response?.data
-  if (data?.errors?.length) return data.errors.map((e) => e.msg).join('. ')
+  if (data?.errors?.length) return [...new Set(data.errors.map((e) => e.msg))].join('. ')
   return data?.message || fallback
 }
 
@@ -145,21 +145,25 @@ export const Field = ({ label, hint, error, children, htmlFor, className = '' })
 
 export const Modal = ({ open, onClose, title, children, footer, size = 'md' }) => {
   const panelRef = useRef(null)
+  const onCloseRef = useRef(onClose)
+  onCloseRef.current = onClose
 
   useEffect(() => {
     if (!open) return undefined
     const previous = document.activeElement
-    const onKey = (e) => e.key === 'Escape' && onClose?.()
+    // Read the latest onClose through a ref. Callers pass a new inline function on every render, and
+    // depending on it here would re-run this effect (and refocus the first field) on every keystroke.
+    const onKey = (e) => e.key === 'Escape' && onCloseRef.current?.()
     document.addEventListener('keydown', onKey)
     document.body.style.overflow = 'hidden'
-    const first = panelRef.current?.querySelector('input, select, textarea, button:not([data-close])')
+    const first = panelRef.current?.querySelector('input:not([type="hidden"]), select, textarea, button:not([data-close])')
     first?.focus()
     return () => {
       document.removeEventListener('keydown', onKey)
       document.body.style.overflow = ''
       previous?.focus?.()
     }
-  }, [open, onClose])
+  }, [open])
 
   if (!open) return null
   const width = { sm: 'max-w-sm', md: 'max-w-lg', lg: 'max-w-2xl' }[size]
@@ -181,7 +185,7 @@ export const Modal = ({ open, onClose, title, children, footer, size = 'md' }) =
           </button>
         </div>
         <div className="overflow-y-auto px-5 py-4">{children}</div>
-        {footer && <div className="flex justify-end gap-2 border-t border-line px-5 py-3">{footer}</div>}
+        {footer && <div className="flex flex-wrap justify-end gap-2 border-t border-line px-5 pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-3">{footer}</div>}
       </div>
     </div>
   )
@@ -212,7 +216,16 @@ export const ConfirmDialog = ({ open, title, text, confirmLabel = 'Confirm', dan
 /* ---------- Data list ---------- */
 /* A register-style list: a table from md up, stacked rows on phones. */
 
-export const DataList = ({ columns, rows, rowKey = (r) => r._id, loading, error, onRetry, empty }) => {
+export const DataList = ({ columns, rows, rowKey = (r) => r._id, loading, error, onRetry, empty, pageSize = 15 }) => {
+  const [page, setPage] = useState(1)
+  const total = rows?.length || 0
+  const pages = Math.max(1, Math.ceil(total / pageSize))
+  // Filtering or reloading can leave the current page past the end.
+  useEffect(() => {
+    if (page > pages) setPage(pages)
+  }, [page, pages])
+  const shown = pageSize ? (rows || []).slice((page - 1) * pageSize, page * pageSize) : rows
+
   if (loading) return <div className="panel"><ListSkeleton /></div>
   if (error) return <div className="panel"><ErrorState message={error} onRetry={onRetry} /></div>
   if (!rows?.length) return <div className="panel">{empty}</div>
@@ -230,7 +243,7 @@ export const DataList = ({ columns, rows, rowKey = (r) => r._id, loading, error,
           </tr>
         </thead>
         <tbody className="divide-y divide-line">
-          {rows.map((row) => (
+          {shown.map((row) => (
             <tr key={rowKey(row)} className="align-middle hover:bg-sunken/60">
               {columns.map((c) => (
                 <td key={c.key} className={`px-4 py-3 text-sm ${c.className || ''}`}>
@@ -243,7 +256,7 @@ export const DataList = ({ columns, rows, rowKey = (r) => r._id, loading, error,
       </table>
 
       <ul className="divide-y divide-line md:hidden">
-        {rows.map((row) => (
+        {shown.map((row) => (
           <li key={rowKey(row)} className="space-y-2 px-4 py-3.5">
             {columns.map((c) => (
               <div key={c.key} className="flex items-start justify-between gap-4 text-sm">
@@ -254,6 +267,17 @@ export const DataList = ({ columns, rows, rowKey = (r) => r._id, loading, error,
           </li>
         ))}
       </ul>
+      {total > pageSize && (
+        <nav className="flex items-center justify-between gap-3 border-t border-line px-4 py-2.5 text-sm" aria-label="Pagination">
+          <p className="text-muted">
+            {(page - 1) * pageSize + 1}–{Math.min(page * pageSize, total)} of {total}
+          </p>
+          <div className="flex gap-2">
+            <button className="btn-secondary btn-sm" disabled={page <= 1} onClick={() => setPage(page - 1)}>Previous</button>
+            <button className="btn-secondary btn-sm" disabled={page >= pages} onClick={() => setPage(page + 1)}>Next</button>
+          </div>
+        </nav>
+      )}
     </div>
   )
 }

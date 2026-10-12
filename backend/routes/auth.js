@@ -6,7 +6,9 @@ const Society = require('../models/Society');
 const { protect, authorize } = require('../middleware/auth');
 const generateToken = require('../utils/generateToken');
 const sendEmail = require('../utils/sendEmail');
+const { notifyUser } = require('../utils/notifyUser');
 const crypto = require('crypto');
+const { strongPassword } = require('../utils/passwordRules');
 
 // @route   POST /api/auth/register
 // @desc    Register a new user
@@ -14,10 +16,10 @@ const crypto = require('crypto');
 router.post('/register', [
   body('name').trim().notEmpty().withMessage('Name is required'),
   body('email').isEmail().withMessage('Please provide a valid email'),
-  body('password').isLength({ min: 6 }).withMessage('Password must be at least 6 characters'),
+  strongPassword('password'),
   body('phone').matches(/^[0-9]{10}$/).withMessage('Please provide a valid 10-digit phone number'),
   body('role').isIn(['resident', 'security', 'staff', 'vendor']).withMessage('Invalid role'),
-  body('societyId').notEmpty().withMessage('Society ID is required'),
+  body('societyId').isMongoId().withMessage('Choose your society'),
   body('flatNo').optional().trim()
 ], async (req, res) => {
   try {
@@ -56,19 +58,27 @@ router.post('/register', [
       societyId,
       flatNo: flatNo || null,
       block: block || null,
-      isApproved: role === 'resident' ? false : true // Residents need approval
+      // Everyone who signs up on their own waits for a society admin. Otherwise anyone could register as a guard.
+      isApproved: false
     });
 
-    // If resident, notify admins
-    if (role === 'resident' && !user.isApproved) {
-      // Get society admins
-      const admins = await User.find({ 
-        societyId, 
-        role: { $in: ['society_admin', 'super_admin'] } 
-      });
-
-      // Notify admins (would use notification service in production)
-      console.log(`New resident ${user.name} registered and pending approval`);
+    // Tell the society's admins someone is waiting. A failed notification must not fail the sign-up.
+    try {
+      const io = req.app.get('io');
+      const admins = await User.find({ societyId, role: 'society_admin', isActive: true });
+      const roleLabel = { resident: 'resident', security: 'guard', staff: 'staff member', vendor: 'vendor' }[role] || role;
+      for (const admin of admins) {
+        await notifyUser(io, admin._id, {
+          societyId,
+          type: 'general',
+          title: 'New sign-up to approve',
+          message: `${user.name} registered as a ${roleLabel}${user.flatNo ? ` (flat ${user.block ? `${user.block}-` : ''}${user.flatNo})` : ''}. Review it in People.`,
+          priority: 'medium',
+          actionUrl: '/admin/residents'
+        });
+      }
+    } catch (notifyError) {
+      console.error('Could not notify admins of new sign-up:', notifyError.message);
     }
 
     // Generate token
@@ -84,16 +94,13 @@ router.post('/register', [
         role: user.role,
         isApproved: user.isApproved
       },
-      message: role === 'resident' && !user.isApproved 
-        ? 'Registration successful. Your account is pending admin approval.'
-        : 'Registration successful'
+      message: 'Registration successful. Your account is pending admin approval.'
     });
   } catch (error) {
     console.error('Registration error:', error);
     res.status(500).json({
       success: false,
-      message: 'Server error during registration',
-      error: error.message
+      message: 'Server error during registration'
     });
   }
 });
@@ -123,16 +130,43 @@ router.post('/login', [
       });
     }
 
+    // Too many wrong passwords: pause sign-in for this account for a while.
+    if (user.lockUntil && user.lockUntil > Date.now()) {
+      const minutes = Math.ceil((user.lockUntil - Date.now()) / 60000);
+      return res.status(429).json({
+        success: false,
+        message: `Too many failed attempts. Try again in ${minutes} minute${minutes === 1 ? '' : 's'}, or reset your password.`
+      });
+    }
+
     // Check password
     const isMatch = await user.comparePassword(password);
     if (!isMatch) {
+      user.loginAttempts = (user.loginAttempts || 0) + 1;
+      if (user.loginAttempts >= 5) {
+        user.lockUntil = new Date(Date.now() + 15 * 60 * 1000);
+        user.loginAttempts = 0;
+      }
+      await user.save({ validateBeforeSave: false });
       return res.status(401).json({
         success: false,
         message: 'Invalid credentials'
       });
     }
 
+    // A rejected sign-up (or a deactivated account) cannot sign in. Say why, so the person is not left guessing.
+    if (!user.isActive) {
+      return res.status(403).json({
+        success: false,
+        message: user.rejectedAt
+          ? `Your registration was not approved${user.rejectedReason ? `: ${user.rejectedReason}` : '.'} Contact your society admin.`
+          : 'This account has been deactivated. Contact your society admin.'
+      });
+    }
+
     // Update last login
+    user.loginAttempts = 0;
+    user.lockUntil = undefined;
     user.lastLogin = new Date();
     await user.save();
 
@@ -156,8 +190,7 @@ router.post('/login', [
     console.error('Login error:', error);
     res.status(500).json({
       success: false,
-      message: 'Server error during login',
-      error: error.message
+      message: 'Server error during login'
     });
   }
 });
@@ -178,8 +211,7 @@ router.get('/me', protect, async (req, res) => {
   } catch (error) {
     res.status(500).json({
       success: false,
-      message: 'Server error',
-      error: error.message
+      message: 'Server error'
     });
   }
 });
@@ -219,6 +251,24 @@ router.post('/forgot-password', [
     // Create reset URL
     const resetUrl = `${process.env.FRONTEND_URL}/reset-password/${resetToken}`;
 
+    // No mail server set up: in development print the link so the flow can still be tested.
+    if (!sendEmail.isEmailConfigured()) {
+      if (process.env.NODE_ENV !== 'production') {
+        console.log(`\n[dev] Email is not configured. Password reset link for ${user.email}:\n${resetUrl}\n`);
+        return res.json({
+          success: true,
+          message: 'Email is not set up on this server. In development the reset link is printed in the backend console.'
+        });
+      }
+      user.resetPasswordToken = undefined;
+      user.resetPasswordExpire = undefined;
+      await user.save({ validateBeforeSave: false });
+      return res.status(503).json({
+        success: false,
+        message: 'Password reset email is not available right now. Please contact your society admin.'
+      });
+    }
+
     // Send email
     try {
       await sendEmail({
@@ -239,6 +289,7 @@ router.post('/forgot-password', [
         message: 'Password reset email sent'
       });
     } catch (error) {
+      console.error('Reset email failed:', error.message);
       user.resetPasswordToken = undefined;
       user.resetPasswordExpire = undefined;
       await user.save({ validateBeforeSave: false });
@@ -251,8 +302,7 @@ router.post('/forgot-password', [
   } catch (error) {
     res.status(500).json({
       success: false,
-      message: 'Server error',
-      error: error.message
+      message: 'Server error'
     });
   }
 });
@@ -261,7 +311,7 @@ router.post('/forgot-password', [
 // @desc    Reset password
 // @access  Public
 router.put('/reset-password/:token', [
-  body('password').isLength({ min: 6 }).withMessage('Password must be at least 6 characters')
+  strongPassword('password')
 ], async (req, res) => {
   try {
     const errors = validationResult(req);
@@ -304,8 +354,7 @@ router.put('/reset-password/:token', [
   } catch (error) {
     res.status(500).json({
       success: false,
-      message: 'Server error',
-      error: error.message
+      message: 'Server error'
     });
   }
 });
@@ -315,7 +364,7 @@ router.put('/reset-password/:token', [
 // @access  Private
 router.put('/update-password', protect, [
   body('currentPassword').notEmpty().withMessage('Current password is required'),
-  body('newPassword').isLength({ min: 6 }).withMessage('New password must be at least 6 characters')
+  strongPassword('newPassword')
 ], async (req, res) => {
   try {
     const errors = validationResult(req);
@@ -344,28 +393,16 @@ router.put('/update-password', protect, [
   } catch (error) {
     res.status(500).json({
       success: false,
-      message: 'Server error',
-      error: error.message
+      message: 'Server error'
     });
   }
 });
 
 // @route   POST /api/auth/create-admin
-// @desc    Create admin user (Development/Setup only)
-// @access  Public (only in development) or Private (Super Admin)
+// @desc    Create an admin user
+// @access  Private (Super Admin only). The first super admin is created with `npm run create-admin`.
 const createAdminHandler = async (req, res) => {
   try {
-    // Only allow in development or if super admin is creating
-    const isDevelopment = process.env.NODE_ENV === 'development';
-    const isSuperAdmin = req.user && req.user.role === 'super_admin';
-
-    if (!isDevelopment && !isSuperAdmin) {
-      return res.status(403).json({
-        success: false,
-        message: 'Admin creation is only allowed in development mode or by super admin'
-      });
-    }
-
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
       return res.status(400).json({ success: false, errors: errors.array() });
@@ -432,33 +469,18 @@ const createAdminHandler = async (req, res) => {
     console.error('Admin creation error:', error);
     res.status(500).json({
       success: false,
-      message: 'Server error during admin creation',
-      error: error.message
+      message: 'Server error during admin creation'
     });
   }
 };
 
-// Apply middleware conditionally
-if (process.env.NODE_ENV === 'development') {
-  // In development, allow without auth
-  router.post('/create-admin', [
-    body('name').trim().notEmpty().withMessage('Name is required'),
-    body('email').isEmail().withMessage('Please provide a valid email'),
-    body('password').isLength({ min: 6 }).withMessage('Password must be at least 6 characters'),
-    body('phone').matches(/^[0-9]{10}$/).withMessage('Please provide a valid 10-digit phone number'),
-    body('role').isIn(['super_admin', 'society_admin']).withMessage('Invalid admin role'),
-    body('societyId').optional().isMongoId().withMessage('Invalid society ID')
-  ], createAdminHandler);
-} else {
-  // In production, require super admin auth
-  router.post('/create-admin', protect, authorize('super_admin'), [
-    body('name').trim().notEmpty().withMessage('Name is required'),
-    body('email').isEmail().withMessage('Please provide a valid email'),
-    body('password').isLength({ min: 6 }).withMessage('Password must be at least 6 characters'),
-    body('phone').matches(/^[0-9]{10}$/).withMessage('Please provide a valid 10-digit phone number'),
-    body('role').isIn(['super_admin', 'society_admin']).withMessage('Invalid admin role'),
-    body('societyId').optional().isMongoId().withMessage('Invalid society ID')
-  ], createAdminHandler);
-}
+router.post('/create-admin', protect, authorize('super_admin'), [
+  body('name').trim().notEmpty().withMessage('Name is required'),
+  body('email').isEmail().withMessage('Please provide a valid email'),
+  strongPassword('password'),
+  body('phone').matches(/^[0-9]{10}$/).withMessage('Please provide a valid 10-digit phone number'),
+  body('role').isIn(['super_admin', 'society_admin']).withMessage('Invalid admin role'),
+  body('societyId').optional().isMongoId().withMessage('Invalid society ID')
+], createAdminHandler);
 
 module.exports = router;

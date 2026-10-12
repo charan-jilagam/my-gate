@@ -18,7 +18,7 @@ const validate = (f) => {
   if (!f.name.trim()) e.name = 'Enter your full name.'
   if (!/^\S+@\S+\.\S+$/.test(f.email)) e.email = 'Enter a valid email address.'
   if (!/^[0-9]{10}$/.test(f.phone)) e.phone = 'Enter a 10-digit mobile number.'
-  if (f.password.length < 6) e.password = 'Use at least 6 characters.'
+  if (f.password.length < 8 || !/[A-Za-z]/.test(f.password) || !/\d/.test(f.password)) e.password = 'Use at least 8 characters with a letter and a number.'
   if (!f.societyId) e.societyId = 'Choose your society.'
   if (f.role === 'resident' && !f.flatNo.trim()) e.flatNo = 'Enter your flat number.'
   return e
@@ -107,7 +107,7 @@ const Register = () => {
           </Field>
         </div>
 
-        <Field label="Password" htmlFor="password" error={errors.password} hint="At least 6 characters.">
+        <Field label="Password" htmlFor="password" error={errors.password} hint="At least 8 characters, with a letter and a number.">
           <input id="password" name="password" type="password" autoComplete="new-password" className="input" value={formData.password} onChange={handleChange} />
         </Field>
 

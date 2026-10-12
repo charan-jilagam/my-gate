@@ -1,3 +1,4 @@
+import { imgSrc } from '../utils/media'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import {
@@ -43,7 +44,7 @@ const NAV = {
     { to: '/notices', icon: FiBell, label: 'Notices' }
   ],
   society_admin: [
-    { to: '/admin/residents', icon: FiCheckCircle, label: 'Residents' },
+    { to: '/admin/residents', icon: FiCheckCircle, label: 'People' },
     { to: '/gate', icon: FiShield, label: 'Gate console' },
     { to: '/visitors', icon: FiUsers, label: 'Visitors' },
     { to: '/deliveries', icon: FiPackage, label: 'Deliveries' },
@@ -56,7 +57,7 @@ const NAV = {
   ],
   super_admin: [
     { to: '/admin/societies', icon: FiHome, label: 'Societies' },
-    { to: '/admin/residents', icon: FiCheckCircle, label: 'Residents' },
+    { to: '/admin/residents', icon: FiCheckCircle, label: 'People' },
     { to: '/visitors', icon: FiUsers, label: 'Visitors' },
     { to: '/deliveries', icon: FiPackage, label: 'Deliveries' },
     { to: '/vehicles', icon: FiTruck, label: 'Vehicles' },
@@ -225,7 +226,7 @@ const Layout = () => {
   }
 
   const sidebar = (
-    <div className="flex h-full flex-col bg-brand-strong text-white">
+    <div className="flex h-full flex-col border-r border-white/10 bg-side text-white">
       <div className="hazard h-1.5 shrink-0" aria-hidden="true" />
       <div className="px-5 pb-4 pt-5 text-white">
         <Logo />
@@ -257,7 +258,7 @@ const Layout = () => {
           className="flex items-center gap-3 rounded-md px-2 py-2 hover:bg-white/5"
         >
           <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-amber font-display text-sm font-bold text-[#1b1400]">
-            {(user?.name || '?').trim().charAt(0).toUpperCase()}
+            {user?.profilePic ? <img src={imgSrc(user.profilePic)} alt="" className="h-full w-full rounded-full object-cover" /> : (user?.name || '?').trim().charAt(0).toUpperCase()}
           </span>
           <span className="min-w-0">
             <span className="block truncate text-sm font-semibold">{user?.name}</span>

@@ -203,7 +203,7 @@ const AdminSocieties = () => {
             <Field label="Email" htmlFor="a-email"><input id="a-email" required type="email" className="input" value={admin.email} onChange={(e) => setAdmin({ ...admin, email: e.target.value })} /></Field>
             <Field label="Phone" htmlFor="a-phone"><input id="a-phone" required type="tel" inputMode="numeric" maxLength={10} className="input" value={admin.phone} onChange={(e) => setAdmin({ ...admin, phone: e.target.value })} /></Field>
           </div>
-          <Field label="Temporary password" htmlFor="a-pass" hint="They can change it from their profile after signing in."><input id="a-pass" required type="password" minLength={6} autoComplete="new-password" className="input" value={admin.password} onChange={(e) => setAdmin({ ...admin, password: e.target.value })} /></Field>
+          <Field label="Temporary password" htmlFor="a-pass" hint="At least 8 characters with a letter and a number. They can change it after signing in."><input id="a-pass" required type="password" minLength={8} autoComplete="new-password" className="input" value={admin.password} onChange={(e) => setAdmin({ ...admin, password: e.target.value })} /></Field>
           {adminError && <p role="alert" className="text-sm font-medium text-danger">{adminError}</p>}
         </form>
       </Modal>

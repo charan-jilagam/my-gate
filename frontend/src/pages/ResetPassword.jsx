@@ -16,7 +16,7 @@ const ResetPassword = () => {
   const handleSubmit = async (e) => {
     e.preventDefault()
     setError('')
-    if (password.length < 6) return setError('Use at least 6 characters.')
+    if (password.length < 8 || !/[A-Za-z]/.test(password) || !/\d/.test(password)) return setError('Use at least 8 characters with a letter and a number.')
     if (password !== confirm) return setError('The two passwords do not match.')
 
     setLoading(true)
@@ -41,7 +41,7 @@ const ResetPassword = () => {
       }
     >
       <form className="space-y-5" onSubmit={handleSubmit} noValidate>
-        <Field label="New password" htmlFor="password" hint="At least 6 characters.">
+        <Field label="New password" htmlFor="password" hint="At least 8 characters, with a letter and a number.">
           <input id="password" type="password" autoComplete="new-password" className="input" value={password} onChange={(e) => setPassword(e.target.value)} />
         </Field>
         <Field label="Confirm new password" htmlFor="confirm">

@@ -1,0 +1,1462 @@
+diff --git a/ADMIN_SETUP.md b/ADMIN_SETUP.md
+index 1141459..c8d3700 100644
+--- a/ADMIN_SETUP.md
++++ b/ADMIN_SETUP.md
+@@ -37,16 +37,17 @@ npm run create-admin admin@example.com mypassword123 "John Admin" 9876543210 sup
+ 
+ ### Method 2: Using the API Endpoint (Development Mode)
+ 
+-In development mode, you can create admin users via API:
++Once you have a super admin, you can create more admins via the API (or from the Societies page in the app). Sign in first and send the token:
+ 
+ **Create Super Admin:**
+ ```bash
+ curl -X POST http://localhost:5000/api/auth/create-admin \
+   -H "Content-Type: application/json" \
++  -H "Authorization: Bearer YOUR_SUPER_ADMIN_TOKEN" \
+   -d '{
+     "name": "Super Admin",
+     "email": "admin@mygate.com",
+-    "password": "admin123",
++    "password": "admin12345",
+     "phone": "1234567890",
+     "role": "super_admin"
+   }'
+@@ -56,17 +57,18 @@ curl -X POST http://localhost:5000/api/auth/create-admin \
+ ```bash
+ curl -X POST http://localhost:5000/api/auth/create-admin \
+   -H "Content-Type: application/json" \
++  -H "Authorization: Bearer YOUR_SUPER_ADMIN_TOKEN" \
+   -d '{
+     "name": "Society Admin",
+     "email": "societyadmin@mygate.com",
+-    "password": "admin123",
++    "password": "admin12345",
+     "phone": "1234567890",
+     "role": "society_admin",
+     "societyId": "<society-id-here>"
+   }'
+ ```
+ 
+-**Note:** This endpoint only works in development mode (`NODE_ENV=development`) or when called by an existing super admin.
++**Note:** This endpoint requires a signed-in super admin (send their token as `Authorization: Bearer <token>`). Create the very first super admin with `npm run create-admin`.
+ 
+ ### Method 3: Using MongoDB Directly
+ 
+diff --git a/backend/.env.example b/backend/.env.example
+index bbadacd..85cf6f0 100644
+--- a/backend/.env.example
++++ b/backend/.env.example
+@@ -9,7 +9,9 @@ MONGODB_URI=mongodb://localhost:27017/mygate
+ # Keep "/mygate" before the "?" so your data goes into a database named mygate.
+ # MONGODB_URI=mongodb+srv://USER:PASSWORD@cluster0.xxxxx.mongodb.net/mygate?retryWrites=true&w=majority&appName=Cluster0
+ 
+-# JWT
++# JWT. Generate one with:
++#   node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"
++# Production refuses to start with a short or example value.
+ JWT_SECRET=your_super_secret_jwt_key_change_in_production
+ JWT_EXPIRE=7d
+ 
+@@ -28,5 +30,5 @@ CLOUDINARY_API_SECRET=your_api_secret
+ # RAZORPAY_KEY_ID=your_razorpay_key_id
+ # RAZORPAY_KEY_SECRET=your_razorpay_key_secret
+ 
+-# Frontend URL (for CORS and email links)
++# Frontend URL (for CORS and email links). Several origins can be separated by commas.
+ FRONTEND_URL=http://localhost:5173
+diff --git a/backend/middleware/auth.js b/backend/middleware/auth.js
+index 7993234..feb3aaf 100644
+--- a/backend/middleware/auth.js
++++ b/backend/middleware/auth.js
+@@ -1,8 +1,11 @@
+ const jwt = require('jsonwebtoken');
++const mongoose = require('mongoose');
+ const User = require('../models/User');
+ 
+ // Protect routes - verify JWT token
+ exports.protect = async (req, res, next) => {
++  // Already authenticated earlier in this request (for example by a router.param guard).
++  if (req.user) return next();
+   try {
+     let token;
+ 
+@@ -65,8 +68,7 @@ exports.protect = async (req, res, next) => {
+   } catch (error) {
+     res.status(500).json({
+       success: false,
+-      message: 'Server error',
+-      error: error.message
++      message: 'Server error'
+     });
+   }
+ };
+@@ -105,3 +107,38 @@ exports.checkSocietyAccess = (req, res, next) => {
+ 
+   next();
+ };
++
++// router.param('id', scopeToSociety(Model)): a user may only touch records from their own society.
++// Runs the login check itself because param callbacks run before the route's own middleware.
++exports.scopeToSociety = (Model, field = 'societyId') => (req, res, next, id) => {
++  exports.protect(req, res, async (err) => {
++    if (err) return next(err);
++    try {
++      if (!mongoose.Types.ObjectId.isValid(id)) {
++        return res.status(404).json({ success: false, message: 'Not found' });
++      }
++      if (req.user.role === 'super_admin') return next();
++      const doc = await Model.findById(id).select(field).lean();
++      if (doc && String(doc[field]) !== String(req.user.societyId)) {
++        return res.status(403).json({ success: false, message: 'Not authorized' });
++      }
++      next();
++    } catch (e) {
++      next(e);
++    }
++  });
++};
++
++// Same idea for /societies/:id, where the id is the society itself.
++exports.scopeToOwnSociety = (req, res, next, id) => {
++  exports.protect(req, res, (err) => {
++    if (err) return next(err);
++    if (!mongoose.Types.ObjectId.isValid(id)) {
++      return res.status(404).json({ success: false, message: 'Not found' });
++    }
++    if (req.user.role !== 'super_admin' && String(id) !== String(req.user.societyId)) {
++      return res.status(403).json({ success: false, message: 'Not authorized' });
++    }
++    next();
++  });
++};
+diff --git a/backend/middleware/sanitize.js b/backend/middleware/sanitize.js
+new file mode 100644
+index 0000000..8fe4493
+--- /dev/null
++++ b/backend/middleware/sanitize.js
+@@ -0,0 +1,28 @@
++// Stops MongoDB operator injection: removes keys that start with "$" or contain "."
++// from request bodies, query strings and params (for example ?status[$ne]=x).
++const clean = (value) => {
++  if (Array.isArray(value)) return value.map(clean);
++  if (value && typeof value === 'object') {
++    const out = {};
++    for (const [key, v] of Object.entries(value)) {
++      if (key.startsWith('$') || key.includes('.')) continue;
++      const cleaned = clean(v);
++      // An operator object like { $ne: 'x' } is dropped entirely rather than left as {}.
++      if (v && typeof v === 'object' && !Array.isArray(v) && Object.keys(v).length && !Object.keys(cleaned).length) continue;
++      out[key] = cleaned;
++    }
++    return out;
++  }
++  return value;
++};
++
++module.exports = (req, res, next) => {
++  if (req.body) req.body = clean(req.body);
++  if (req.query) {
++    const q = clean(req.query);
++    Object.keys(req.query).forEach((k) => delete req.query[k]);
++    Object.assign(req.query, q);
++  }
++  if (req.params) req.params = clean(req.params);
++  next();
++};
+diff --git a/backend/models/Delivery.js b/backend/models/Delivery.js
+index 10c71c2..edd5397 100644
+--- a/backend/models/Delivery.js
++++ b/backend/models/Delivery.js
+@@ -100,7 +100,8 @@ const deliverySchema = new mongoose.Schema({
+   },
+   otp: {
+     type: String,
+-    length: 6
++    length: 6,
++    select: false // never sent to guards or admins
+   },
+   otpExpires: {
+     type: Date
+diff --git a/backend/models/User.js b/backend/models/User.js
+index 0f9c8d8..96ef918 100644
+--- a/backend/models/User.js
++++ b/backend/models/User.js
+@@ -82,6 +82,8 @@ const userSchema = new mongoose.Schema({
+     type: String,
+     trim: true
+   },
++  loginAttempts: { type: Number, default: 0 },
++  lockUntil: Date,
+   resetPasswordToken: String,
+   resetPasswordExpire: Date,
+   lastLogin: Date
+diff --git a/backend/routes/auth.js b/backend/routes/auth.js
+index ece0327..3c6034d 100644
+--- a/backend/routes/auth.js
++++ b/backend/routes/auth.js
+@@ -8,6 +8,7 @@ const generateToken = require('../utils/generateToken');
+ const sendEmail = require('../utils/sendEmail');
+ const { notifyUser } = require('../utils/notifyUser');
+ const crypto = require('crypto');
++const { strongPassword } = require('../utils/passwordRules');
+ 
+ // @route   POST /api/auth/register
+ // @desc    Register a new user
+@@ -15,10 +16,10 @@ const crypto = require('crypto');
+ router.post('/register', [
+   body('name').trim().notEmpty().withMessage('Name is required'),
+   body('email').isEmail().withMessage('Please provide a valid email'),
+-  body('password').isLength({ min: 6 }).withMessage('Password must be at least 6 characters'),
++  strongPassword('password'),
+   body('phone').matches(/^[0-9]{10}$/).withMessage('Please provide a valid 10-digit phone number'),
+   body('role').isIn(['resident', 'security', 'staff', 'vendor']).withMessage('Invalid role'),
+-  body('societyId').notEmpty().withMessage('Society ID is required'),
++  body('societyId').isMongoId().withMessage('Choose your society'),
+   body('flatNo').optional().trim()
+ ], async (req, res) => {
+   try {
+@@ -99,8 +100,7 @@ router.post('/register', [
+     console.error('Registration error:', error);
+     res.status(500).json({
+       success: false,
+-      message: 'Server error during registration',
+-      error: error.message
++      message: 'Server error during registration'
+     });
+   }
+ });
+@@ -130,9 +130,24 @@ router.post('/login', [
+       });
+     }
+ 
++    // Too many wrong passwords: pause sign-in for this account for a while.
++    if (user.lockUntil && user.lockUntil > Date.now()) {
++      const minutes = Math.ceil((user.lockUntil - Date.now()) / 60000);
++      return res.status(429).json({
++        success: false,
++        message: `Too many failed attempts. Try again in ${minutes} minute${minutes === 1 ? '' : 's'}, or reset your password.`
++      });
++    }
++
+     // Check password
+     const isMatch = await user.comparePassword(password);
+     if (!isMatch) {
++      user.loginAttempts = (user.loginAttempts || 0) + 1;
++      if (user.loginAttempts >= 5) {
++        user.lockUntil = new Date(Date.now() + 15 * 60 * 1000);
++        user.loginAttempts = 0;
++      }
++      await user.save({ validateBeforeSave: false });
+       return res.status(401).json({
+         success: false,
+         message: 'Invalid credentials'
+@@ -150,6 +165,8 @@ router.post('/login', [
+     }
+ 
+     // Update last login
++    user.loginAttempts = 0;
++    user.lockUntil = undefined;
+     user.lastLogin = new Date();
+     await user.save();
+ 
+@@ -173,8 +190,7 @@ router.post('/login', [
+     console.error('Login error:', error);
+     res.status(500).json({
+       success: false,
+-      message: 'Server error during login',
+-      error: error.message
++      message: 'Server error during login'
+     });
+   }
+ });
+@@ -195,8 +211,7 @@ router.get('/me', protect, async (req, res) => {
+   } catch (error) {
+     res.status(500).json({
+       success: false,
+-      message: 'Server error',
+-      error: error.message
++      message: 'Server error'
+     });
+   }
+ });
+@@ -287,8 +302,7 @@ router.post('/forgot-password', [
+   } catch (error) {
+     res.status(500).json({
+       success: false,
+-      message: 'Server error',
+-      error: error.message
++      message: 'Server error'
+     });
+   }
+ });
+@@ -297,7 +311,7 @@ router.post('/forgot-password', [
+ // @desc    Reset password
+ // @access  Public
+ router.put('/reset-password/:token', [
+-  body('password').isLength({ min: 6 }).withMessage('Password must be at least 6 characters')
++  strongPassword('password')
+ ], async (req, res) => {
+   try {
+     const errors = validationResult(req);
+@@ -340,8 +354,7 @@ router.put('/reset-password/:token', [
+   } catch (error) {
+     res.status(500).json({
+       success: false,
+-      message: 'Server error',
+-      error: error.message
++      message: 'Server error'
+     });
+   }
+ });
+@@ -351,7 +364,7 @@ router.put('/reset-password/:token', [
+ // @access  Private
+ router.put('/update-password', protect, [
+   body('currentPassword').notEmpty().withMessage('Current password is required'),
+-  body('newPassword').isLength({ min: 6 }).withMessage('New password must be at least 6 characters')
++  strongPassword('newPassword')
+ ], async (req, res) => {
+   try {
+     const errors = validationResult(req);
+@@ -380,28 +393,16 @@ router.put('/update-password', protect, [
+   } catch (error) {
+     res.status(500).json({
+       success: false,
+-      message: 'Server error',
+-      error: error.message
++      message: 'Server error'
+     });
+   }
+ });
+ 
+ // @route   POST /api/auth/create-admin
+-// @desc    Create admin user (Development/Setup only)
+-// @access  Public (only in development) or Private (Super Admin)
++// @desc    Create an admin user
++// @access  Private (Super Admin only). The first super admin is created with `npm run create-admin`.
+ const createAdminHandler = async (req, res) => {
+   try {
+-    // Only allow in development or if super admin is creating
+-    const isDevelopment = process.env.NODE_ENV === 'development';
+-    const isSuperAdmin = req.user && req.user.role === 'super_admin';
+-
+-    if (!isDevelopment && !isSuperAdmin) {
+-      return res.status(403).json({
+-        success: false,
+-        message: 'Admin creation is only allowed in development mode or by super admin'
+-      });
+-    }
+-
+     const errors = validationResult(req);
+     if (!errors.isEmpty()) {
+       return res.status(400).json({ success: false, errors: errors.array() });
+@@ -468,33 +469,18 @@ const createAdminHandler = async (req, res) => {
+     console.error('Admin creation error:', error);
+     res.status(500).json({
+       success: false,
+-      message: 'Server error during admin creation',
+-      error: error.message
++      message: 'Server error during admin creation'
+     });
+   }
+ };
+ 
+-// Apply middleware conditionally
+-if (process.env.NODE_ENV === 'development') {
+-  // In development, allow without auth
+-  router.post('/create-admin', [
+-    body('name').trim().notEmpty().withMessage('Name is required'),
+-    body('email').isEmail().withMessage('Please provide a valid email'),
+-    body('password').isLength({ min: 6 }).withMessage('Password must be at least 6 characters'),
+-    body('phone').matches(/^[0-9]{10}$/).withMessage('Please provide a valid 10-digit phone number'),
+-    body('role').isIn(['super_admin', 'society_admin']).withMessage('Invalid admin role'),
+-    body('societyId').optional().isMongoId().withMessage('Invalid society ID')
+-  ], createAdminHandler);
+-} else {
+-  // In production, require super admin auth
+-  router.post('/create-admin', protect, authorize('super_admin'), [
+-    body('name').trim().notEmpty().withMessage('Name is required'),
+-    body('email').isEmail().withMessage('Please provide a valid email'),
+-    body('password').isLength({ min: 6 }).withMessage('Password must be at least 6 characters'),
+-    body('phone').matches(/^[0-9]{10}$/).withMessage('Please provide a valid 10-digit phone number'),
+-    body('role').isIn(['super_admin', 'society_admin']).withMessage('Invalid admin role'),
+-    body('societyId').optional().isMongoId().withMessage('Invalid society ID')
+-  ], createAdminHandler);
+-}
++router.post('/create-admin', protect, authorize('super_admin'), [
++  body('name').trim().notEmpty().withMessage('Name is required'),
++  body('email').isEmail().withMessage('Please provide a valid email'),
++  strongPassword('password'),
++  body('phone').matches(/^[0-9]{10}$/).withMessage('Please provide a valid 10-digit phone number'),
++  body('role').isIn(['super_admin', 'society_admin']).withMessage('Invalid admin role'),
++  body('societyId').optional().isMongoId().withMessage('Invalid society ID')
++], createAdminHandler);
+ 
+ module.exports = router;
+diff --git a/backend/routes/bookings.js b/backend/routes/bookings.js
+index 0b19ceb..c9176dd 100644
+--- a/backend/routes/bookings.js
++++ b/backend/routes/bookings.js
+@@ -3,7 +3,8 @@ const router = express.Router();
+ const { body, validationResult } = require('express-validator');
+ const Booking = require('../models/Booking');
+ const Society = require('../models/Society');
+-const { protect, authorize } = require('../middleware/auth');
++const { protect, authorize , scopeToSociety } = require('../middleware/auth');
++router.param('id', scopeToSociety(require('../models/Booking')));
+ const { notifyUser } = require('../utils/notifyUser');
+ 
+ // @route   POST /api/bookings
+@@ -110,8 +111,7 @@ router.post('/', protect, authorize('resident'), [
+     console.error('Booking creation error:', error);
+     res.status(500).json({
+       success: false,
+-      message: 'Server error',
+-      error: error.message
++      message: 'Server error'
+     });
+   }
+ });
+@@ -137,6 +137,8 @@ router.get('/', protect, async (req, res) => {
+       query.amenity = req.query.amenity;
+     }
+ 
++    if (req.user.role !== 'super_admin') query.societyId = req.user.societyId;
++
+     const bookings = await Booking.find(query)
+       .populate('residentId', 'name flatNo')
+       .populate('approvedBy', 'name')
+@@ -152,8 +154,7 @@ router.get('/', protect, async (req, res) => {
+   } catch (error) {
+     res.status(500).json({
+       success: false,
+-      message: 'Server error',
+-      error: error.message
++      message: 'Server error'
+     });
+   }
+ });
+@@ -188,8 +189,7 @@ router.get('/availability', protect, [
+   } catch (error) {
+     res.status(500).json({
+       success: false,
+-      message: 'Server error',
+-      error: error.message
++      message: 'Server error'
+     });
+   }
+ });
+@@ -236,8 +236,7 @@ router.put('/:id/approve', protect, authorize('society_admin', 'super_admin'), a
+   } catch (error) {
+     res.status(500).json({
+       success: false,
+-      message: 'Server error',
+-      error: error.message
++      message: 'Server error'
+     });
+   }
+ });
+@@ -285,8 +284,7 @@ router.put('/:id/reject', protect, authorize('society_admin', 'super_admin'), [
+   } catch (error) {
+     res.status(500).json({
+       success: false,
+-      message: 'Server error',
+-      error: error.message
++      message: 'Server error'
+     });
+   }
+ });
+@@ -335,8 +333,7 @@ router.put('/:id/cancel', protect, authorize('resident'), [
+   } catch (error) {
+     res.status(500).json({
+       success: false,
+-      message: 'Server error',
+-      error: error.message
++      message: 'Server error'
+     });
+   }
+ });
+diff --git a/backend/routes/complaints.js b/backend/routes/complaints.js
+index cbffa00..2357405 100644
+--- a/backend/routes/complaints.js
++++ b/backend/routes/complaints.js
+@@ -2,7 +2,8 @@ const express = require('express');
+ const router = express.Router();
+ const { body, validationResult } = require('express-validator');
+ const Complaint = require('../models/Complaint');
+-const { protect, authorize, checkSocietyAccess } = require('../middleware/auth');
++const { protect, authorize, checkSocietyAccess , scopeToSociety } = require('../middleware/auth');
++router.param('id', scopeToSociety(require('../models/Complaint')));
+ const { notifyUser } = require('../utils/notifyUser');
+ const User = require('../models/User');
+ 
+@@ -77,8 +78,7 @@ router.post('/', protect, authorize('resident'), [
+     console.error('Complaint creation error:', error);
+     res.status(500).json({
+       success: false,
+-      message: 'Server error',
+-      error: error.message
++      message: 'Server error'
+     });
+   }
+ });
+@@ -111,6 +111,8 @@ router.get('/', protect, async (req, res) => {
+       query.category = req.query.category;
+     }
+ 
++    if (req.user.role !== 'super_admin') query.societyId = req.user.societyId;
++
+     const complaints = await Complaint.find(query)
+       .populate('residentId', 'name email phone flatNo')
+       .populate('assignedTo', 'name email')
+@@ -126,8 +128,7 @@ router.get('/', protect, async (req, res) => {
+   } catch (error) {
+     res.status(500).json({
+       success: false,
+-      message: 'Server error',
+-      error: error.message
++      message: 'Server error'
+     });
+   }
+ });
+@@ -164,8 +165,7 @@ router.get('/:id', protect, async (req, res) => {
+   } catch (error) {
+     res.status(500).json({
+       success: false,
+-      message: 'Server error',
+-      error: error.message
++      message: 'Server error'
+     });
+   }
+ });
+@@ -243,8 +243,7 @@ router.put('/:id/assign', protect, authorize('society_admin', 'super_admin'), [
+   } catch (error) {
+     res.status(500).json({
+       success: false,
+-      message: 'Server error',
+-      error: error.message
++      message: 'Server error'
+     });
+   }
+ });
+@@ -320,8 +319,7 @@ router.put('/:id/status', protect, authorize('society_admin', 'super_admin', 'st
+   } catch (error) {
+     res.status(500).json({
+       success: false,
+-      message: 'Server error',
+-      error: error.message
++      message: 'Server error'
+     });
+   }
+ });
+@@ -430,8 +428,7 @@ router.post('/:id/update', protect, [
+   } catch (error) {
+     res.status(500).json({
+       success: false,
+-      message: 'Server error',
+-      error: error.message
++      message: 'Server error'
+     });
+   }
+ });
+diff --git a/backend/routes/deliveries.js b/backend/routes/deliveries.js
+index 9d61e53..fb1da62 100644
+--- a/backend/routes/deliveries.js
++++ b/backend/routes/deliveries.js
+@@ -2,7 +2,8 @@ const express = require('express');
+ const router = express.Router();
+ const { body, validationResult } = require('express-validator');
+ const Delivery = require('../models/Delivery');
+-const { protect, authorize, checkSocietyAccess } = require('../middleware/auth');
++const { protect, authorize, checkSocietyAccess , scopeToSociety } = require('../middleware/auth');
++router.param('id', scopeToSociety(require('../models/Delivery')));
+ const { generateQRCode } = require('../utils/generateQR');
+ const { notifyUser } = require('../utils/notifyUser');
+ const { generateOTP, generateOTPExpiry } = require('../utils/generateOTP');
+@@ -105,8 +106,7 @@ router.post('/invite', protect, authorize('resident'), [
+     console.error('Delivery invite error:', error);
+     res.status(500).json({
+       success: false,
+-      message: 'Server error',
+-      error: error.message
++      message: 'Server error'
+     });
+   }
+ });
+@@ -130,6 +130,8 @@ router.get('/', protect, async (req, res) => {
+       query.status = req.query.status;
+     }
+ 
++    if (req.user.role !== 'super_admin') query.societyId = req.user.societyId;
++
+     const deliveries = await Delivery.find(query)
+       .populate('residentId', 'name email phone flatNo')
+       .populate('approvedBy', 'name')
+@@ -146,8 +148,7 @@ router.get('/', protect, async (req, res) => {
+   } catch (error) {
+     res.status(500).json({
+       success: false,
+-      message: 'Server error',
+-      error: error.message
++      message: 'Server error'
+     });
+   }
+ });
+@@ -183,8 +184,7 @@ router.get('/:id', protect, async (req, res) => {
+   } catch (error) {
+     res.status(500).json({
+       success: false,
+-      message: 'Server error',
+-      error: error.message
++      message: 'Server error'
+     });
+   }
+ });
+@@ -239,8 +239,7 @@ router.put('/:id/approve', protect, authorize('resident', 'security', 'society_a
+   } catch (error) {
+     res.status(500).json({
+       success: false,
+-      message: 'Server error',
+-      error: error.message
++      message: 'Server error'
+     });
+   }
+ });
+@@ -345,8 +344,7 @@ router.put('/:id/check-in', protect, authorize('security', 'society_admin', 'sup
+   } catch (error) {
+     res.status(500).json({
+       success: false,
+-      message: 'Server error',
+-      error: error.message
++      message: 'Server error'
+     });
+   }
+ });
+@@ -358,7 +356,7 @@ router.put('/:id/deliver', protect, authorize('resident', 'security', 'society_a
+   body('otp').optional().trim()
+ ], async (req, res) => {
+   try {
+-    const delivery = await Delivery.findById(req.params.id);
++    const delivery = await Delivery.findById(req.params.id).select('+otp');
+ 
+     if (!delivery) {
+       return res.status(404).json({
+@@ -398,8 +396,7 @@ router.put('/:id/deliver', protect, authorize('resident', 'security', 'society_a
+   } catch (error) {
+     res.status(500).json({
+       success: false,
+-      message: 'Server error',
+-      error: error.message
++      message: 'Server error'
+     });
+   }
+ });
+diff --git a/backend/routes/notices.js b/backend/routes/notices.js
+index 5891a3f..6f7f055 100644
+--- a/backend/routes/notices.js
++++ b/backend/routes/notices.js
+@@ -2,7 +2,8 @@ const express = require('express');
+ const router = express.Router();
+ const { body, validationResult } = require('express-validator');
+ const Notice = require('../models/Notice');
+-const { protect, authorize, checkSocietyAccess } = require('../middleware/auth');
++const { protect, authorize, checkSocietyAccess , scopeToSociety } = require('../middleware/auth');
++router.param('id', scopeToSociety(require('../models/Notice')));
+ const { notifyUsers } = require('../utils/notifyUser');
+ const User = require('../models/User');
+ 
+@@ -105,8 +106,7 @@ router.post('/', protect, authorize('society_admin', 'super_admin'), [
+     console.error('Notice creation error:', error);
+     res.status(500).json({
+       success: false,
+-      message: 'Server error',
+-      error: error.message
++      message: 'Server error'
+     });
+   }
+ });
+@@ -151,6 +151,8 @@ router.get('/', protect, async (req, res) => {
+       );
+     }
+ 
++    if (req.user.role !== 'super_admin') query.societyId = req.user.societyId;
++
+     const notices = await Notice.find(query)
+       .populate('createdBy', 'name')
+       .sort({ createdAt: -1 })
+@@ -165,8 +167,7 @@ router.get('/', protect, async (req, res) => {
+   } catch (error) {
+     res.status(500).json({
+       success: false,
+-      message: 'Server error',
+-      error: error.message
++      message: 'Server error'
+     });
+   }
+ });
+@@ -207,8 +208,7 @@ router.get('/:id', protect, async (req, res) => {
+   } catch (error) {
+     res.status(500).json({
+       success: false,
+-      message: 'Server error',
+-      error: error.message
++      message: 'Server error'
+     });
+   }
+ });
+@@ -280,8 +280,7 @@ router.post('/:id/vote', protect, authorize('resident'), [
+   } catch (error) {
+     res.status(500).json({
+       success: false,
+-      message: 'Server error',
+-      error: error.message
++      message: 'Server error'
+     });
+   }
+ });
+@@ -325,8 +324,7 @@ router.put('/:id', protect, authorize('society_admin', 'super_admin'), async (re
+   } catch (error) {
+     res.status(500).json({
+       success: false,
+-      message: 'Server error',
+-      error: error.message
++      message: 'Server error'
+     });
+   }
+ });
+@@ -355,8 +353,7 @@ router.delete('/:id', protect, authorize('society_admin', 'super_admin'), async
+   } catch (error) {
+     res.status(500).json({
+       success: false,
+-      message: 'Server error',
+-      error: error.message
++      message: 'Server error'
+     });
+   }
+ });
+diff --git a/backend/routes/payments.js b/backend/routes/payments.js
+index 5c7f0a5..8687926 100644
+--- a/backend/routes/payments.js
++++ b/backend/routes/payments.js
+@@ -4,7 +4,8 @@ const { body, validationResult } = require('express-validator');
+ const Payment = require('../models/Payment');
+ const Razorpay = require('razorpay');
+ const crypto = require('crypto');
+-const { protect, authorize } = require('../middleware/auth');
++const { protect, authorize , scopeToSociety } = require('../middleware/auth');
++router.param('id', scopeToSociety(require('../models/Payment')));
+ const { notifyUser } = require('../utils/notifyUser');
+ 
+ // Initialize Razorpay only if credentials are provided
+@@ -104,8 +105,7 @@ router.post('/create-order', protect, authorize('resident'), [
+     console.error('Payment order creation error:', error);
+     res.status(500).json({
+       success: false,
+-      message: 'Server error',
+-      error: error.message
++      message: 'Server error'
+     });
+   }
+ });
+@@ -222,8 +222,7 @@ router.post('/verify', protect, authorize('resident'), [
+     console.error('Payment verification error:', error);
+     res.status(500).json({
+       success: false,
+-      message: 'Server error',
+-      error: error.message
++      message: 'Server error'
+     });
+   }
+ });
+@@ -255,6 +254,8 @@ router.get('/', protect, async (req, res) => {
+       query.month = req.query.month;
+     }
+ 
++    if (req.user.role !== 'super_admin') query.societyId = req.user.societyId;
++
+     const payments = await Payment.find(query)
+       .populate('residentId', 'name flatNo')
+       .sort({ createdAt: -1 })
+@@ -269,8 +270,7 @@ router.get('/', protect, async (req, res) => {
+   } catch (error) {
+     res.status(500).json({
+       success: false,
+-      message: 'Server error',
+-      error: error.message
++      message: 'Server error'
+     });
+   }
+ });
+@@ -516,8 +516,7 @@ router.get('/:id', protect, async (req, res) => {
+   } catch (error) {
+     res.status(500).json({
+       success: false,
+-      message: 'Server error',
+-      error: error.message
++      message: 'Server error'
+     });
+   }
+ });
+@@ -548,8 +547,7 @@ router.get('/history/summary', protect, authorize('resident'), async (req, res)
+   } catch (error) {
+     res.status(500).json({
+       success: false,
+-      message: 'Server error',
+-      error: error.message
++      message: 'Server error'
+     });
+   }
+ });
+diff --git a/backend/routes/societies.js b/backend/routes/societies.js
+index b087630..e397d76 100644
+--- a/backend/routes/societies.js
++++ b/backend/routes/societies.js
+@@ -3,7 +3,8 @@ const router = express.Router();
+ const { body, validationResult } = require('express-validator');
+ const Society = require('../models/Society');
+ const User = require('../models/User');
+-const { protect, authorize } = require('../middleware/auth');
++const { protect, authorize , scopeToOwnSociety } = require('../middleware/auth');
++router.param('id', scopeToOwnSociety);
+ 
+ // @route   POST /api/societies
+ // @desc    Create a society
+@@ -57,8 +58,7 @@ router.post('/', protect, authorize('super_admin'), [
+     console.error('Society creation error:', error);
+     res.status(500).json({
+       success: false,
+-      message: 'Server error',
+-      error: error.message
++      message: 'Server error'
+     });
+   }
+ });
+@@ -73,7 +73,7 @@ router.get('/public', async (req, res) => {
+       .sort({ name: 1 });
+     res.json({ success: true, societies });
+   } catch (error) {
+-    res.status(500).json({ success: false, message: 'Server error', error: error.message });
++    res.status(500).json({ success: false, message: 'Server error' });
+   }
+ });
+ 
+@@ -102,8 +102,7 @@ router.get('/', protect, async (req, res) => {
+   } catch (error) {
+     res.status(500).json({
+       success: false,
+-      message: 'Server error',
+-      error: error.message
++      message: 'Server error'
+     });
+   }
+ });
+@@ -139,8 +138,7 @@ router.get('/:id', protect, async (req, res) => {
+   } catch (error) {
+     res.status(500).json({
+       success: false,
+-      message: 'Server error',
+-      error: error.message
++      message: 'Server error'
+     });
+   }
+ });
+@@ -158,7 +156,7 @@ router.get('/:id/staff', protect, authorize('society_admin', 'super_admin'), asy
+       .sort({ name: 1 });
+     res.json({ success: true, staff });
+   } catch (error) {
+-    res.status(500).json({ success: false, message: 'Server error', error: error.message });
++    res.status(500).json({ success: false, message: 'Server error' });
+   }
+ });
+ 
+@@ -199,8 +197,7 @@ router.get('/:id/residents', protect, authorize('society_admin', 'super_admin'),
+   } catch (error) {
+     res.status(500).json({
+       success: false,
+-      message: 'Server error',
+-      error: error.message
++      message: 'Server error'
+     });
+   }
+ });
+@@ -248,8 +245,7 @@ router.put('/:id', protect, authorize('super_admin', 'society_admin'), async (re
+   } catch (error) {
+     res.status(500).json({
+       success: false,
+-      message: 'Server error',
+-      error: error.message
++      message: 'Server error'
+     });
+   }
+ });
+diff --git a/backend/routes/users.js b/backend/routes/users.js
+index 7810d5a..4c34c78 100644
+--- a/backend/routes/users.js
++++ b/backend/routes/users.js
+@@ -31,8 +31,7 @@ router.get('/notifications', protect, async (req, res) => {
+   } catch (error) {
+     res.status(500).json({
+       success: false,
+-      message: 'Server error',
+-      error: error.message
++      message: 'Server error'
+     });
+   }
+ });
+@@ -70,8 +69,7 @@ router.put('/notifications/:id/read', protect, async (req, res) => {
+   } catch (error) {
+     res.status(500).json({
+       success: false,
+-      message: 'Server error',
+-      error: error.message
++      message: 'Server error'
+     });
+   }
+ });
+@@ -93,8 +91,7 @@ router.put('/notifications/read-all', protect, async (req, res) => {
+   } catch (error) {
+     res.status(500).json({
+       success: false,
+-      message: 'Server error',
+-      error: error.message
++      message: 'Server error'
+     });
+   }
+ });
+@@ -197,8 +194,7 @@ router.put('/approve/:id', protect, authorize('society_admin', 'super_admin'), a
+   } catch (error) {
+     res.status(500).json({
+       success: false,
+-      message: 'Server error',
+-      error: error.message
++      message: 'Server error'
+     });
+   }
+ });
+@@ -263,8 +259,7 @@ router.get('/pending-approvals', protect, authorize('society_admin', 'super_admi
+   } catch (error) {
+     res.status(500).json({
+       success: false,
+-      message: 'Server error',
+-      error: error.message
++      message: 'Server error'
+     });
+   }
+ });
+@@ -299,8 +294,7 @@ router.put('/profile', protect, [
+   } catch (error) {
+     res.status(500).json({
+       success: false,
+-      message: 'Server error',
+-      error: error.message
++      message: 'Server error'
+     });
+   }
+ });
+diff --git a/backend/routes/vehicles.js b/backend/routes/vehicles.js
+index a6eccd2..aa62685 100644
+--- a/backend/routes/vehicles.js
++++ b/backend/routes/vehicles.js
+@@ -2,7 +2,8 @@ const express = require('express');
+ const router = express.Router();
+ const { body, validationResult } = require('express-validator');
+ const Vehicle = require('../models/Vehicle');
+-const { protect, authorize, checkSocietyAccess } = require('../middleware/auth');
++const { protect, authorize, checkSocietyAccess , scopeToSociety } = require('../middleware/auth');
++router.param('id', scopeToSociety(require('../models/Vehicle')));
+ const { notifyUser } = require('../utils/notifyUser');
+ 
+ // @route   POST /api/vehicles/register
+@@ -64,8 +65,7 @@ router.post('/register', protect, authorize('resident'), [
+     console.error('Vehicle registration error:', error);
+     res.status(500).json({
+       success: false,
+-      message: 'Server error',
+-      error: error.message
++      message: 'Server error'
+     });
+   }
+ });
+@@ -89,6 +89,8 @@ router.get('/', protect, async (req, res) => {
+       query.isInside = req.query.isInside === 'true';
+     }
+ 
++    if (req.user.role !== 'super_admin') query.societyId = req.user.societyId;
++
+     const vehicles = await Vehicle.find(query)
+       .populate('residentId', 'name phone flatNo')
+       .sort({ createdAt: -1 });
+@@ -101,8 +103,7 @@ router.get('/', protect, async (req, res) => {
+   } catch (error) {
+     res.status(500).json({
+       success: false,
+-      message: 'Server error',
+-      error: error.message
++      message: 'Server error'
+     });
+   }
+ });
+@@ -199,8 +200,7 @@ router.get('/:id', protect, async (req, res) => {
+   } catch (error) {
+     res.status(500).json({
+       success: false,
+-      message: 'Server error',
+-      error: error.message
++      message: 'Server error'
+     });
+   }
+ });
+@@ -266,8 +266,7 @@ router.post('/:id/entry', protect, authorize('security', 'society_admin', 'super
+   } catch (error) {
+     res.status(500).json({
+       success: false,
+-      message: 'Server error',
+-      error: error.message
++      message: 'Server error'
+     });
+   }
+ });
+@@ -331,8 +330,7 @@ router.post('/:id/exit', protect, authorize('security', 'society_admin', 'super_
+   } catch (error) {
+     res.status(500).json({
+       success: false,
+-      message: 'Server error',
+-      error: error.message
++      message: 'Server error'
+     });
+   }
+ });
+@@ -362,8 +360,7 @@ router.get('/search/:vehicleNumber', protect, authorize('security', 'society_adm
+   } catch (error) {
+     res.status(500).json({
+       success: false,
+-      message: 'Server error',
+-      error: error.message
++      message: 'Server error'
+     });
+   }
+ });
+diff --git a/backend/routes/visitors.js b/backend/routes/visitors.js
+index 9d6a887..b84a3dd 100644
+--- a/backend/routes/visitors.js
++++ b/backend/routes/visitors.js
+@@ -2,7 +2,8 @@ const express = require('express');
+ const router = express.Router();
+ const { body, validationResult } = require('express-validator');
+ const Visitor = require('../models/Visitor');
+-const { protect, authorize, checkSocietyAccess } = require('../middleware/auth');
++const { protect, authorize, checkSocietyAccess , scopeToSociety } = require('../middleware/auth');
++router.param('id', scopeToSociety(require('../models/Visitor')));
+ const { generateQRCode } = require('../utils/generateQR');
+ const { notifyUser } = require('../utils/notifyUser');
+ const crypto = require('crypto');
+@@ -103,8 +104,7 @@ router.post('/invite', protect, authorize('resident'), [
+     console.error('Visitor invite error:', error);
+     res.status(500).json({
+       success: false,
+-      message: 'Server error',
+-      error: error.message
++      message: 'Server error'
+     });
+   }
+ });
+@@ -158,8 +158,7 @@ router.get('/', protect, async (req, res) => {
+   } catch (error) {
+     res.status(500).json({
+       success: false,
+-      message: 'Server error',
+-      error: error.message
++      message: 'Server error'
+     });
+   }
+ });
+@@ -196,8 +195,7 @@ router.get('/:id', protect, async (req, res) => {
+   } catch (error) {
+     res.status(500).json({
+       success: false,
+-      message: 'Server error',
+-      error: error.message
++      message: 'Server error'
+     });
+   }
+ });
+@@ -293,8 +291,7 @@ router.put('/:id/approve', protect, authorize('resident', 'security', 'society_a
+   } catch (error) {
+     res.status(500).json({
+       success: false,
+-      message: 'Server error',
+-      error: error.message
++      message: 'Server error'
+     });
+   }
+ });
+@@ -359,8 +356,7 @@ router.put('/:id/reject', protect, authorize('resident', 'security', 'society_ad
+   } catch (error) {
+     res.status(500).json({
+       success: false,
+-      message: 'Server error',
+-      error: error.message
++      message: 'Server error'
+     });
+   }
+ });
+@@ -417,8 +413,7 @@ router.put('/:id/check-in', protect, authorize('security', 'society_admin', 'sup
+   } catch (error) {
+     res.status(500).json({
+       success: false,
+-      message: 'Server error',
+-      error: error.message
++      message: 'Server error'
+     });
+   }
+ });
+@@ -474,8 +469,7 @@ router.put('/:id/check-out', protect, authorize('security', 'society_admin', 'su
+   } catch (error) {
+     res.status(500).json({
+       success: false,
+-      message: 'Server error',
+-      error: error.message
++      message: 'Server error'
+     });
+   }
+ });
+@@ -511,8 +505,7 @@ router.get('/logs/today', protect, authorize('security', 'society_admin', 'super
+   } catch (error) {
+     res.status(500).json({
+       success: false,
+-      message: 'Server error',
+-      error: error.message
++      message: 'Server error'
+     });
+   }
+ });
+diff --git a/backend/scripts/createAdmin.js b/backend/scripts/createAdmin.js
+index 03eba67..6ad2576 100644
+--- a/backend/scripts/createAdmin.js
++++ b/backend/scripts/createAdmin.js
+@@ -12,6 +12,10 @@ const createAdmin = async () => {
+     // Get admin details from command line arguments or use defaults
+     const args = process.argv.slice(2);
+     const email = args[0] || 'admin@mygate.com';
++    if (process.env.NODE_ENV === 'production' && !args[1]) {
++      console.error('Pass a password: npm run create-admin <email> <password> <name> <phone> <role>');
++      process.exit(1);
++    }
+     const password = args[1] || 'admin123';
+     const name = args[2] || 'Super Admin';
+     const phone = args[3] || '1234567890';
+diff --git a/backend/server.js b/backend/server.js
+index f7e98e5..5c1334c 100644
+--- a/backend/server.js
++++ b/backend/server.js
+@@ -15,13 +15,21 @@ const rateLimit = require('express-rate-limit');
+ const { createServer } = require('http');
+ const { Server } = require('socket.io');
+ require('dotenv').config();
++const jwt = require('jsonwebtoken');
++const User = require('./models/User');
++const sanitize = require('./middleware/sanitize');
++require('./utils/checkEnv')();
++
++// FRONTEND_URL may hold several origins separated by commas.
++const allowedOrigins = (process.env.FRONTEND_URL || 'http://localhost:5173').split(',').map((o) => o.trim()).filter(Boolean);
+ 
+ const app = express();
++app.set('trust proxy', 1); // correct client IPs (rate limits) behind Render, Railway, nginx and similar
+ const httpServer = createServer(app);
+ const io = new Server(httpServer, {
+   cors: {
+-    origin: process.env.FRONTEND_URL || "http://localhost:5173",
+-    methods: ["GET", "POST"]
++    origin: allowedOrigins,
++    methods: ['GET', 'POST']
+   }
+ });
+ 
+@@ -40,31 +48,54 @@ const userRoutes = require('./routes/users');
+ // Middleware
+ app.use(helmet());
+ app.use(cors({
+-  origin: process.env.FRONTEND_URL || "http://localhost:5173",
++  origin: allowedOrigins,
+   credentials: true
+ }));
+-app.use(express.json());
+-app.use(express.urlencoded({ extended: true }));
++app.use(express.json({ limit: '1mb' }));
++app.use(express.urlencoded({ extended: true, limit: '1mb' }));
++app.use(sanitize);
+ 
+-// Rate limiting
++// Rate limiting. The app makes several calls per page, so the general limit is generous;
++// sign-in and password endpoints get a much tighter one.
+ const limiter = rateLimit({
+-  windowMs: 15 * 60 * 1000, // 15 minutes
+-  max: 100 // limit each IP to 100 requests per windowMs
++  windowMs: 15 * 60 * 1000,
++  max: 1500,
++  standardHeaders: true,
++  legacyHeaders: false,
++  message: { success: false, message: 'Too many requests. Please slow down and try again shortly.' }
+ });
+ app.use('/api/', limiter);
+ 
+-// Socket.io connection handling
+-io.on('connection', (socket) => {
+-  console.log('User connected:', socket.id);
++const authLimiter = rateLimit({
++  windowMs: 15 * 60 * 1000,
++  max: 30,
++  standardHeaders: true,
++  legacyHeaders: false,
++  skipSuccessfulRequests: true,
++  message: { success: false, message: 'Too many attempts. Please wait 15 minutes and try again.' }
++});
++['/api/auth/login', '/api/auth/register', '/api/auth/forgot-password', '/api/auth/reset-password'].forEach((path) => app.use(path, authLimiter));
+ 
+-  socket.on('join-room', (userId) => {
+-    socket.join(`user-${userId}`);
+-    console.log(`User ${userId} joined their room`);
+-  });
++// Socket.io connection handling
++// Only signed-in users may connect, and each can only join their own room.
++io.use(async (socket, next) => {
++  try {
++    const token = socket.handshake.auth?.token;
++    if (!token) return next(new Error('Not authorized'));
++    const decoded = jwt.verify(token, process.env.JWT_SECRET);
++    const user = await User.findById(decoded.id).select('_id isActive isApproved');
++    if (!user || !user.isActive) return next(new Error('Not authorized'));
++    socket.userId = String(user._id);
++    next();
++  } catch (e) {
++    next(new Error('Not authorized'));
++  }
++});
+ 
+-  socket.on('disconnect', () => {
+-    console.log('User disconnected:', socket.id);
+-  });
++io.on('connection', (socket) => {
++  // The room is decided by the verified token, never by what the client asks for.
++  socket.join(`user-${socket.userId}`);
++  socket.on('join-room', () => {}); // kept so older clients do not error
+ });
+ 
+ // Make io available to routes
+@@ -90,9 +121,11 @@ app.get('/api/health', (req, res) => {
+ // Error handling middleware
+ app.use((err, req, res, next) => {
+   console.error(err.stack);
+-  res.status(err.status || 500).json({
++  const status = err.status || 500;
++  const isProd = process.env.NODE_ENV === 'production';
++  res.status(status).json({
+     success: false,
+-    message: err.message || 'Internal Server Error',
++    message: status < 500 || !isProd ? err.message || 'Something went wrong' : 'Something went wrong',
+     ...(process.env.NODE_ENV === 'development' && { stack: err.stack })
+   });
+ });
+diff --git a/backend/utils/checkEnv.js b/backend/utils/checkEnv.js
+new file mode 100644
+index 0000000..738df68
+--- /dev/null
++++ b/backend/utils/checkEnv.js
+@@ -0,0 +1,23 @@
++// Fail fast on unsafe configuration instead of running with it.
++module.exports = () => {
++  const isProd = process.env.NODE_ENV === 'production';
++  const secret = process.env.JWT_SECRET || '';
++  const placeholder = /change_in_production|your_super_secret|secret$/i.test(secret);
++
++  if (!secret) {
++    console.error('\nJWT_SECRET is not set. Add a long random value to backend/.env, for example:');
++    console.error('  node -e "console.log(require(\'crypto\').randomBytes(48).toString(\'hex\'))"\n');
++    process.exit(1);
++  }
++  if (isProd && (secret.length < 32 || placeholder)) {
++    console.error('\nJWT_SECRET is too weak for production. Use at least 32 random characters and not the example value.\n');
++    process.exit(1);
++  }
++  if (!isProd && (secret.length < 32 || placeholder)) {
++    console.warn('Warning: JWT_SECRET looks weak. Fine for local development, never for production.');
++  }
++  if (isProd && !process.env.FRONTEND_URL) {
++    console.error('\nFRONTEND_URL must be set in production (it is used for CORS and email links).\n');
++    process.exit(1);
++  }
++};
+diff --git a/backend/utils/passwordRules.js b/backend/utils/passwordRules.js
+new file mode 100644
+index 0000000..6d46a37
+--- /dev/null
++++ b/backend/utils/passwordRules.js
+@@ -0,0 +1,11 @@
++const { body } = require('express-validator');
++
++const MESSAGE = 'Password must be at least 8 characters and include a letter and a number';
++
++// Use as: strongPassword('password') inside a route's validator list.
++exports.strongPassword = (field) =>
++  body(field)
++    .isString().withMessage(MESSAGE)
++    .isLength({ min: 8, max: 128 }).withMessage(MESSAGE)
++    .matches(/[A-Za-z]/).withMessage(MESSAGE)
++    .matches(/\d/).withMessage(MESSAGE);
+diff --git a/frontend/src/components/ui.jsx b/frontend/src/components/ui.jsx
+index acbef7f..c739f0e 100644
+--- a/frontend/src/components/ui.jsx
++++ b/frontend/src/components/ui.jsx
+@@ -25,7 +25,7 @@ export const titleCase = (s = '') =>
+ 
+ export const errorMessage = (error, fallback = 'Something went wrong. Try again.') => {
+   const data = error?.response?.data
+-  if (data?.errors?.length) return data.errors.map((e) => e.msg).join('. ')
++  if (data?.errors?.length) return [...new Set(data.errors.map((e) => e.msg))].join('. ')
+   return data?.message || fallback
+ }
+ 
+diff --git a/frontend/src/contexts/SocketContext.jsx b/frontend/src/contexts/SocketContext.jsx
+index 2f3136f..8e1888a 100644
+--- a/frontend/src/contexts/SocketContext.jsx
++++ b/frontend/src/contexts/SocketContext.jsx
+@@ -18,9 +18,11 @@ export const SocketProvider = ({ children }) => {
+   useEffect(() => {
+     if (!isAuthenticated || !user?.id) return undefined
+ 
+-    const newSocket = io(SOCKET_URL, { transports: ['websocket', 'polling'] })
++    const newSocket = io(SOCKET_URL, {
++      transports: ['websocket', 'polling'],
++      auth: { token: localStorage.getItem('token') }
++    })
+ 
+-    newSocket.on('connect', () => newSocket.emit('join-room', user.id))
+     newSocket.on('notification', (notification) => {
+       setLastNotification({ ...notification, receivedAt: Date.now() })
+       toast(notification.title || 'New notification', { icon: '🔔', duration: 5000 })
+diff --git a/frontend/src/pages/AdminSocieties.jsx b/frontend/src/pages/AdminSocieties.jsx
+index 5a3fb09..701cd8c 100644
+--- a/frontend/src/pages/AdminSocieties.jsx
++++ b/frontend/src/pages/AdminSocieties.jsx
+@@ -203,7 +203,7 @@ const AdminSocieties = () => {
+             <Field label="Email" htmlFor="a-email"><input id="a-email" required type="email" className="input" value={admin.email} onChange={(e) => setAdmin({ ...admin, email: e.target.value })} /></Field>
+             <Field label="Phone" htmlFor="a-phone"><input id="a-phone" required type="tel" inputMode="numeric" maxLength={10} className="input" value={admin.phone} onChange={(e) => setAdmin({ ...admin, phone: e.target.value })} /></Field>
+           </div>
+-          <Field label="Temporary password" htmlFor="a-pass" hint="They can change it from their profile after signing in."><input id="a-pass" required type="password" minLength={6} autoComplete="new-password" className="input" value={admin.password} onChange={(e) => setAdmin({ ...admin, password: e.target.value })} /></Field>
++          <Field label="Temporary password" htmlFor="a-pass" hint="At least 8 characters with a letter and a number. They can change it after signing in."><input id="a-pass" required type="password" minLength={8} autoComplete="new-password" className="input" value={admin.password} onChange={(e) => setAdmin({ ...admin, password: e.target.value })} /></Field>
+           {adminError && <p role="alert" className="text-sm font-medium text-danger">{adminError}</p>}
+         </form>
+       </Modal>
+diff --git a/frontend/src/pages/Payments.jsx b/frontend/src/pages/Payments.jsx
+index 0da16f7..e1856bc 100644
+--- a/frontend/src/pages/Payments.jsx
++++ b/frontend/src/pages/Payments.jsx
+@@ -13,7 +13,9 @@ const EMPTY_FORM = { amount: '', type: 'maintenance', month: thisMonth(), descri
+ 
+ const Payments = () => {
+   const { user, isResident } = useAuth()
+-  const isSocAdmin = user?.role === 'society_admin'
++  const isSocAdmin = user?.role === 'society_admin' || user?.role === 'super_admin'
++  const isSuper = user?.role === 'super_admin'
++  const { data: societies } = useApi('/societies', { enabled: isSuper, live: false, select: (d) => d.societies || [] })
+   const [month, setMonth] = useState('')
+   const { data, loading, error, reload } = useApi('/payments', {
+     params: { limit: 100, ...(!isResident && month ? { month } : {}) },
+@@ -41,7 +43,7 @@ const Payments = () => {
+ 
+   // Admin: create dues for every approved resident
+   const [duesOpen, setDuesOpen] = useState(false)
+-  const [dues, setDues] = useState({ type: 'maintenance', amount: '', month: thisMonth(), dueDate: '', description: '' })
++  const [dues, setDues] = useState({ societyId: '', type: 'maintenance', amount: '', month: thisMonth(), dueDate: '', description: '' })
+   const [duesError, setDuesError] = useState('')
+   const createDues = async (e) => {
+     e.preventDefault()
+@@ -51,6 +53,7 @@ const Payments = () => {
+     setBusy('dues')
+     try {
+       const { data: res } = await api.post('/payments/generate', {
++        societyId: isSuper ? dues.societyId || societies?.[0]?._id : undefined,
+         type: dues.type,
+         amount,
+         month: dues.type === 'maintenance' ? dues.month : undefined,
+@@ -321,6 +324,13 @@ const Payments = () => {
+         }
+       >
+         <form id="dues-form" onSubmit={createDues} className="space-y-4">
++          {isSuper && (
++            <Field label="Society" htmlFor="dues-society">
++              <select id="dues-society" className="input" value={dues.societyId || societies?.[0]?._id || ''} onChange={(e) => setDues({ ...dues, societyId: e.target.value })}>
++                {(societies || []).map((s) => <option key={s._id} value={s._id}>{s.name}</option>)}
++              </select>
++            </Field>
++          )}
+           <p className="text-sm text-muted">Every approved resident gets this due and a notification. Flats already billed for the same month are skipped.</p>
+           <div className="grid gap-4 sm:grid-cols-2">
+             <Field label="Amount per flat (₹)" htmlFor="dues-amount">
+diff --git a/frontend/src/pages/Profile.jsx b/frontend/src/pages/Profile.jsx
+index 099e168..b1de4a3 100644
+--- a/frontend/src/pages/Profile.jsx
++++ b/frontend/src/pages/Profile.jsx
+@@ -34,7 +34,7 @@ const Profile = () => {
+   const changePassword = async (e) => {
+     e.preventDefault()
+     setPwError('')
+-    if (pw.newPassword.length < 6) return setPwError('Use at least 6 characters for the new password.')
++    if (pw.newPassword.length < 8 || !/[A-Za-z]/.test(pw.newPassword) || !/\d/.test(pw.newPassword)) return setPwError('Use at least 8 characters with a letter and a number.')
+     if (pw.newPassword !== pw.confirm) return setPwError('The two new passwords do not match.')
+     setSavingPw(true)
+     try {
+@@ -99,7 +99,7 @@ const Profile = () => {
+             <Field label="Current password" htmlFor="pw-current">
+               <input id="pw-current" type="password" autoComplete="current-password" className="input" value={pw.currentPassword} onChange={(e) => setPw({ ...pw, currentPassword: e.target.value })} />
+             </Field>
+-            <Field label="New password" htmlFor="pw-new" hint="At least 6 characters.">
++            <Field label="New password" htmlFor="pw-new" hint="At least 8 characters, with a letter and a number.">
+               <input id="pw-new" type="password" autoComplete="new-password" className="input" value={pw.newPassword} onChange={(e) => setPw({ ...pw, newPassword: e.target.value })} />
+             </Field>
+             <Field label="Confirm new password" htmlFor="pw-confirm">
+diff --git a/frontend/src/pages/Register.jsx b/frontend/src/pages/Register.jsx
+index 7bac47e..3ff9b09 100644
+--- a/frontend/src/pages/Register.jsx
++++ b/frontend/src/pages/Register.jsx
+@@ -18,7 +18,7 @@ const validate = (f) => {
+   if (!f.name.trim()) e.name = 'Enter your full name.'
+   if (!/^\S+@\S+\.\S+$/.test(f.email)) e.email = 'Enter a valid email address.'
+   if (!/^[0-9]{10}$/.test(f.phone)) e.phone = 'Enter a 10-digit mobile number.'
+-  if (f.password.length < 6) e.password = 'Use at least 6 characters.'
++  if (f.password.length < 8 || !/[A-Za-z]/.test(f.password) || !/\d/.test(f.password)) e.password = 'Use at least 8 characters with a letter and a number.'
+   if (!f.societyId) e.societyId = 'Choose your society.'
+   if (f.role === 'resident' && !f.flatNo.trim()) e.flatNo = 'Enter your flat number.'
+   return e
+@@ -107,7 +107,7 @@ const Register = () => {
+           </Field>
+         </div>
+ 
+-        <Field label="Password" htmlFor="password" error={errors.password} hint="At least 6 characters.">
++        <Field label="Password" htmlFor="password" error={errors.password} hint="At least 8 characters, with a letter and a number.">
+           <input id="password" name="password" type="password" autoComplete="new-password" className="input" value={formData.password} onChange={handleChange} />
+         </Field>
+ 
+diff --git a/frontend/src/pages/ResetPassword.jsx b/frontend/src/pages/ResetPassword.jsx
+index 141f2a6..0b54724 100644
+--- a/frontend/src/pages/ResetPassword.jsx
++++ b/frontend/src/pages/ResetPassword.jsx
+@@ -16,7 +16,7 @@ const ResetPassword = () => {
+   const handleSubmit = async (e) => {
+     e.preventDefault()
+     setError('')
+-    if (password.length < 6) return setError('Use at least 6 characters.')
++    if (password.length < 8 || !/[A-Za-z]/.test(password) || !/\d/.test(password)) return setError('Use at least 8 characters with a letter and a number.')
+     if (password !== confirm) return setError('The two passwords do not match.')
+ 
+     setLoading(true)
+@@ -41,7 +41,7 @@ const ResetPassword = () => {
+       }
+     >
+       <form className="space-y-5" onSubmit={handleSubmit} noValidate>
+-        <Field label="New password" htmlFor="password" hint="At least 6 characters.">
++        <Field label="New password" htmlFor="password" hint="At least 8 characters, with a letter and a number.">
+           <input id="password" type="password" autoComplete="new-password" className="input" value={password} onChange={(e) => setPassword(e.target.value)} />
+         </Field>
+         <Field label="Confirm new password" htmlFor="confirm">

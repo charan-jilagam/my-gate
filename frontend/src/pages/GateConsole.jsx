@@ -1,11 +1,12 @@
 import { useState } from 'react'
 import toast from 'react-hot-toast'
-import { FiLogIn, FiLogOut, FiSearch, FiUserPlus } from 'react-icons/fi'
+import { FiCamera, FiLogIn, FiLogOut, FiSearch, FiUserPlus } from 'react-icons/fi'
 import { useAuth } from '../contexts/AuthContext'
 import api from '../services/api'
 import useApi from '../hooks/useApi'
 import useAction from '../hooks/useAction'
 import { passCode } from '../utils/pass'
+import QrScanner from '../components/QrScanner'
 import { EmptyState, ErrorState, Field, ListSkeleton, Modal, PageHeader, Spinner, StatusTag, errorMessage, formatDate, titleCase } from '../components/ui'
 
 const PURPOSES = ['personal', 'business', 'delivery', 'service', 'other']
@@ -60,13 +61,28 @@ const GateConsole = () => {
   const [lookupError, setLookupError] = useState('')
   const [looking, setLooking] = useState(false)
 
-  const findPass = async (e) => {
-    e.preventDefault()
+  const [scanning, setScanning] = useState(false)
+  const onScan = (text) => {
+    setScanning(false)
+    let value = ''
+    try {
+      value = JSON.parse(text)?.visitorId?.slice(0, 8) || ''
+    } catch (e) {
+      value = String(text).trim()
+    }
+    if (!value) return setLookupError('That QR code is not a MyGate visitor pass.')
+    setCode(value.toUpperCase())
+    findPass(null, value)
+  }
+
+  const findPass = async (e, override) => {
+    e?.preventDefault()
+    const query = (override ?? code).trim()
     setLookupError('')
     setLookup(null)
     setLooking(true)
     try {
-      const { data } = await api.get(`/visitors/lookup/${encodeURIComponent(code.trim())}`)
+      const { data } = await api.get(`/visitors/lookup/${encodeURIComponent(query)}`)
       setLookup(data.visitor)
     } catch (err) {
       setLookupError(errorMessage(err, 'Could not look up that code.'))
@@ -171,6 +187,10 @@ const GateConsole = () => {
         ))}
       </div>
 
+      <Modal open={scanning} onClose={() => setScanning(false)} title="Scan visitor pass" size="sm">
+        {scanning && <QrScanner onScan={onScan} />}
+      </Modal>
+
       {tab === 'visitors' && (
         <div className="space-y-5">
           <form onSubmit={findPass} className="panel p-4">
@@ -179,6 +199,9 @@ const GateConsole = () => {
               <input id="pass" className="input font-mono uppercase tracking-widest" placeholder="A1B2C3D4" maxLength={32} autoComplete="off" value={code} onChange={(e) => setCode(e.target.value)} />
               <button className="btn-primary" disabled={looking || code.trim().length < 6}>
                 {looking ? <Spinner className="h-4 w-4" /> : <FiSearch size={16} />} Find
+              </button>
+              <button type="button" className="btn-secondary" onClick={() => setScanning(true)} aria-label="Scan QR code with camera">
+                <FiCamera size={16} /> <span className="hidden sm:inline">Scan</span>
               </button>
             </div>
             {lookupError && <p role="alert" className="mt-2 text-sm font-medium text-danger">{lookupError}</p>}

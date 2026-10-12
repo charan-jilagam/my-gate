@@ -37,16 +37,17 @@ npm run create-admin admin@example.com mypassword123 "John Admin" 9876543210 sup
 
 ### Method 2: Using the API Endpoint (Development Mode)
 
-In development mode, you can create admin users via API:
+Once you have a super admin, you can create more admins via the API (or from the Societies page in the app). Sign in first and send the token:
 
 **Create Super Admin:**
 ```bash
 curl -X POST http://localhost:5000/api/auth/create-admin \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_SUPER_ADMIN_TOKEN" \
   -d '{
     "name": "Super Admin",
     "email": "admin@mygate.com",
-    "password": "admin123",
+    "password": "admin12345",
     "phone": "1234567890",
     "role": "super_admin"
   }'
@@ -56,17 +57,18 @@ curl -X POST http://localhost:5000/api/auth/create-admin \
 ```bash
 curl -X POST http://localhost:5000/api/auth/create-admin \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_SUPER_ADMIN_TOKEN" \
   -d '{
     "name": "Society Admin",
     "email": "societyadmin@mygate.com",
-    "password": "admin123",
+    "password": "admin12345",
     "phone": "1234567890",
     "role": "society_admin",
     "societyId": "<society-id-here>"
   }'
 ```
 
-**Note:** This endpoint only works in development mode (`NODE_ENV=development`) or when called by an existing super admin.
+**Note:** This endpoint requires a signed-in super admin (send their token as `Authorization: Bearer <token>`). Create the very first super admin with `npm run create-admin`.
 
 ### Method 3: Using MongoDB Directly
 

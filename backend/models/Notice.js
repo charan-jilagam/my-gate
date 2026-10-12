@@ -37,7 +37,7 @@ const noticeSchema = new mongoose.Schema({
   }],
   targetAudience: {
     type: String,
-    enum: ['all', 'residents', 'owners', 'tenants', 'specific_blocks'],
+    enum: ['all', 'residents', 'owners', 'tenants', 'specific_blocks', 'specific_flats'],
     default: 'all'
   },
   targetBlocks: [{

@@ -15,13 +15,21 @@ const rateLimit = require('express-rate-limit');
 const { createServer } = require('http');
 const { Server } = require('socket.io');
 require('dotenv').config();
+const jwt = require('jsonwebtoken');
+const User = require('./models/User');
+const sanitize = require('./middleware/sanitize');
+require('./utils/checkEnv')();
+
+// FRONTEND_URL may hold several origins separated by commas.
+const allowedOrigins = (process.env.FRONTEND_URL || 'http://localhost:5173').split(',').map((o) => o.trim()).filter(Boolean);
 
 const app = express();
+app.set('trust proxy', 1); // correct client IPs (rate limits) behind Render, Railway, nginx and similar
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
   cors: {
-    origin: process.env.FRONTEND_URL || "http://localhost:5173",
-    methods: ["GET", "POST"]
+    origin: allowedOrigins,
+    methods: ['GET', 'POST']
   }
 });
 
@@ -36,35 +44,60 @@ const complaintRoutes = require('./routes/complaints');
 const paymentRoutes = require('./routes/payments');
 const bookingRoutes = require('./routes/bookings');
 const userRoutes = require('./routes/users');
+const uploadRoutes = require('./routes/uploads');
+const pushRoutes = require('./routes/push');
 
 // Middleware
 app.use(helmet());
 app.use(cors({
-  origin: process.env.FRONTEND_URL || "http://localhost:5173",
+  origin: allowedOrigins,
   credentials: true
 }));
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json({ limit: '1mb' }));
+app.use(express.urlencoded({ extended: true, limit: '1mb' }));
+app.use(sanitize);
 
-// Rate limiting
+// Rate limiting. The app makes several calls per page, so the general limit is generous;
+// sign-in and password endpoints get a much tighter one.
 const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100 // limit each IP to 100 requests per windowMs
+  windowMs: 15 * 60 * 1000,
+  max: 1500,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, message: 'Too many requests. Please slow down and try again shortly.' }
 });
 app.use('/api/', limiter);
 
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skipSuccessfulRequests: true,
+  message: { success: false, message: 'Too many attempts. Please wait 15 minutes and try again.' }
+});
+['/api/auth/login', '/api/auth/register', '/api/auth/forgot-password', '/api/auth/reset-password'].forEach((path) => app.use(path, authLimiter));
+
 // Socket.io connection handling
+// Only signed-in users may connect, and each can only join their own room.
+io.use(async (socket, next) => {
+  try {
+    const token = socket.handshake.auth?.token;
+    if (!token) return next(new Error('Not authorized'));
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const user = await User.findById(decoded.id).select('_id isActive isApproved');
+    if (!user || !user.isActive) return next(new Error('Not authorized'));
+    socket.userId = String(user._id);
+    next();
+  } catch (e) {
+    next(new Error('Not authorized'));
+  }
+});
+
 io.on('connection', (socket) => {
-  console.log('User connected:', socket.id);
-
-  socket.on('join-room', (userId) => {
-    socket.join(`user-${userId}`);
-    console.log(`User ${userId} joined their room`);
-  });
-
-  socket.on('disconnect', () => {
-    console.log('User disconnected:', socket.id);
-  });
+  // The room is decided by the verified token, never by what the client asks for.
+  socket.join(`user-${socket.userId}`);
+  socket.on('join-room', () => {}); // kept so older clients do not error
 });
 
 // Make io available to routes
@@ -81,6 +114,18 @@ app.use('/api/complaints', complaintRoutes);
 app.use('/api/payments', paymentRoutes);
 app.use('/api/bookings', bookingRoutes);
 app.use('/api/users', userRoutes);
+app.use('/api/uploads', uploadRoutes);
+app.use('/api/push', pushRoutes);
+
+// Uploaded images (used only when Cloudinary is not configured). Images must be loadable from the frontend's origin.
+app.use('/uploads', express.static(require('path').join(__dirname, 'uploads'), {
+  maxAge: '7d',
+  index: false,
+  setHeaders: (res) => {
+    res.set('Cross-Origin-Resource-Policy', 'cross-origin');
+    res.set('X-Content-Type-Options', 'nosniff');
+  }
+}));
 
 // Health check
 app.get('/api/health', (req, res) => {
@@ -90,9 +135,11 @@ app.get('/api/health', (req, res) => {
 // Error handling middleware
 app.use((err, req, res, next) => {
   console.error(err.stack);
-  res.status(err.status || 500).json({
+  const status = err.status || 500;
+  const isProd = process.env.NODE_ENV === 'production';
+  res.status(status).json({
     success: false,
-    message: err.message || 'Internal Server Error',
+    message: status < 500 || !isProd ? err.message || 'Something went wrong' : 'Something went wrong',
     ...(process.env.NODE_ENV === 'development' && { stack: err.stack })
   });
 });
@@ -104,8 +151,7 @@ app.use((req, res) => {
 
 // Connect to MongoDB
 mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/mygate', {
-  useNewUrlParser: true,
-  useUnifiedTopology: true,
+  serverSelectionTimeoutMS: 10000 // fail fast with a clear message instead of hanging
 })
 .then(() => {
   console.log('MongoDB connected successfully');
@@ -116,7 +162,15 @@ mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/mygate', 
   });
 })
 .catch((error) => {
-  console.error('MongoDB connection error:', error);
+  console.error('\nMongoDB connection error:', error.message);
+  const uri = process.env.MONGODB_URI || '';
+  if (!uri) {
+    console.error('Hint: MONGODB_URI is not set. Create backend/.env (copy .env.example) and set it.');
+  } else if (/bad auth|authentication failed/i.test(error.message)) {
+    console.error('Hint: wrong database username or password. If the password has special characters (@ : / ? # %), URL-encode them.');
+  } else if (/ENOTFOUND|querySrv|ETIMEOUT|ECONNREFUSED|Server selection timed out|whitelist|IP/i.test(error.message)) {
+    console.error('Hint: cannot reach the database. For MongoDB Atlas, open Network Access and allow your current IP address (or 0.0.0.0/0 while testing).');
+  }
   process.exit(1);
 });
 

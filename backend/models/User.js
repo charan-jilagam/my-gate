@@ -75,6 +75,27 @@ const userSchema = new mongoose.Schema({
     type: Boolean,
     default: true
   },
+  rejectedAt: {
+    type: Date
+  },
+  rejectedReason: {
+    type: String,
+    trim: true
+  },
+  notificationPrefs: {
+    push: { type: Boolean, default: true },
+    sms: { type: Boolean, default: true }
+  },
+  pushSubscriptions: {
+    type: [{
+      endpoint: { type: String, required: true },
+      keys: { p256dh: String, auth: String },
+      addedAt: { type: Date, default: Date.now }
+    }],
+    select: false
+  },
+  loginAttempts: { type: Number, default: 0 },
+  lockUntil: Date,
   resetPasswordToken: String,
   resetPasswordExpire: Date,
   lastLogin: Date

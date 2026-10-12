@@ -10,7 +10,7 @@ const POINTS = [
 /** Two-column sign-in layout: the brand panel on the left, the form on the right. */
 const AuthShell = ({ title, subtitle, children, footer }) => (
   <div className="grid min-h-screen lg:grid-cols-[minmax(0,5fr)_minmax(0,6fr)]">
-    <aside className="relative hidden flex-col justify-between overflow-hidden bg-brand-strong p-12 text-white lg:flex">
+    <aside className="relative hidden flex-col justify-between overflow-hidden bg-side p-12 text-white lg:flex">
       <div className="hazard absolute inset-x-0 top-0 h-2" aria-hidden="true" />
       <Logo />
       <div>

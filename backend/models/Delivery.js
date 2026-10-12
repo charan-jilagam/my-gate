@@ -100,7 +100,8 @@ const deliverySchema = new mongoose.Schema({
   },
   otp: {
     type: String,
-    length: 6
+    length: 6,
+    select: false // never sent to guards or admins
   },
   otpExpires: {
     type: Date
