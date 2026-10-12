@@ -1,284 +1,245 @@
-import { useState, useEffect } from 'react'
+import { useMemo, useState } from 'react'
+import { FiFileText, FiPlus } from 'react-icons/fi'
 import { useAuth } from '../contexts/AuthContext'
 import api from '../services/api'
-import toast from 'react-hot-toast'
-import { FiFileText, FiPlus } from 'react-icons/fi'
+import useApi from '../hooks/useApi'
+import useAction from '../hooks/useAction'
+import { DataList, EmptyState, Field, Modal, PageHeader, Spinner, StatusTag, formatDate, titleCase } from '../components/ui'
+
+const CATEGORIES = ['maintenance', 'security', 'cleaning', 'amenities', 'billing', 'noise', 'parking', 'other']
+const PRIORITIES = ['low', 'medium', 'high', 'urgent']
+const STATUSES = ['open', 'in_progress', 'resolved', 'closed', 'rejected']
+const EMPTY_FORM = { title: '', description: '', category: 'maintenance', priority: 'medium', location: '' }
+const FILTERS = [{ key: 'all', label: 'All' }, ...['open', 'in_progress', 'resolved'].map((s) => ({ key: s, label: titleCase(s) }))]
 
 const Complaints = () => {
   const { user, isResident, isAdmin } = useAuth()
-  const [complaints, setComplaints] = useState([])
-  const [staff, setStaff] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [showModal, setShowModal] = useState(false)
-  const [statusModal, setStatusModal] = useState(null)
-  const [assignModal, setAssignModal] = useState(null)
-  const [formData, setFormData] = useState({
-    title: '',
-    description: '',
-    category: 'other',
-    priority: 'medium'
+  const canManage = isAdmin || user?.role === 'staff'
+  const { data, loading, error, reload } = useApi('/complaints', { select: (d) => d.complaints || [] })
+  const { busy, run } = useAction(reload)
+  const [filter, setFilter] = useState('all')
+  const [createOpen, setCreateOpen] = useState(false)
+  const [form, setForm] = useState(EMPTY_FORM)
+
+  const [detailId, setDetailId] = useState(null)
+  const {
+    data: detail,
+    loading: detailLoading,
+    reload: reloadDetail
+  } = useApi(`/complaints/${detailId}`, { enabled: !!detailId, live: false, select: (d) => d.complaint })
+  const { busy: detailBusy, run: runDetail } = useAction(async () => {
+    await reloadDetail()
+    await reload()
   })
-  const [statusForm, setStatusForm] = useState({ status: '', resolution: '', message: '' })
-  const [assignTo, setAssignTo] = useState('')
+  const [comment, setComment] = useState('')
+  const [statusForm, setStatusForm] = useState({ status: 'in_progress', resolution: '' })
 
-  useEffect(() => {
-    fetchComplaints()
-  }, [])
+  const societyId = detail?.societyId?._id || detail?.societyId || user?.societyId?._id || user?.societyId
+  const { data: staff } = useApi(`/societies/${societyId}/staff`, {
+    enabled: !!detailId && isAdmin && !!societyId,
+    live: false,
+    select: (d) => d.staff || []
+  })
 
-  const fetchComplaints = async () => {
-    try {
-      const response = await api.get('/complaints')
-      setComplaints(response.data.complaints || [])
-    } catch (error) {
-      toast.error('Error fetching complaints')
-    } finally {
-      setLoading(false)
-    }
-  }
+  const rows = useMemo(() => (filter === 'all' ? data || [] : (data || []).filter((c) => c.status === filter)), [data, filter])
 
-  const fetchStaff = async (societyId) => {
-    if (!societyId) return
-    try {
-      const response = await api.get(`/societies/${societyId}/staff`)
-      setStaff(response.data.staff || [])
-    } catch (error) {
-      setStaff([])
-    }
-  }
-
-  const handleCreate = async (e) => {
+  const submit = async (e) => {
     e.preventDefault()
-    try {
-      await api.post('/complaints', formData)
-      toast.success('Complaint submitted!')
-      setShowModal(false)
-      setFormData({ title: '', description: '', category: 'other', priority: 'medium' })
-      fetchComplaints()
-    } catch (error) {
-      toast.error(error.response?.data?.message || 'Error submitting complaint')
+    const payload = { ...form, title: form.title.trim(), description: form.description.trim() }
+    if (!payload.location.trim()) delete payload.location
+    const ok = await run('create', () => api.post('/complaints', payload), 'Complaint submitted')
+    if (ok) {
+      setCreateOpen(false)
+      setForm(EMPTY_FORM)
     }
   }
 
-  const handleUpdateStatus = async (e) => {
-    e.preventDefault()
-    if (!statusModal) return
-    try {
-      await api.put(`/complaints/${statusModal._id}/status`, {
-        status: statusForm.status,
-        resolution: statusForm.resolution,
-        message: statusForm.message
-      })
-      toast.success('Status updated!')
-      setStatusModal(null)
-      setStatusForm({ status: '', resolution: '', message: '' })
-      fetchComplaints()
-    } catch (error) {
-      toast.error(error.response?.data?.message || 'Error updating status')
-    }
-  }
-
-  const handleAssign = async (e) => {
-    e.preventDefault()
-    if (!assignModal || !assignTo) return
-    try {
-      await api.put(`/complaints/${assignModal._id}/assign`, { assignedTo: assignTo })
-      toast.success('Complaint assigned!')
-      setAssignModal(null)
-      setAssignTo('')
-      fetchComplaints()
-    } catch (error) {
-      toast.error(error.response?.data?.message || 'Error assigning')
-    }
-  }
-
-  const openAssignModal = (complaint) => {
-    setAssignModal(complaint)
-    setAssignTo(complaint.assignedTo?._id || '')
-    fetchStaff(complaint.societyId)
-  }
-
-  const getStatusBadge = (status) => {
-    const map = {
-      open: 'bg-yellow-100 text-yellow-800',
-      in_progress: 'bg-blue-100 text-blue-800',
-      resolved: 'bg-green-100 text-green-800',
-      closed: 'bg-gray-100 text-gray-800',
-      rejected: 'bg-red-100 text-red-800'
-    }
-    return map[status] || 'bg-gray-100 text-gray-800'
-  }
-
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600"></div>
-      </div>
-    )
-  }
+  const columns = [
+    {
+      key: 'title',
+      header: 'Complaint',
+      render: (c) => (
+        <button className="text-left md:max-w-xs" onClick={() => { setDetailId(c._id); setStatusForm({ status: c.status === 'open' ? 'in_progress' : c.status, resolution: '' }) }}>
+          <p className="font-semibold text-brand hover:underline">{c.title}</p>
+          <p className="line-clamp-1 text-xs text-muted">{c.description}</p>
+        </button>
+      )
+    },
+    ...(isResident ? [] : [{ key: 'flat', header: 'Flat', render: (c) => `${c.block ? `${c.block}-` : ''}${c.flatNo || '-'}` }]),
+    { key: 'category', header: 'Category', render: (c) => titleCase(c.category) },
+    { key: 'priority', header: 'Priority', render: (c) => <StatusTag status={c.priority} /> },
+    { key: 'status', header: 'Status', render: (c) => <StatusTag status={c.status} /> },
+    { key: 'date', header: 'Raised', render: (c) => formatDate(c.createdAt) }
+  ]
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-      <div className="flex justify-between items-center mb-6">
-        <h1 className="text-3xl font-bold text-gray-900">Complaints & Help Desk</h1>
-        {isResident && (
+    <>
+      <PageHeader
+        title="Complaints"
+        subtitle={isResident ? 'Raise an issue and follow it until it is fixed.' : 'Issues raised by residents.'}
+        action={
+          isResident && (
+            <button className="btn-primary" onClick={() => setCreateOpen(true)}>
+              <FiPlus size={16} /> Raise complaint
+            </button>
+          )
+        }
+      />
+
+      <div className="mb-4 flex flex-wrap gap-2" role="tablist" aria-label="Filter complaints">
+        {FILTERS.map((f) => (
           <button
-            onClick={() => setShowModal(true)}
-            className="flex items-center px-4 py-2 bg-primary-600 text-white rounded-md hover:bg-primary-700"
+            key={f.key}
+            role="tab"
+            aria-selected={filter === f.key}
+            onClick={() => setFilter(f.key)}
+            className={`rounded-md px-3 py-1.5 text-sm font-semibold transition-colors ${filter === f.key ? 'bg-brand text-brand-ink' : 'bg-surface text-muted ring-1 ring-line hover:text-ink'}`}
           >
-            <FiPlus className="mr-2" />
-            Raise Complaint
+            {f.label}
           </button>
-        )}
+        ))}
       </div>
 
-      <div className="space-y-4">
-        {complaints.length === 0 ? (
-          <div className="bg-white rounded-lg shadow-md p-8 text-center text-gray-500">No complaints.</div>
-        ) : (
-          complaints.map((complaint) => (
-            <div key={complaint._id} className="bg-white rounded-lg shadow-md p-6">
-              <div className="flex items-start justify-between flex-wrap gap-2">
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center flex-wrap gap-2 mb-2">
-                    <FiFileText className="text-primary-600 flex-shrink-0" />
-                    <h3 className="text-xl font-semibold">{complaint.title}</h3>
-                    <span className={`px-2 py-1 text-xs font-semibold rounded-full ${getStatusBadge(complaint.status)}`}>
-                      {complaint.status.replace('_', ' ')}
-                    </span>
-                  </div>
-                  <p className="text-gray-600 mb-2">{complaint.description}</p>
-                  <p className="text-sm text-gray-500">
-                    Category: {complaint.category} | Priority: {complaint.priority}
-                    {complaint.assignedTo && ` | Assigned to: ${complaint.assignedTo.name}`}
-                  </p>
-                </div>
-                {isAdmin && (
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => { setStatusModal(complaint); setStatusForm({ status: complaint.status, resolution: complaint.resolution || '', message: '' }) }}
-                      className="px-3 py-1.5 text-sm border border-gray-300 rounded-md hover:bg-gray-50"
-                    >
-                      Update Status
-                    </button>
-                    <button
-                      onClick={() => openAssignModal(complaint)}
-                      className="px-3 py-1.5 text-sm border border-gray-300 rounded-md hover:bg-gray-50"
-                    >
-                      Assign
-                    </button>
-                  </div>
-                )}
+      <DataList
+        columns={columns}
+        rows={rows}
+        loading={loading}
+        error={error}
+        onRetry={reload}
+        empty={
+          <EmptyState
+            icon={FiFileText}
+            title={filter === 'all' ? 'No complaints' : 'Nothing in this view'}
+            text={isResident && filter === 'all' ? 'If something needs fixing, raise it here and the society team will pick it up.' : undefined}
+            action={isResident && filter === 'all' ? <button className="btn-primary" onClick={() => setCreateOpen(true)}>Raise complaint</button> : null}
+          />
+        }
+      />
+
+      {/* Create */}
+      <Modal
+        open={createOpen}
+        onClose={() => setCreateOpen(false)}
+        title="Raise a complaint"
+        footer={
+          <>
+            <button className="btn-secondary" onClick={() => setCreateOpen(false)}>Cancel</button>
+            <button className="btn-primary" form="complaint-form" type="submit" disabled={busy === 'create'}>
+              {busy === 'create' && <Spinner className="h-4 w-4" />}
+              Submit complaint
+            </button>
+          </>
+        }
+      >
+        <form id="complaint-form" onSubmit={submit} className="space-y-4">
+          <Field label="Title" htmlFor="c-title">
+            <input id="c-title" required className="input" placeholder="Water leak in the corridor" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} />
+          </Field>
+          <Field label="What is wrong" htmlFor="c-desc">
+            <textarea id="c-desc" required rows={4} className="input" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
+          </Field>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field label="Category" htmlFor="c-cat">
+              <select id="c-cat" className="input" value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })}>
+                {CATEGORIES.map((c) => <option key={c} value={c}>{titleCase(c)}</option>)}
+              </select>
+            </Field>
+            <Field label="Priority" htmlFor="c-pri">
+              <select id="c-pri" className="input" value={form.priority} onChange={(e) => setForm({ ...form, priority: e.target.value })}>
+                {PRIORITIES.map((c) => <option key={c} value={c}>{titleCase(c)}</option>)}
+              </select>
+            </Field>
+          </div>
+          <Field label="Where in the society" htmlFor="c-loc" hint="Optional">
+            <input id="c-loc" className="input" value={form.location} onChange={(e) => setForm({ ...form, location: e.target.value })} />
+          </Field>
+        </form>
+      </Modal>
+
+      {/* Detail */}
+      <Modal open={!!detailId} onClose={() => { setDetailId(null); setComment('') }} title="Complaint" size="lg">
+        {detailLoading && !detail ? (
+          <div className="grid place-items-center py-10 text-brand"><Spinner className="h-6 w-6" /></div>
+        ) : detail ? (
+          <div className="space-y-5">
+            <div>
+              <div className="flex flex-wrap items-center gap-2">
+                <StatusTag status={detail.status} />
+                <StatusTag status={detail.priority} label={`${titleCase(detail.priority)} priority`} />
+                <span className="text-xs text-muted">{titleCase(detail.category)} · {formatDate(detail.createdAt, true)}</span>
               </div>
+              <h3 className="mt-2 text-xl font-bold">{detail.title}</h3>
+              <p className="mt-1 whitespace-pre-line text-sm text-ink/90">{detail.description}</p>
+              <p className="mt-2 text-xs text-muted">
+                Raised by {detail.residentId?.name || 'resident'} · Flat {detail.block ? `${detail.block}-` : ''}{detail.flatNo}
+                {detail.assignedTo?.name ? ` · Assigned to ${detail.assignedTo.name}` : ''}
+              </p>
+              {detail.resolution && <p className="mt-3 rounded-md bg-ok-soft px-3 py-2 text-sm text-ok"><strong>Resolution:</strong> {detail.resolution}</p>}
             </div>
-          ))
+
+            {isAdmin && (
+              <Field label="Assign to" htmlFor="c-assign">
+                <select
+                  id="c-assign"
+                  className="input"
+                  value={detail.assignedTo?._id || ''}
+                  disabled={detailBusy === 'assign'}
+                  onChange={(e) => e.target.value && runDetail('assign', () => api.put(`/complaints/${detail._id}/assign`, { assignedTo: e.target.value }), 'Complaint assigned')}
+                >
+                  <option value="">Not assigned</option>
+                  {(staff || []).map((s) => <option key={s._id} value={s._id}>{s.name} ({titleCase(s.role)})</option>)}
+                </select>
+              </Field>
+            )}
+
+            {canManage && (
+              <div className="rounded-md border border-line p-3">
+                <p className="mb-2 text-sm font-semibold">Update status</p>
+                <div className="grid gap-3 sm:grid-cols-[180px_1fr_auto]">
+                  <select aria-label="Status" className="input" value={statusForm.status} onChange={(e) => setStatusForm({ ...statusForm, status: e.target.value })}>
+                    {STATUSES.map((s) => <option key={s} value={s}>{titleCase(s)}</option>)}
+                  </select>
+                  <input aria-label="Resolution note" className="input" placeholder="Resolution note (optional)" value={statusForm.resolution} onChange={(e) => setStatusForm({ ...statusForm, resolution: e.target.value })} />
+                  <button className="btn-primary" disabled={detailBusy === 'status'} onClick={() => runDetail('status', () => api.put(`/complaints/${detail._id}/status`, { status: statusForm.status, resolution: statusForm.resolution.trim() || undefined }), 'Status updated')}>
+                    Save
+                  </button>
+                </div>
+              </div>
+            )}
+
+            <div>
+              <p className="mb-2 text-sm font-semibold">Updates</p>
+              {detail.updates?.length ? (
+                <ol className="space-y-3 border-l-2 border-line pl-4">
+                  {detail.updates.map((u, i) => (
+                    <li key={u._id || i}>
+                      <p className="text-sm">{u.message}</p>
+                      <p className="text-xs text-muted">{u.updatedBy?.name || 'Someone'} · {formatDate(u.updatedAt, true)}</p>
+                    </li>
+                  ))}
+                </ol>
+              ) : (
+                <p className="text-sm text-muted">No updates yet.</p>
+              )}
+              <form
+                className="mt-3 flex gap-2"
+                onSubmit={async (e) => {
+                  e.preventDefault()
+                  if (!comment.trim()) return
+                  const ok = await runDetail('comment', () => api.post(`/complaints/${detail._id}/update`, { message: comment.trim() }), 'Update added')
+                  if (ok) setComment('')
+                }}
+              >
+                <input aria-label="Add an update" className="input" placeholder="Add an update" value={comment} onChange={(e) => setComment(e.target.value)} />
+                <button className="btn-secondary" type="submit" disabled={detailBusy === 'comment' || !comment.trim()}>Post</button>
+              </form>
+            </div>
+          </div>
+        ) : (
+          <p className="py-6 text-center text-sm text-muted">This complaint could not be loaded.</p>
         )}
-      </div>
-
-      {showModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg p-6 max-w-md w-full max-h-[90vh] overflow-y-auto">
-            <h2 className="text-2xl font-bold mb-4">Raise Complaint</h2>
-            <form onSubmit={handleCreate} className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700">Title *</label>
-                <input type="text" required className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md"
-                  value={formData.title} onChange={(e) => setFormData({ ...formData, title: e.target.value })} />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700">Description *</label>
-                <textarea required rows={4} className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md"
-                  value={formData.description} onChange={(e) => setFormData({ ...formData, description: e.target.value })} />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700">Category</label>
-                <select className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md"
-                  value={formData.category} onChange={(e) => setFormData({ ...formData, category: e.target.value })}>
-                  <option value="maintenance">Maintenance</option>
-                  <option value="security">Security</option>
-                  <option value="cleaning">Cleaning</option>
-                  <option value="amenities">Amenities</option>
-                  <option value="billing">Billing</option>
-                  <option value="noise">Noise</option>
-                  <option value="parking">Parking</option>
-                  <option value="other">Other</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700">Priority</label>
-                <select className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md"
-                  value={formData.priority} onChange={(e) => setFormData({ ...formData, priority: e.target.value })}>
-                  <option value="low">Low</option>
-                  <option value="medium">Medium</option>
-                  <option value="high">High</option>
-                  <option value="urgent">Urgent</option>
-                </select>
-              </div>
-              <div className="flex justify-end gap-2 pt-2">
-                <button type="button" onClick={() => setShowModal(false)} className="px-4 py-2 border border-gray-300 rounded-md">Cancel</button>
-                <button type="submit" className="px-4 py-2 bg-primary-600 text-white rounded-md hover:bg-primary-700">Submit</button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {statusModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg p-6 max-w-md w-full">
-            <h2 className="text-xl font-bold mb-4">Update Status: {statusModal.title}</h2>
-            <form onSubmit={handleUpdateStatus} className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700">Status</label>
-                <select required className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md"
-                  value={statusForm.status} onChange={(e) => setStatusForm({ ...statusForm, status: e.target.value })}>
-                  <option value="open">Open</option>
-                  <option value="in_progress">In Progress</option>
-                  <option value="resolved">Resolved</option>
-                  <option value="closed">Closed</option>
-                  <option value="rejected">Rejected</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700">Resolution (optional)</label>
-                <textarea rows={2} className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md"
-                  value={statusForm.resolution} onChange={(e) => setStatusForm({ ...statusForm, resolution: e.target.value })} />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700">Message (optional)</label>
-                <input type="text" className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md"
-                  value={statusForm.message} onChange={(e) => setStatusForm({ ...statusForm, message: e.target.value })} />
-              </div>
-              <div className="flex justify-end gap-2 pt-2">
-                <button type="button" onClick={() => setStatusModal(null)} className="px-4 py-2 border border-gray-300 rounded-md">Cancel</button>
-                <button type="submit" className="px-4 py-2 bg-primary-600 text-white rounded-md hover:bg-primary-700">Update</button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {assignModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg p-6 max-w-md w-full">
-            <h2 className="text-xl font-bold mb-4">Assign: {assignModal.title}</h2>
-            <form onSubmit={handleAssign} className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700">Assign to</label>
-                <select required className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md"
-                  value={assignTo} onChange={(e) => setAssignTo(e.target.value)}>
-                  <option value="">Select staff</option>
-                  {staff.map(s => <option key={s._id} value={s._id}>{s.name} ({s.role})</option>)}
-                </select>
-              </div>
-              <div className="flex justify-end gap-2 pt-2">
-                <button type="button" onClick={() => setAssignModal(null)} className="px-4 py-2 border border-gray-300 rounded-md">Cancel</button>
-                <button type="submit" className="px-4 py-2 bg-primary-600 text-white rounded-md hover:bg-primary-700">Assign</button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-    </div>
+      </Modal>
+    </>
   )
 }
 

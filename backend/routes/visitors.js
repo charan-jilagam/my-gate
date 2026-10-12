@@ -58,8 +58,11 @@ router.post('/invite', protect, authorize('resident'), [
       qrCode: qrCodeString,
       expectedArrival: expectedArrival ? new Date(expectedArrival) : null,
       notes,
-      approved: false,
-      status: 'pending'
+      // A resident inviting a guest is the approval: the guard should let them in without a second step.
+      approved: true,
+      approvedBy: req.user.id,
+      approvedAt: new Date(),
+      status: 'approved'
     });
 
     // Generate QR code image
@@ -79,8 +82,8 @@ router.post('/invite', protect, authorize('resident'), [
         await notifyUser(io, securityUser._id, {
           societyId: req.user.societyId,
           type: 'visitor_approval',
-          title: 'New Visitor Request',
-          message: `${req.user.name} (${req.user.flatNo}) has invited ${name} to visit`,
+          title: 'Expected visitor',
+          message: `${name} is expected at ${req.user.block ? `${req.user.block}-` : ''}${req.user.flatNo} (invited by ${req.user.name})`,
           relatedId: visitor._id,
           relatedModel: 'Visitor',
           actionUrl: `/visitors/${visitor._id}`
@@ -465,6 +468,109 @@ router.get('/logs/today', protect, authorize('security', 'society_admin', 'super
       message: 'Server error',
       error: error.message
     });
+  }
+});
+
+// @route   POST /api/visitors/walk-in
+// @desc    Guard logs an unannounced visitor; the resident gets a live request to approve or reject
+// @access  Private (Security, Admins)
+router.post('/walk-in', protect, authorize('security', 'society_admin'), [
+  body('name').trim().notEmpty().withMessage('Visitor name is required'),
+  body('phone').matches(/^[0-9]{10}$/).withMessage('Enter a valid 10-digit phone number'),
+  body('flatNo').trim().notEmpty().withMessage('Flat number is required'),
+  body('block').optional({ checkFalsy: true }).trim(),
+  body('purpose').optional().isIn(['personal', 'business', 'delivery', 'service', 'other']).withMessage('Invalid purpose'),
+  body('numberOfVisitors').optional().isInt({ min: 1, max: 50 }).withMessage('Number of visitors must be between 1 and 50'),
+  body('vehicleNumber').optional({ checkFalsy: true }).trim()
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ success: false, errors: errors.array() });
+    }
+
+    const User = require('../models/User');
+    const { name, phone, flatNo, block, purpose, numberOfVisitors, vehicleNumber, purposeDescription } = req.body;
+
+    const residentQuery = { societyId: req.user.societyId, role: 'resident', isApproved: true, isActive: true, flatNo };
+    if (block) residentQuery.block = block;
+    const residents = await User.find(residentQuery);
+
+    if (residents.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: `No approved resident found for flat ${block ? `${block}-` : ''}${flatNo}`
+      });
+    }
+
+    const qrCodeString = JSON.stringify({
+      visitorId: crypto.randomBytes(16).toString('hex'),
+      residentId: residents[0]._id,
+      societyId: req.user.societyId,
+      timestamp: Date.now()
+    });
+
+    const visitor = await Visitor.create({
+      residentId: residents[0]._id,
+      societyId: req.user.societyId,
+      name,
+      phone,
+      purpose: purpose || 'personal',
+      purposeDescription,
+      numberOfVisitors: numberOfVisitors || 1,
+      vehicleNumber: vehicleNumber || undefined,
+      flatNo,
+      block: block || residents[0].block,
+      qrCode: qrCodeString,
+      loggedBy: req.user.id,
+      approved: false,
+      status: 'pending'
+    });
+
+    const io = req.app.get('io');
+    if (io) {
+      for (const resident of residents) {
+        await notifyUser(io, resident._id, {
+          societyId: req.user.societyId,
+          type: 'visitor_approval',
+          title: 'Visitor at the gate',
+          message: `${name} is at the gate for you. Approve or reject in Visitors.`,
+          priority: 'high',
+          relatedId: visitor._id,
+          relatedModel: 'Visitor',
+          actionUrl: '/visitors'
+        });
+      }
+    }
+
+    res.status(201).json({ success: true, visitor, message: 'Resident has been notified' });
+  } catch (error) {
+    console.error('Walk-in visitor error:', error);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// @route   GET /api/visitors/lookup/:code
+// @desc    Find an invited visitor by the pass code printed under their QR code
+// @access  Private (Security, Admins)
+router.get('/lookup/:code', protect, authorize('security', 'society_admin', 'super_admin'), async (req, res) => {
+  try {
+    const code = String(req.params.code || '').trim().toLowerCase();
+    if (!/^[0-9a-f]{6,32}$/.test(code)) {
+      return res.status(400).json({ success: false, message: 'Pass codes are 6 or more letters and digits (0-9, A-F).' });
+    }
+
+    const query = { qrCode: { $regex: `"visitorId":"${code}` } };
+    if (req.user.role !== 'super_admin') query.societyId = req.user.societyId;
+
+    const visitor = await Visitor.findOne(query).populate('residentId', 'name phone flatNo block');
+    if (!visitor) {
+      return res.status(404).json({ success: false, message: 'No visitor found for that pass code' });
+    }
+
+    res.json({ success: true, visitor });
+  } catch (error) {
+    res.status(500).json({ success: false, message: 'Server error' });
   }
 });
 

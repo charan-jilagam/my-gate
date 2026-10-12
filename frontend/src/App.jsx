@@ -1,108 +1,82 @@
+import { lazy, Suspense } from 'react'
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom'
 import { Toaster } from 'react-hot-toast'
-import { AuthProvider } from './contexts/AuthContext'
+import { AuthProvider, useAuth } from './contexts/AuthContext'
 import { SocketProvider } from './contexts/SocketContext'
-import PrivateRoute from './components/PrivateRoute'
-import Navbar from './components/Navbar'
-import Login from './pages/Login'
-import Register from './pages/Register'
-import Dashboard from './pages/Dashboard'
-import Visitors from './pages/Visitors'
-import Deliveries from './pages/Deliveries'
-import Vehicles from './pages/Vehicles'
-import Notices from './pages/Notices'
-import Complaints from './pages/Complaints'
-import Payments from './pages/Payments'
-import Bookings from './pages/Bookings'
-import Profile from './pages/Profile'
+import PrivateRoute, { FullPageSpinner } from './components/PrivateRoute'
+import Layout from './components/Layout'
 import './App.css'
+
+const Login = lazy(() => import('./pages/Login'))
+const Register = lazy(() => import('./pages/Register'))
+const ForgotPassword = lazy(() => import('./pages/ForgotPassword'))
+const ResetPassword = lazy(() => import('./pages/ResetPassword'))
+const Dashboard = lazy(() => import('./pages/Dashboard'))
+const Visitors = lazy(() => import('./pages/Visitors'))
+const Deliveries = lazy(() => import('./pages/Deliveries'))
+const Vehicles = lazy(() => import('./pages/Vehicles'))
+const Notices = lazy(() => import('./pages/Notices'))
+const Complaints = lazy(() => import('./pages/Complaints'))
+const Payments = lazy(() => import('./pages/Payments'))
+const Bookings = lazy(() => import('./pages/Bookings'))
+const Profile = lazy(() => import('./pages/Profile'))
+const GateConsole = lazy(() => import('./pages/GateConsole'))
+const AdminResidents = lazy(() => import('./pages/AdminResidents'))
+const AdminSocieties = lazy(() => import('./pages/AdminSocieties'))
+const NotFound = lazy(() => import('./pages/NotFound'))
+
+const ADMINS = ['society_admin', 'super_admin']
+
+// Signed-in users have no reason to see the sign-in screens.
+const GuestOnly = ({ children }) => {
+  const { isAuthenticated, pendingApproval, loading } = useAuth()
+  if (loading) return <FullPageSpinner />
+  // Unapproved residents are routed to the dashboard route, where the guard shows the "waiting for approval" screen.
+  return isAuthenticated || pendingApproval ? <Navigate to="/dashboard" replace /> : children
+}
 
 function App() {
   return (
     <AuthProvider>
       <SocketProvider>
         <Router>
-          <div className="min-h-screen bg-gray-50">
-            <Navbar />
+          <Suspense fallback={<FullPageSpinner />}>
             <Routes>
-              <Route path="/login" element={<Login />} />
-              <Route path="/register" element={<Register />} />
-              <Route
-                path="/dashboard"
-                element={
-                  <PrivateRoute>
-                    <Dashboard />
-                  </PrivateRoute>
-                }
-              />
-              <Route
-                path="/visitors"
-                element={
-                  <PrivateRoute>
-                    <Visitors />
-                  </PrivateRoute>
-                }
-              />
-              <Route
-                path="/deliveries"
-                element={
-                  <PrivateRoute>
-                    <Deliveries />
-                  </PrivateRoute>
-                }
-              />
-              <Route
-                path="/vehicles"
-                element={
-                  <PrivateRoute>
-                    <Vehicles />
-                  </PrivateRoute>
-                }
-              />
-              <Route
-                path="/notices"
-                element={
-                  <PrivateRoute>
-                    <Notices />
-                  </PrivateRoute>
-                }
-              />
-              <Route
-                path="/complaints"
-                element={
-                  <PrivateRoute>
-                    <Complaints />
-                  </PrivateRoute>
-                }
-              />
-              <Route
-                path="/payments"
-                element={
-                  <PrivateRoute>
-                    <Payments />
-                  </PrivateRoute>
-                }
-              />
-              <Route
-                path="/bookings"
-                element={
-                  <PrivateRoute>
-                    <Bookings />
-                  </PrivateRoute>
-                }
-              />
-              <Route
-                path="/profile"
-                element={
-                  <PrivateRoute>
-                    <Profile />
-                  </PrivateRoute>
-                }
-              />
+              <Route path="/login" element={<GuestOnly><Login /></GuestOnly>} />
+              <Route path="/register" element={<GuestOnly><Register /></GuestOnly>} />
+              <Route path="/forgot-password" element={<GuestOnly><ForgotPassword /></GuestOnly>} />
+              <Route path="/reset-password/:token" element={<GuestOnly><ResetPassword /></GuestOnly>} />
+
+              <Route element={<PrivateRoute><Layout /></PrivateRoute>}>
+                <Route path="/dashboard" element={<Dashboard />} />
+                <Route path="/visitors" element={<Visitors />} />
+                <Route path="/deliveries" element={<Deliveries />} />
+                <Route path="/vehicles" element={<Vehicles />} />
+                <Route path="/notices" element={<Notices />} />
+                <Route path="/complaints" element={<Complaints />} />
+                <Route path="/payments" element={<PrivateRoute roles={['resident', ...ADMINS]}><Payments /></PrivateRoute>} />
+                <Route path="/bookings" element={<PrivateRoute roles={['resident', ...ADMINS]}><Bookings /></PrivateRoute>} />
+                <Route path="/profile" element={<Profile />} />
+                <Route path="/gate" element={<PrivateRoute roles={['security', ...ADMINS]}><GateConsole /></PrivateRoute>} />
+                <Route path="/admin/residents" element={<PrivateRoute roles={ADMINS}><AdminResidents /></PrivateRoute>} />
+                <Route path="/admin/societies" element={<PrivateRoute roles={ADMINS}><AdminSocieties /></PrivateRoute>} />
+                <Route path="*" element={<NotFound />} />
+              </Route>
+
               <Route path="/" element={<Navigate to="/dashboard" replace />} />
             </Routes>
-            <Toaster position="top-right" />
-          </div>
+          </Suspense>
+          <Toaster
+            position="top-right"
+            toastOptions={{
+              style: {
+                background: 'rgb(var(--surface))',
+                color: 'rgb(var(--ink))',
+                border: '1px solid rgb(var(--line))',
+                fontSize: '14px'
+              }
+            }}
+          />
         </Router>
       </SocketProvider>
     </AuthProvider>

@@ -60,8 +60,11 @@ router.post('/invite', protect, authorize('resident'), [
       otpExpires: generateOTPExpiry(30), // 30 minutes
       expectedArrival: expectedArrival ? new Date(expectedArrival) : null,
       notes,
-      approved: false,
-      status: 'pending'
+      // Telling the app you expect a delivery is the approval; the guard can let the courier in.
+      approved: true,
+      approvedBy: req.user.id,
+      approvedAt: new Date(),
+      status: 'approved'
     });
 
     // Generate QR code image

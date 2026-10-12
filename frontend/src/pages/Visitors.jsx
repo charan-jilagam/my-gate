@@ -1,271 +1,281 @@
-import { useState, useEffect } from 'react'
+import { useMemo, useState } from 'react'
+import { QRCodeSVG } from 'qrcode.react'
+import { FiCheck, FiLogIn, FiLogOut, FiPlus, FiUsers, FiX } from 'react-icons/fi'
 import { useAuth } from '../contexts/AuthContext'
 import api from '../services/api'
-import toast from 'react-hot-toast'
-import { FiPlus, FiCheck, FiX, FiClock, FiUser } from 'react-icons/fi'
+import useApi from '../hooks/useApi'
+import useAction from '../hooks/useAction'
+import { passCode } from '../utils/pass'
+import { DataList, EmptyState, Field, Modal, PageHeader, Spinner, StatusTag, formatDate, titleCase } from '../components/ui'
+
+const PURPOSES = ['personal', 'business', 'delivery', 'service', 'other']
+const EMPTY_FORM = { name: '', phone: '', purpose: 'personal', numberOfVisitors: 1, vehicleNumber: '', expectedArrival: '' }
+
+const FILTERS = [
+  { key: 'all', label: 'All' },
+  { key: 'pending', label: 'Needs approval' },
+  { key: 'approved', label: 'Expected' },
+  { key: 'checked_in', label: 'Inside' },
+  { key: 'checked_out', label: 'Left' }
+]
 
 const Visitors = () => {
-  const { user, isResident, isSecurity, isAdmin } = useAuth()
-  const [visitors, setVisitors] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [showInviteModal, setShowInviteModal] = useState(false)
-  const [formData, setFormData] = useState({
-    name: '',
-    phone: '',
-    email: '',
-    purpose: 'personal',
-    purposeDescription: '',
-    numberOfVisitors: 1,
-    vehicleNumber: '',
-    expectedArrival: ''
-  })
+  const { isResident, isSecurity, isAdmin } = useAuth()
+  const [filter, setFilter] = useState('all')
+  const { data, loading, error, reload } = useApi('/visitors', { params: { limit: 100 }, select: (d) => d.visitors || [] })
+  const { busy, run } = useAction(reload)
 
-  useEffect(() => {
-    fetchVisitors()
-  }, [])
+  const [inviteOpen, setInviteOpen] = useState(false)
+  const [form, setForm] = useState(EMPTY_FORM)
+  const [formError, setFormError] = useState('')
+  const [passFor, setPassFor] = useState(null)
+  const [rejecting, setRejecting] = useState(null)
+  const [reason, setReason] = useState('')
 
-  const fetchVisitors = async () => {
-    try {
-      const response = await api.get('/visitors')
-      setVisitors(response.data.visitors)
-    } catch (error) {
-      toast.error('Error fetching visitors')
-    } finally {
-      setLoading(false)
-    }
-  }
+  const visitors = useMemo(
+    () => (filter === 'all' ? data || [] : (data || []).filter((v) => v.status === filter)),
+    [data, filter]
+  )
 
-  const handleInvite = async (e) => {
+  const counts = useMemo(() => {
+    const c = { all: (data || []).length }
+    ;(data || []).forEach((v) => {
+      c[v.status] = (c[v.status] || 0) + 1
+    })
+    return c
+  }, [data])
+
+  const submitInvite = async (e) => {
     e.preventDefault()
-    try {
-      await api.post('/visitors/invite', formData)
-      toast.success('Visitor invitation sent!')
-      setShowInviteModal(false)
-      setFormData({
-        name: '',
-        phone: '',
-        email: '',
-        purpose: 'personal',
-        purposeDescription: '',
-        numberOfVisitors: 1,
-        vehicleNumber: '',
-        expectedArrival: ''
-      })
-      fetchVisitors()
-    } catch (error) {
-      toast.error(error.response?.data?.message || 'Error inviting visitor')
+    setFormError('')
+    if (!/^[0-9]{10}$/.test(form.phone)) return setFormError('Enter a 10-digit phone number.')
+    const payload = { ...form, numberOfVisitors: Number(form.numberOfVisitors) || 1 }
+    if (!payload.expectedArrival) delete payload.expectedArrival
+    else payload.expectedArrival = new Date(payload.expectedArrival).toISOString()
+    if (!payload.vehicleNumber) delete payload.vehicleNumber
+
+    const res = await run('invite', () => api.post('/visitors/invite', payload), 'Invitation sent. Your guest can now enter.')
+    if (res) {
+      setInviteOpen(false)
+      setForm(EMPTY_FORM)
+      setPassFor(res.data.visitor)
     }
   }
 
-  const handleApprove = async (id) => {
-    try {
-      await api.put(`/visitors/${id}/approve`)
-      toast.success('Visitor approved!')
-      fetchVisitors()
-    } catch (error) {
-      toast.error('Error approving visitor')
+  const columns = [
+    {
+      key: 'name',
+      header: 'Visitor',
+      render: (v) => (
+        <div className="md:text-left">
+          <p className="font-semibold">{v.name}</p>
+          <p className="text-xs text-muted">{v.phone}</p>
+        </div>
+      )
+    },
+    ...(isResident
+      ? []
+      : [
+          {
+            key: 'host',
+            header: 'Visiting',
+            render: (v) => `${v.block ? `${v.block}-` : ''}${v.flatNo || '-'}${v.residentId?.name ? ` (${v.residentId.name})` : ''}`
+          }
+        ]),
+    { key: 'purpose', header: 'Purpose', render: (v) => titleCase(v.purpose) },
+    { key: 'when', header: 'When', render: (v) => formatDate(v.entryTime || v.expectedArrival || v.createdAt, true) },
+    { key: 'status', header: 'Status', render: (v) => <StatusTag status={v.status} /> },
+    {
+      key: 'actions',
+      header: 'Actions',
+      className: 'md:text-right',
+      render: (v) => {
+        const isBusy = busy === v._id
+        return (
+          <div className="flex flex-wrap justify-end gap-2">
+            {(isResident || isAdmin) && v.status === 'pending' && (
+              <>
+                <button className="btn-ok btn-sm" disabled={isBusy} onClick={() => run(v._id, () => api.put(`/visitors/${v._id}/approve`), 'Visitor approved')}>
+                  <FiCheck size={14} /> Approve
+                </button>
+                <button className="btn-secondary btn-sm" disabled={isBusy} onClick={() => setRejecting(v)}>
+                  <FiX size={14} /> Reject
+                </button>
+              </>
+            )}
+            {isResident && ['approved', 'checked_in'].includes(v.status) && (
+              <button className="btn-secondary btn-sm" onClick={() => setPassFor(v)}>
+                Show pass
+              </button>
+            )}
+            {(isSecurity || isAdmin) && v.status === 'approved' && (
+              <button className="btn-primary btn-sm" disabled={isBusy} onClick={() => run(v._id, () => api.put(`/visitors/${v._id}/check-in`), 'Checked in')}>
+                <FiLogIn size={14} /> Check in
+              </button>
+            )}
+            {(isSecurity || isAdmin) && v.status === 'checked_in' && (
+              <button className="btn-secondary btn-sm" disabled={isBusy} onClick={() => run(v._id, () => api.put(`/visitors/${v._id}/check-out`), 'Checked out')}>
+                <FiLogOut size={14} /> Check out
+              </button>
+            )}
+          </div>
+        )
+      }
     }
-  }
-
-  const handleReject = async (id) => {
-    try {
-      await api.put(`/visitors/${id}/reject`, { reason: 'Rejected by user' })
-      toast.success('Visitor rejected!')
-      fetchVisitors()
-    } catch (error) {
-      toast.error('Error rejecting visitor')
-    }
-  }
-
-  const handleCheckIn = async (id) => {
-    try {
-      await api.put(`/visitors/${id}/check-in`)
-      toast.success('Visitor checked in!')
-      fetchVisitors()
-    } catch (error) {
-      toast.error('Error checking in visitor')
-    }
-  }
-
-  const handleCheckOut = async (id) => {
-    try {
-      await api.put(`/visitors/${id}/check-out`)
-      toast.success('Visitor checked out!')
-      fetchVisitors()
-    } catch (error) {
-      toast.error('Error checking out visitor')
-    }
-  }
-
-  const getStatusBadge = (status) => {
-    const badges = {
-      pending: 'bg-yellow-100 text-yellow-800',
-      approved: 'bg-green-100 text-green-800',
-      rejected: 'bg-red-100 text-red-800',
-      checked_in: 'bg-blue-100 text-blue-800',
-      checked_out: 'bg-gray-100 text-gray-800'
-    }
-    return badges[status] || 'bg-gray-100 text-gray-800'
-  }
-
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600"></div>
-      </div>
-    )
-  }
+  ]
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-      <div className="flex justify-between items-center mb-6">
-        <h1 className="text-3xl font-bold text-gray-900">Visitors</h1>
-        {isResident && (
+    <>
+      <PageHeader
+        title="Visitors"
+        subtitle={
+          isResident
+            ? 'Invite guests ahead of time. Anyone the guard logs at the gate waits here for your approval.'
+            : 'Everyone who has been invited or logged at the gate.'
+        }
+        action={
+          isResident && (
+            <button className="btn-primary" onClick={() => setInviteOpen(true)}>
+              <FiPlus size={16} /> Invite visitor
+            </button>
+          )
+        }
+      />
+
+      <div className="mb-4 flex flex-wrap gap-2" role="tablist" aria-label="Filter visitors">
+        {FILTERS.map((f) => (
           <button
-            onClick={() => setShowInviteModal(true)}
-            className="flex items-center px-4 py-2 bg-primary-600 text-white rounded-md hover:bg-primary-700"
+            key={f.key}
+            role="tab"
+            aria-selected={filter === f.key}
+            onClick={() => setFilter(f.key)}
+            className={`rounded-md px-3 py-1.5 text-sm font-semibold transition-colors ${
+              filter === f.key ? 'bg-brand text-brand-ink' : 'bg-surface text-muted ring-1 ring-line hover:text-ink'
+            }`}
           >
-            <FiPlus className="mr-2" />
-            Invite Visitor
+            {f.label}
+            <span className="ml-1.5 text-xs opacity-80">{counts[f.key] || 0}</span>
           </button>
-        )}
+        ))}
       </div>
 
-      <div className="bg-white shadow-md rounded-lg overflow-hidden">
-        <table className="min-w-full divide-y divide-gray-200">
-          <thead className="bg-gray-50">
-            <tr>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Phone</th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Purpose</th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
-            </tr>
-          </thead>
-          <tbody className="bg-white divide-y divide-gray-200">
-            {visitors.length === 0 ? (
-              <tr><td colSpan={5} className="px-6 py-8 text-center text-gray-500">No visitors</td></tr>
-            ) : visitors.map((visitor) => (
-              <tr key={visitor._id}>
-                <td className="px-6 py-4 whitespace-nowrap">
-                  <div className="flex items-center">
-                    <FiUser className="mr-2 text-gray-400" />
-                    {visitor.name}
-                  </div>
-                </td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{visitor.phone}</td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{visitor.purpose}</td>
-                <td className="px-6 py-4 whitespace-nowrap">
-                  <span className={`px-2 py-1 text-xs font-semibold rounded-full ${getStatusBadge(visitor.status)}`}>
-                    {visitor.status.replace('_', ' ')}
-                  </span>
-                </td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                  <div className="flex flex-wrap gap-2">
-                    {(isResident || isAdmin) && visitor.status === 'pending' && (
-                      <>
-                        <button
-                          onClick={() => handleApprove(visitor._id)}
-                          className="text-green-600 hover:text-green-900 font-medium"
-                          title="Approve"
-                        >
-                          <FiCheck className="inline" /> Approve
-                        </button>
-                        <button
-                          onClick={() => handleReject(visitor._id)}
-                          className="text-red-600 hover:text-red-900 font-medium"
-                          title="Reject"
-                        >
-                          <FiX className="inline" /> Reject
-                        </button>
-                      </>
-                    )}
-                    {(isSecurity || isAdmin) && visitor.status === 'approved' && (
-                      <button
-                        onClick={() => handleCheckIn(visitor._id)}
-                        className="text-blue-600 hover:text-blue-900 font-medium"
-                      >
-                        Check In
-                      </button>
-                    )}
-                    {(isSecurity || isAdmin) && visitor.status === 'checked_in' && (
-                      <button
-                        onClick={() => handleCheckOut(visitor._id)}
-                        className="text-gray-600 hover:text-gray-900 font-medium"
-                      >
-                        Check Out
-                      </button>
-                    )}
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      <DataList
+        columns={columns}
+        rows={visitors}
+        loading={loading}
+        error={error}
+        onRetry={reload}
+        empty={
+          <EmptyState
+            icon={FiUsers}
+            title={filter === 'all' ? 'No visitors yet' : 'Nothing in this view'}
+            text={isResident ? 'Invite a guest and they will show up here with a pass for the gate.' : 'Visitors will appear here as they are invited or logged.'}
+            action={
+              isResident && filter === 'all' ? (
+                <button className="btn-primary" onClick={() => setInviteOpen(true)}>
+                  Invite visitor
+                </button>
+              ) : null
+            }
+          />
+        }
+      />
 
-      {/* Invite Modal */}
-      {showInviteModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg p-6 max-w-md w-full">
-            <h2 className="text-2xl font-bold mb-4">Invite Visitor</h2>
-            <form onSubmit={handleInvite}>
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700">Name</label>
-                  <input
-                    type="text"
-                    required
-                    className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md"
-                    value={formData.name}
-                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700">Phone</label>
-                  <input
-                    type="tel"
-                    required
-                    className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md"
-                    value={formData.phone}
-                    onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700">Purpose</label>
-                  <select
-                    className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md"
-                    value={formData.purpose}
-                    onChange={(e) => setFormData({ ...formData, purpose: e.target.value })}
-                  >
-                    <option value="personal">Personal</option>
-                    <option value="business">Business</option>
-                    <option value="delivery">Delivery</option>
-                    <option value="service">Service</option>
-                    <option value="other">Other</option>
-                  </select>
-                </div>
-              </div>
-              <div className="mt-6 flex justify-end space-x-3">
-                <button
-                  type="button"
-                  onClick={() => setShowInviteModal(false)}
-                  className="px-4 py-2 border border-gray-300 rounded-md"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="px-4 py-2 bg-primary-600 text-white rounded-md hover:bg-primary-700"
-                >
-                  Invite
-                </button>
-              </div>
-            </form>
+      <Modal
+        open={inviteOpen}
+        onClose={() => setInviteOpen(false)}
+        title="Invite visitor"
+        footer={
+          <>
+            <button className="btn-secondary" onClick={() => setInviteOpen(false)}>
+              Cancel
+            </button>
+            <button className="btn-primary" form="invite-form" type="submit" disabled={busy === 'invite'}>
+              {busy === 'invite' && <Spinner className="h-4 w-4" />}
+              Send invitation
+            </button>
+          </>
+        }
+      >
+        <form id="invite-form" onSubmit={submitInvite} className="space-y-4">
+          <Field label="Visitor name" htmlFor="v-name">
+            <input id="v-name" required className="input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+          </Field>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field label="Phone number" htmlFor="v-phone">
+              <input id="v-phone" required type="tel" inputMode="numeric" maxLength={10} className="input" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
+            </Field>
+            <Field label="Purpose" htmlFor="v-purpose">
+              <select id="v-purpose" className="input" value={form.purpose} onChange={(e) => setForm({ ...form, purpose: e.target.value })}>
+                {PURPOSES.map((p) => (
+                  <option key={p} value={p}>
+                    {titleCase(p)}
+                  </option>
+                ))}
+              </select>
+            </Field>
           </div>
-        </div>
-      )}
-    </div>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field label="Number of people" htmlFor="v-count">
+              <input id="v-count" type="number" min="1" max="50" className="input" value={form.numberOfVisitors} onChange={(e) => setForm({ ...form, numberOfVisitors: e.target.value })} />
+            </Field>
+            <Field label="Expected arrival" htmlFor="v-when" hint="Optional">
+              <input id="v-when" type="datetime-local" className="input" value={form.expectedArrival} onChange={(e) => setForm({ ...form, expectedArrival: e.target.value })} />
+            </Field>
+          </div>
+          <Field label="Vehicle number" htmlFor="v-vehicle" hint="Optional">
+            <input id="v-vehicle" className="input uppercase" value={form.vehicleNumber} onChange={(e) => setForm({ ...form, vehicleNumber: e.target.value })} />
+          </Field>
+          {formError && <p role="alert" className="text-sm font-medium text-danger">{formError}</p>}
+        </form>
+      </Modal>
+
+      <Modal open={!!passFor} onClose={() => setPassFor(null)} title="Gate pass" size="sm" footer={<button className="btn-primary" onClick={() => setPassFor(null)}>Done</button>}>
+        {passFor && (
+          <div className="text-center">
+            <div className="mx-auto inline-block rounded-lg bg-white p-3 ring-1 ring-line">
+              <QRCodeSVG value={passFor.qrCode} size={176} />
+            </div>
+            <p className="mt-3 font-display text-lg font-bold">{passFor.name}</p>
+            <p className="mt-3 text-xs text-muted">Pass code for the guard</p>
+            <p className="font-mono text-2xl font-bold tracking-widest">{passCode(passFor) || '-'}</p>
+            <p className="mt-3 text-sm text-muted">Share this with your guest. The guard can scan the code or type the pass code.</p>
+          </div>
+        )}
+      </Modal>
+
+      <Modal
+        open={!!rejecting}
+        onClose={() => setRejecting(null)}
+        title="Reject visitor"
+        size="sm"
+        footer={
+          <>
+            <button className="btn-secondary" onClick={() => setRejecting(null)}>
+              Cancel
+            </button>
+            <button
+              className="btn-danger"
+              disabled={busy === rejecting?._id}
+              onClick={async () => {
+                const ok = await run(rejecting._id, () => api.put(`/visitors/${rejecting._id}/reject`, { reason: reason.trim() || undefined }), 'Visitor rejected')
+                if (ok) {
+                  setRejecting(null)
+                  setReason('')
+                }
+              }}
+            >
+              Reject visitor
+            </button>
+          </>
+        }
+      >
+        <p className="mb-3 text-sm text-muted">The guard will see that {rejecting?.name} was turned away.</p>
+        <Field label="Reason" htmlFor="reason" hint="Optional">
+          <input id="reason" className="input" value={reason} onChange={(e) => setReason(e.target.value)} />
+        </Field>
+      </Modal>
+    </>
   )
 }
 

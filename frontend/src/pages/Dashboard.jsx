@@ -1,176 +1,121 @@
-import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
+import { FiArrowRight, FiBell, FiCheckCircle } from 'react-icons/fi'
 import { useAuth } from '../contexts/AuthContext'
-import api from '../services/api'
-import { FiUsers, FiPackage, FiTruck, FiBell, FiFileText, FiCreditCard, FiCalendar } from 'react-icons/fi'
+import useApi from '../hooks/useApi'
+import { PageHeader, formatDate, formatINR } from '../components/ui'
+
+const greeting = () => {
+  const h = new Date().getHours()
+  return h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening'
+}
+
+const count = (d, key) => d?.count ?? d?.[key]?.length ?? 0
 
 const Dashboard = () => {
   const { user, isResident, isAdmin, isSecurity } = useAuth()
-  const [stats, setStats] = useState({
-    visitors: { pending: 0, today: 0 },
-    deliveries: { pending: 0, today: 0 },
-    vehicles: { inside: 0 },
-    notices: { unread: 0 },
-    complaints: { open: 0 },
-    payments: { pending: 0 }
-  })
-  const [loading, setLoading] = useState(true)
+  const role = user?.role
+  const sees = (...roles) => roles.includes(role)
 
-  useEffect(() => {
-    fetchDashboardData()
-  }, [])
+  const visitorsPending = useApi('/visitors', { params: { status: 'pending', limit: 100 }, enabled: sees('resident', 'society_admin', 'super_admin') })
+  const visitorsInside = useApi('/visitors', { params: { status: 'checked_in', limit: 100 }, enabled: sees('security', 'society_admin', 'super_admin') })
+  const visitorsExpected = useApi('/visitors', { params: { status: 'approved', limit: 100 }, enabled: sees('security', 'resident') })
+  const deliveriesOpen = useApi('/deliveries', { params: { status: 'approved', limit: 100 }, enabled: sees('resident', 'security', 'society_admin', 'super_admin') })
+  const vehiclesInside = useApi('/vehicles', { params: { isInside: true }, enabled: sees('security', 'society_admin', 'super_admin') })
+  const complaintsOpen = useApi('/complaints', { params: { status: 'open', limit: 100 }, enabled: sees('resident', 'society_admin', 'super_admin', 'staff') })
+  const paymentsPending = useApi('/payments', { params: { status: 'pending', limit: 100 }, enabled: sees('resident', 'society_admin', 'super_admin') })
+  const approvals = useApi('/users/pending-approvals', { enabled: isAdmin })
+  const notifications = useApi('/users/notifications', { params: { limit: 6 }, select: (d) => d.notifications || [] })
 
-  const fetchDashboardData = async () => {
-    try {
-      // Fetch visitors
-      const visitorsRes = await api.get('/visitors?status=pending').catch(() => ({ data: { count: 0, visitors: [] } }))
-      const visitorsTodayRes = await api.get('/visitors/logs/today').catch(() => ({ data: { count: 0, visitors: [] } }))
-      
-      // Fetch deliveries
-      const deliveriesRes = await api.get('/deliveries?status=pending').catch(() => ({ data: { count: 0, deliveries: [] } }))
-      
-      // Fetch vehicles
-      const vehiclesRes = await api.get('/vehicles?isInside=true').catch(() => ({ data: { count: 0, vehicles: [] } }))
-      
-      // Fetch notices
-      const noticesRes = await api.get('/notices').catch(() => ({ data: { count: 0, notices: [] } }))
-      
-      // Fetch complaints
-      const complaintsRes = await api.get('/complaints?status=open').catch(() => ({ data: { count: 0, complaints: [] } }))
-      
-      // Fetch payments
-      const paymentsRes = await api.get('/payments?status=pending').catch(() => ({ data: { count: 0, payments: [] } }))
+  const pendingPaymentTotal = (paymentsPending.data?.payments || []).reduce((n, p) => n + (p.amount || 0), 0)
 
-      setStats({
-        visitors: {
-          pending: visitorsRes.data?.count ?? visitorsRes.data?.visitors?.length ?? 0,
-          today: visitorsTodayRes.data?.count ?? visitorsTodayRes.data?.visitors?.length ?? 0
-        },
-        deliveries: {
-          pending: deliveriesRes.data?.count ?? deliveriesRes.data?.deliveries?.length ?? 0
-        },
-        vehicles: {
-          inside: vehiclesRes.data?.count ?? vehiclesRes.data?.vehicles?.length ?? 0
-        },
-        notices: {
-          unread: noticesRes.data?.count ?? noticesRes.data?.notices?.length ?? 0
-        },
-        complaints: {
-          open: complaintsRes.data?.count ?? complaintsRes.data?.complaints?.length ?? 0
-        },
-        payments: {
-          pending: paymentsRes.data?.count ?? paymentsRes.data?.payments?.length ?? 0
-        }
-      })
-    } catch (error) {
-      console.error('Error fetching dashboard data:', error)
-      // Set defaults on error
-      setStats({
-        visitors: { pending: 0, today: 0 },
-        deliveries: { pending: 0 },
-        vehicles: { inside: 0 },
-        notices: { unread: 0 },
-        complaints: { open: 0 },
-        payments: { pending: 0 }
-      })
-    } finally {
-      setLoading(false)
-    }
-  }
+  // Things the person can act on right now. Zero-count items are hidden so the list stays short.
+  const attention = [
+    isAdmin && { n: count(approvals.data, 'users'), label: 'residents waiting for approval', to: '/admin/residents', cta: 'Review' },
+    sees('resident', 'society_admin', 'super_admin') && {
+      n: count(visitorsPending.data, 'visitors'),
+      label: isResident ? 'visitors at the gate waiting for you' : 'visitors waiting for a decision',
+      to: '/visitors',
+      cta: 'Decide'
+    },
+    isResident && { n: count(paymentsPending.data, 'payments'), label: `payments pending (${formatINR(pendingPaymentTotal)})`, to: '/payments', cta: 'Pay' },
+    sees('resident', 'society_admin', 'super_admin', 'staff') && { n: count(complaintsOpen.data, 'complaints'), label: 'open complaints', to: '/complaints', cta: 'Open' },
+    isSecurity && { n: count(visitorsExpected.data, 'visitors'), label: 'invited visitors expected', to: '/gate', cta: 'Open console' }
+  ].filter((x) => x && x.n > 0)
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600"></div>
-      </div>
-    )
-  }
+  const glance = [
+    sees('security', 'society_admin', 'super_admin') && { label: 'Visitors inside', value: count(visitorsInside.data, 'visitors'), to: '/visitors' },
+    sees('resident', 'security', 'society_admin', 'super_admin') && { label: 'Deliveries approved', value: count(deliveriesOpen.data, 'deliveries'), to: '/deliveries' },
+    sees('security', 'society_admin', 'super_admin') && { label: 'Vehicles inside', value: count(vehiclesInside.data, 'vehicles'), to: '/vehicles' },
+    isResident && { label: 'Visitors expected', value: count(visitorsExpected.data, 'visitors'), to: '/visitors' },
+    isAdmin && { label: 'Open complaints', value: count(complaintsOpen.data, 'complaints'), to: '/complaints' }
+  ].filter(Boolean)
 
-  const statCards = [
-    {
-      title: 'Pending Visitors',
-      value: stats.visitors.pending,
-      icon: FiUsers,
-      color: 'bg-blue-500',
-      link: '/visitors'
-    },
-    {
-      title: 'Pending Deliveries',
-      value: stats.deliveries.pending,
-      icon: FiPackage,
-      color: 'bg-green-500',
-      link: '/deliveries?status=pending'
-    },
-    {
-      title: 'Vehicles Inside',
-      value: stats.vehicles.inside,
-      icon: FiTruck,
-      color: 'bg-purple-500',
-      link: '/vehicles?isInside=true'
-    },
-    {
-      title: 'New Notices',
-      value: stats.notices.unread,
-      icon: FiBell,
-      color: 'bg-yellow-500',
-      link: '/notices'
-    },
-    {
-      title: 'Open Complaints',
-      value: stats.complaints.open,
-      icon: FiFileText,
-      color: 'bg-red-500',
-      link: '/complaints?status=open'
-    },
-    {
-      title: 'Pending Payments',
-      value: stats.payments.pending,
-      icon: FiCreditCard,
-      color: 'bg-indigo-500',
-      link: '/payments?status=pending'
-    }
-  ]
+  const flat = user?.flatNo ? `${user.block ? `${user.block}-` : ''}${user.flatNo}` : ''
+  const subtitle = [user?.societyId?.name, flat && `Flat ${flat}`].filter(Boolean).join(' · ')
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold text-gray-900">
-          Welcome back, {user?.name}!
-        </h1>
-        <p className="mt-2 text-gray-600">
-          {user?.flatNo && `Flat ${user.flatNo}`} {user?.block && `Block ${user.block}`}
-        </p>
-      </div>
+    <>
+      <PageHeader title={`${greeting()}, ${user?.name?.split(' ')[0] || 'there'}`} subtitle={subtitle || undefined} />
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {statCards.map((card, index) => (
-          <Link
-            key={index}
-            to={card.link}
-            className="bg-white rounded-lg shadow-md p-6 hover:shadow-lg transition-shadow"
-          >
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-gray-600 text-sm font-medium">{card.title}</p>
-                <p className="text-3xl font-bold text-gray-900 mt-2">{card.value}</p>
-              </div>
-              <div className={`${card.color} p-3 rounded-full`}>
-                <card.icon className="text-white text-2xl" />
-              </div>
+      <div className="grid gap-6 lg:grid-cols-[3fr_2fr]">
+        <section aria-labelledby="attention-h" className="panel">
+          <h2 id="attention-h" className="border-b border-line px-5 py-3.5 text-base font-bold">Needs your attention</h2>
+          {attention.length === 0 ? (
+            <div className="flex items-center gap-3 px-5 py-8 text-sm text-muted">
+              <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-ok-soft text-ok"><FiCheckCircle size={18} /></span>
+              Nothing is waiting on you right now.
             </div>
-          </Link>
-        ))}
-      </div>
+          ) : (
+            <ul className="divide-y divide-line">
+              {attention.map((a) => (
+                <li key={a.label}>
+                  <Link to={a.to} className="group flex items-center gap-4 px-5 py-4 hover:bg-sunken/60">
+                    <span className="w-10 text-right font-display text-3xl font-extrabold leading-none">{a.n}</span>
+                    <span className="flex-1 text-sm">{a.label}</span>
+                    <span className="inline-flex items-center gap-1 text-sm font-semibold text-brand">
+                      {a.cta} <FiArrowRight className="transition-transform group-hover:translate-x-0.5" />
+                    </span>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          )}
 
-      {/* Recent Activity Section */}
-      <div className="mt-8 bg-white rounded-lg shadow-md p-6">
-        <h2 className="text-xl font-bold text-gray-900 mb-4">Recent Activity</h2>
-        <div className="space-y-4">
-          {/* Add recent activity items here */}
-          <p className="text-gray-600">No recent activity</p>
-        </div>
+          {glance.length > 0 && (
+            <>
+              <h2 className="border-y border-line px-5 py-3.5 text-base font-bold">Right now</h2>
+              <div className="grid grid-cols-2 divide-x divide-y divide-line sm:grid-cols-3 sm:divide-y-0">
+                {glance.map((g) => (
+                  <Link key={g.label} to={g.to} className="px-5 py-4 hover:bg-sunken/60">
+                    <p className="font-display text-2xl font-extrabold">{g.value}</p>
+                    <p className="text-xs text-muted">{g.label}</p>
+                  </Link>
+                ))}
+              </div>
+            </>
+          )}
+        </section>
+
+        <section aria-labelledby="recent-h" className="panel h-fit">
+          <h2 id="recent-h" className="border-b border-line px-5 py-3.5 text-base font-bold">Recent activity</h2>
+          {notifications.data?.length ? (
+            <ul className="divide-y divide-line">
+              {notifications.data.map((n) => (
+                <li key={n._id} className="px-5 py-3.5">
+                  <p className="text-sm font-semibold">{n.title}</p>
+                  <p className="text-sm text-muted">{n.message}</p>
+                  <p className="mt-1 text-xs text-muted">{formatDate(n.createdAt, true)}</p>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <div className="flex items-center gap-3 px-5 py-8 text-sm text-muted">
+              <FiBell size={18} /> Activity from visitors, deliveries and payments shows up here.
+            </div>
+          )}
+        </section>
       </div>
-    </div>
+    </>
   )
 }
 

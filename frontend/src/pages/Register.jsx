@@ -1,8 +1,28 @@
-import { useState, useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { useAuth } from '../contexts/AuthContext'
 import toast from 'react-hot-toast'
+import { useAuth } from '../contexts/AuthContext'
 import api from '../services/api'
+import AuthShell from '../components/AuthShell'
+import { Field, Spinner } from '../components/ui'
+
+const ROLES = [
+  { value: 'resident', label: 'Resident' },
+  { value: 'security', label: 'Security guard' },
+  { value: 'staff', label: 'Society staff' },
+  { value: 'vendor', label: 'Vendor' }
+]
+
+const validate = (f) => {
+  const e = {}
+  if (!f.name.trim()) e.name = 'Enter your full name.'
+  if (!/^\S+@\S+\.\S+$/.test(f.email)) e.email = 'Enter a valid email address.'
+  if (!/^[0-9]{10}$/.test(f.phone)) e.phone = 'Enter a 10-digit mobile number.'
+  if (f.password.length < 6) e.password = 'Use at least 6 characters.'
+  if (!f.societyId) e.societyId = 'Choose your society.'
+  if (f.role === 'resident' && !f.flatNo.trim()) e.flatNo = 'Enter your flat number.'
+  return e
+}
 
 const Register = () => {
   const [formData, setFormData] = useState({
@@ -16,194 +36,126 @@ const Register = () => {
     block: ''
   })
   const [societies, setSocieties] = useState([])
+  const [societiesLoaded, setSocietiesLoaded] = useState(false)
+  const [errors, setErrors] = useState({})
   const [loading, setLoading] = useState(false)
   const { register } = useAuth()
   const navigate = useNavigate()
 
   useEffect(() => {
-    api.get('/societies/public')
-      .then(res => setSocieties(res.data.societies || []))
+    api
+      .get('/societies/public')
+      .then((res) => setSocieties(res.data.societies || []))
       .catch(() => setSocieties([]))
+      .finally(() => setSocietiesLoaded(true))
   }, [])
 
   const handleChange = (e) => {
     setFormData({ ...formData, [e.target.name]: e.target.value })
+    if (errors[e.target.name]) setErrors({ ...errors, [e.target.name]: undefined })
   }
 
   const handleSubmit = async (e) => {
     e.preventDefault()
-    setLoading(true)
+    const found = validate(formData)
+    setErrors(found)
+    if (Object.keys(found).length) return
 
-    const result = await register(formData)
-    
-    if (result.success) {
-      toast.success(result.message || 'Registration successful!')
-      navigate('/dashboard')
-    } else {
-      toast.error(result.message || 'Registration failed')
+    setLoading(true)
+    const payload = { ...formData, name: formData.name.trim(), email: formData.email.trim() }
+    if (payload.role !== 'resident') {
+      delete payload.flatNo
+      delete payload.block
     }
-    
+    const result = await register(payload)
     setLoading(false)
+
+    if (result.success) {
+      toast.success(result.message || 'Account created')
+      navigate('/dashboard', { replace: true })
+    } else {
+      toast.error(result.message)
+    }
   }
 
+  const isResident = formData.role === 'resident'
+
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-md w-full space-y-8">
-        <div>
-          <h2 className="mt-6 text-center text-3xl font-extrabold text-gray-900">
-            Create your account
-          </h2>
+    <AuthShell
+      title="Create your account"
+      subtitle="Residents are approved by their society admin before first sign-in."
+      footer={
+        <>
+          Already registered?{' '}
+          <Link to="/login" className="font-semibold text-brand hover:underline">
+            Sign in
+          </Link>
+        </>
+      }
+    >
+      <form className="space-y-4" onSubmit={handleSubmit} noValidate>
+        <Field label="Full name" htmlFor="name" error={errors.name}>
+          <input id="name" name="name" autoComplete="name" className="input" value={formData.name} onChange={handleChange} />
+        </Field>
+
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field label="Email" htmlFor="email" error={errors.email}>
+            <input id="email" name="email" type="email" autoComplete="email" className="input" value={formData.email} onChange={handleChange} />
+          </Field>
+          <Field label="Mobile number" htmlFor="phone" error={errors.phone}>
+            <input id="phone" name="phone" type="tel" inputMode="numeric" maxLength={10} autoComplete="tel-national" className="input" value={formData.phone} onChange={handleChange} />
+          </Field>
         </div>
-        <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
-          <div className="space-y-4">
-            <div>
-              <label htmlFor="name" className="block text-sm font-medium text-gray-700">
-                Full Name
-              </label>
-              <input
-                id="name"
-                name="name"
-                type="text"
-                required
-                className="mt-1 appearance-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-md focus:outline-none focus:ring-primary-500 focus:border-primary-500 sm:text-sm"
-                value={formData.name}
-                onChange={handleChange}
-              />
-            </div>
-            <div>
-              <label htmlFor="email" className="block text-sm font-medium text-gray-700">
-                Email
-              </label>
-              <input
-                id="email"
-                name="email"
-                type="email"
-                required
-                className="mt-1 appearance-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-md focus:outline-none focus:ring-primary-500 focus:border-primary-500 sm:text-sm"
-                value={formData.email}
-                onChange={handleChange}
-              />
-            </div>
-            <div>
-              <label htmlFor="phone" className="block text-sm font-medium text-gray-700">
-                Phone
-              </label>
-              <input
-                id="phone"
-                name="phone"
-                type="tel"
-                required
-                className="mt-1 appearance-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-md focus:outline-none focus:ring-primary-500 focus:border-primary-500 sm:text-sm"
-                value={formData.phone}
-                onChange={handleChange}
-              />
-            </div>
-            <div>
-              <label htmlFor="password" className="block text-sm font-medium text-gray-700">
-                Password
-              </label>
-              <input
-                id="password"
-                name="password"
-                type="password"
-                required
-                className="mt-1 appearance-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-md focus:outline-none focus:ring-primary-500 focus:border-primary-500 sm:text-sm"
-                value={formData.password}
-                onChange={handleChange}
-              />
-            </div>
-            <div>
-              <label htmlFor="role" className="block text-sm font-medium text-gray-700">
-                Role
-              </label>
-              <select
-                id="role"
-                name="role"
-                className="mt-1 block w-full px-3 py-2 border border-gray-300 bg-white rounded-md shadow-sm focus:outline-none focus:ring-primary-500 focus:border-primary-500 sm:text-sm"
-                value={formData.role}
-                onChange={handleChange}
-              >
-                <option value="resident">Resident</option>
-                <option value="security">Security</option>
-                <option value="staff">Staff</option>
-              </select>
-            </div>
-            <div>
-              <label htmlFor="societyId" className="block text-sm font-medium text-gray-700">
-                Society
-              </label>
-              <select
-                id="societyId"
-                name="societyId"
-                required
-                className="mt-1 block w-full px-3 py-2 border border-gray-300 bg-white rounded-md shadow-sm focus:outline-none focus:ring-primary-500 focus:border-primary-500 sm:text-sm"
-                value={formData.societyId}
-                onChange={handleChange}
-              >
-                <option value="">Select Society</option>
-                {societies.map(society => (
-                  <option key={society._id} value={society._id}>
-                    {society.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-            {formData.role === 'resident' && (
-              <>
-                <div>
-                  <label htmlFor="flatNo" className="block text-sm font-medium text-gray-700">
-                    Flat Number
-                  </label>
-                  <input
-                    id="flatNo"
-                    name="flatNo"
-                    type="text"
-                    className="mt-1 appearance-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-md focus:outline-none focus:ring-primary-500 focus:border-primary-500 sm:text-sm"
-                    value={formData.flatNo}
-                    onChange={handleChange}
-                  />
-                </div>
-                <div>
-                  <label htmlFor="block" className="block text-sm font-medium text-gray-700">
-                    Block
-                  </label>
-                  <input
-                    id="block"
-                    name="block"
-                    type="text"
-                    className="mt-1 appearance-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-md focus:outline-none focus:ring-primary-500 focus:border-primary-500 sm:text-sm"
-                    value={formData.block}
-                    onChange={handleChange}
-                  />
-                </div>
-              </>
-            )}
-          </div>
 
-          <div>
-            <button
-              type="submit"
-              disabled={loading}
-              className="group relative w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-primary-600 hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500 disabled:opacity-50"
-            >
-              {loading ? 'Registering...' : 'Register'}
-            </button>
-          </div>
+        <Field label="Password" htmlFor="password" error={errors.password} hint="At least 6 characters.">
+          <input id="password" name="password" type="password" autoComplete="new-password" className="input" value={formData.password} onChange={handleChange} />
+        </Field>
 
-          <div className="text-center">
-            <span className="text-sm text-gray-600">
-              Already have an account?{' '}
-              <Link
-                to="/login"
-                className="font-medium text-primary-600 hover:text-primary-500"
-              >
-                Sign in
-              </Link>
-            </span>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field label="I am a" htmlFor="role">
+            <select id="role" name="role" className="input" value={formData.role} onChange={handleChange}>
+              {ROLES.map((r) => (
+                <option key={r.value} value={r.value}>
+                  {r.label}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field
+            label="Society"
+            htmlFor="societyId"
+            error={errors.societyId}
+            hint={societiesLoaded && societies.length === 0 ? 'No societies yet. Ask your admin to add yours.' : undefined}
+          >
+            <select id="societyId" name="societyId" className="input" value={formData.societyId} onChange={handleChange}>
+              <option value="">{societiesLoaded ? 'Select society' : 'Loading...'}</option>
+              {societies.map((s) => (
+                <option key={s._id} value={s._id}>
+                  {s.name}
+                  {s.address?.city ? `, ${s.address.city}` : ''}
+                </option>
+              ))}
+            </select>
+          </Field>
+        </div>
+
+        {isResident && (
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field label="Block or tower" htmlFor="block" hint="Optional">
+              <input id="block" name="block" className="input" value={formData.block} onChange={handleChange} />
+            </Field>
+            <Field label="Flat number" htmlFor="flatNo" error={errors.flatNo}>
+              <input id="flatNo" name="flatNo" className="input" value={formData.flatNo} onChange={handleChange} />
+            </Field>
           </div>
-        </form>
-      </div>
-    </div>
+        )}
+
+        <button type="submit" disabled={loading} className="btn-primary w-full">
+          {loading && <Spinner className="h-4 w-4" />}
+          {loading ? 'Creating account' : 'Create account'}
+        </button>
+      </form>
+    </AuthShell>
   )
 }
 

@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect } from 'react'
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
 import api from '../services/api'
 
 const AuthContext = createContext()
@@ -11,47 +11,66 @@ export const useAuth = () => {
   return context
 }
 
+// The API returns `_id` on /auth/me and `id` on login; components always read `id`.
+const normalizeUser = (u) => (u ? { ...u, id: u.id || u._id } : u)
+
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [pendingApproval, setPendingApproval] = useState(false)
   const [token, setToken] = useState(localStorage.getItem('token'))
+
+  const clearSession = useCallback(() => {
+    localStorage.removeItem('token')
+    setToken(null)
+    setUser(null)
+    setPendingApproval(false)
+  }, [])
+
+  const fetchUser = useCallback(async () => {
+    try {
+      const response = await api.get('/auth/me')
+      setUser(normalizeUser(response.data.user))
+      setPendingApproval(false)
+    } catch (error) {
+      // A resident who has registered but is not approved yet gets 403 from the API.
+      if (error.response?.status === 403) {
+        setUser(null)
+        setPendingApproval(true)
+      } else if (error.response?.status === 401) {
+        clearSession()
+      } else {
+        // Network or server trouble: keep the token so a refresh can recover.
+        setUser(null)
+      }
+    } finally {
+      setLoading(false)
+    }
+  }, [clearSession])
 
   useEffect(() => {
     if (token) {
-      api.defaults.headers.common['Authorization'] = `Bearer ${token}`
       fetchUser()
     } else {
       setLoading(false)
     }
-  }, [token])
+  }, [token, fetchUser])
 
-  const fetchUser = async () => {
-    try {
-      const response = await api.get('/auth/me')
-      setUser(response.data.user)
-    } catch (error) {
-      console.error('Error fetching user:', error)
-      logout()
-    } finally {
-      setLoading(false)
-    }
+  const startSession = (newToken) => {
+    localStorage.setItem('token', newToken)
+    setLoading(true)
+    setToken(newToken)
   }
 
   const login = async (email, password) => {
     try {
       const response = await api.post('/auth/login', { email, password })
-      const { token: newToken, user: userData } = response.data
-      
-      localStorage.setItem('token', newToken)
-      setToken(newToken)
-      setUser(userData)
-      api.defaults.headers.common['Authorization'] = `Bearer ${newToken}`
-      
+      startSession(response.data.token)
       return { success: true }
     } catch (error) {
       return {
         success: false,
-        message: error.response?.data?.message || 'Login failed'
+        message: error.response?.data?.message || error.response?.data?.errors?.[0]?.msg || 'Could not sign in. Check your connection and try again.'
       }
     }
   }
@@ -59,40 +78,35 @@ export const AuthProvider = ({ children }) => {
   const register = async (userData) => {
     try {
       const response = await api.post('/auth/register', userData)
-      const { token: newToken, user: newUser } = response.data
-      
-      localStorage.setItem('token', newToken)
-      setToken(newToken)
-      setUser(newUser)
-      api.defaults.headers.common['Authorization'] = `Bearer ${newToken}`
-      
+      startSession(response.data.token)
       return { success: true, message: response.data.message }
     } catch (error) {
       return {
         success: false,
-        message: error.response?.data?.message || 'Registration failed'
+        message: error.response?.data?.errors?.map((e) => e.msg).join('. ') || error.response?.data?.message || 'Could not create the account. Try again.'
       }
     }
   }
 
-  const logout = () => {
-    localStorage.removeItem('token')
-    setToken(null)
-    setUser(null)
-    delete api.defaults.headers.common['Authorization']
-  }
-
-  const value = {
-    user,
-    loading,
-    login,
-    register,
-    logout,
-    isAuthenticated: !!user,
-    isResident: user?.role === 'resident',
-    isAdmin: ['society_admin', 'super_admin'].includes(user?.role),
-    isSecurity: user?.role === 'security'
-  }
+  const value = useMemo(
+    () => ({
+      user,
+      loading,
+      pendingApproval,
+      login,
+      register,
+      logout: clearSession,
+      refreshUser: fetchUser,
+      isAuthenticated: !!user,
+      isResident: user?.role === 'resident',
+      isSuperAdmin: user?.role === 'super_admin',
+      isAdmin: ['society_admin', 'super_admin'].includes(user?.role),
+      isSecurity: user?.role === 'security'
+    }),
+    // login/register only close over stable setters
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [user, loading, pendingApproval, clearSession, fetchUser]
+  )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }

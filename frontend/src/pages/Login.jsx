@@ -1,113 +1,106 @@
 import { useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
-import { useAuth } from '../contexts/AuthContext'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
+import { FiEye, FiEyeOff } from 'react-icons/fi'
 import toast from 'react-hot-toast'
+import { useAuth } from '../contexts/AuthContext'
+import AuthShell from '../components/AuthShell'
+import { Field, Spinner } from '../components/ui'
 
 const Login = () => {
   const [formData, setFormData] = useState({ email: '', password: '' })
+  const [showPassword, setShowPassword] = useState(false)
+  const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const { login } = useAuth()
   const navigate = useNavigate()
+  const location = useLocation()
 
-  const handleChange = (e) => {
-    setFormData({ ...formData, [e.target.name]: e.target.value })
-  }
+  const handleChange = (e) => setFormData({ ...formData, [e.target.name]: e.target.value })
 
   const handleSubmit = async (e) => {
     e.preventDefault()
+    setError('')
     setLoading(true)
-
-    const result = await login(formData.email, formData.password)
-    
-    if (result.success) {
-      toast.success('Login successful!')
-      navigate('/dashboard')
-    } else {
-      toast.error(result.message || 'Login failed')
-    }
-    
+    const result = await login(formData.email.trim(), formData.password)
     setLoading(false)
+
+    if (result.success) {
+      navigate(location.state?.from || '/dashboard', { replace: true })
+    } else {
+      setError(result.message)
+      toast.error(result.message)
+    }
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-md w-full space-y-8">
-        <div>
-          <h2 className="mt-6 text-center text-3xl font-extrabold text-gray-900">
-            Sign in to MyGate
-          </h2>
-        </div>
-        <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
-          <div className="rounded-md shadow-sm -space-y-px">
-            <div>
-              <label htmlFor="email" className="sr-only">
-                Email address
-              </label>
-              <input
-                id="email"
-                name="email"
-                type="email"
-                autoComplete="email"
-                required
-                className="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-t-md focus:outline-none focus:ring-primary-500 focus:border-primary-500 focus:z-10 sm:text-sm"
-                placeholder="Email address"
-                value={formData.email}
-                onChange={handleChange}
-              />
-            </div>
-            <div>
-              <label htmlFor="password" className="sr-only">
-                Password
-              </label>
-              <input
-                id="password"
-                name="password"
-                type="password"
-                autoComplete="current-password"
-                required
-                className="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-b-md focus:outline-none focus:ring-primary-500 focus:border-primary-500 focus:z-10 sm:text-sm"
-                placeholder="Password"
-                value={formData.password}
-                onChange={handleChange}
-              />
-            </div>
-          </div>
+    <AuthShell
+      title="Sign in"
+      subtitle="Use the email you registered with."
+      footer={
+        <>
+          New to your society on MyGate?{' '}
+          <Link to="/register" className="font-semibold text-brand hover:underline">
+            Create an account
+          </Link>
+        </>
+      }
+    >
+      <form className="space-y-5" onSubmit={handleSubmit} noValidate>
+        <Field label="Email" htmlFor="email">
+          <input
+            id="email"
+            name="email"
+            type="email"
+            autoComplete="email"
+            required
+            className="input"
+            placeholder="you@example.com"
+            value={formData.email}
+            onChange={handleChange}
+          />
+        </Field>
 
-          <div className="flex items-center justify-between">
-            <div className="text-sm">
-              <Link
-                to="/forgot-password"
-                className="font-medium text-primary-600 hover:text-primary-500"
-              >
-                Forgot your password?
-              </Link>
-            </div>
-          </div>
-
-          <div>
+        <Field label="Password" htmlFor="password">
+          <div className="relative">
+            <input
+              id="password"
+              name="password"
+              type={showPassword ? 'text' : 'password'}
+              autoComplete="current-password"
+              required
+              className="input pr-11"
+              value={formData.password}
+              onChange={handleChange}
+            />
             <button
-              type="submit"
-              disabled={loading}
-              className="group relative w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-primary-600 hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500 disabled:opacity-50"
+              type="button"
+              className="absolute inset-y-0 right-0 grid w-11 place-items-center text-muted hover:text-ink"
+              onClick={() => setShowPassword((v) => !v)}
+              aria-label={showPassword ? 'Hide password' : 'Show password'}
             >
-              {loading ? 'Signing in...' : 'Sign in'}
+              {showPassword ? <FiEyeOff size={18} /> : <FiEye size={18} />}
             </button>
           </div>
+        </Field>
 
-          <div className="text-center">
-            <span className="text-sm text-gray-600">
-              Don't have an account?{' '}
-              <Link
-                to="/register"
-                className="font-medium text-primary-600 hover:text-primary-500"
-              >
-                Sign up
-              </Link>
-            </span>
-          </div>
-        </form>
-      </div>
-    </div>
+        {error && (
+          <p role="alert" className="rounded-md bg-danger-soft px-3 py-2 text-sm font-medium text-danger">
+            {error}
+          </p>
+        )}
+
+        <div className="flex items-center justify-end">
+          <Link to="/forgot-password" className="text-sm font-semibold text-brand hover:underline">
+            Forgot password?
+          </Link>
+        </div>
+
+        <button type="submit" disabled={loading || !formData.email || !formData.password} className="btn-primary w-full">
+          {loading && <Spinner className="h-4 w-4" />}
+          {loading ? 'Signing in' : 'Sign in'}
+        </button>
+      </form>
+    </AuthShell>
   )
 }
 

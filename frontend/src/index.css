@@ -2,16 +2,149 @@
 @tailwind components;
 @tailwind utilities;
 
-body {
-  margin: 0;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
-    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
-    sans-serif;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+:root {
+  --bg: 244 246 244;
+  --surface: 255 255 255;
+  --sunken: 236 240 238;
+  --ink: 18 42 41;
+  --muted: 91 111 109;
+  --line: 218 227 224;
+  --brand: 15 76 74;
+  --brand-strong: 10 58 57;
+  --brand-soft: 222 238 236;
+  --brand-ink: 255 255 255;
+  --amber-soft: 254 240 199;
+  --ok: 30 122 76;
+  --ok-soft: 220 243 229;
+  --danger: 190 52 52;
+  --danger-soft: 252 228 228;
+  --info: 30 90 160;
+  --info-soft: 221 233 249;
 }
 
-code {
-  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
-    monospace;
+.dark {
+  --bg: 8 24 24;
+  --surface: 15 37 36;
+  --sunken: 11 30 29;
+  --ink: 228 238 236;
+  --muted: 143 168 165;
+  --line: 33 62 60;
+  --brand: 74 190 182;
+  --brand-strong: 120 214 207;
+  --brand-soft: 20 62 60;
+  --brand-ink: 6 30 29;
+  --amber-soft: 70 52 8;
+  --ok: 92 200 142;
+  --ok-soft: 18 62 40;
+  --danger: 244 120 120;
+  --danger-soft: 72 24 24;
+  --info: 120 170 240;
+  --info-soft: 22 44 80;
+}
+
+@layer base {
+  html {
+    color-scheme: light;
+  }
+  html.dark {
+    color-scheme: dark;
+  }
+  body {
+    @apply bg-bg font-sans text-ink antialiased;
+    margin: 0;
+  }
+  h1,
+  h2,
+  h3 {
+    @apply font-display tracking-tight;
+  }
+  :focus-visible {
+    outline: 2px solid rgb(var(--brand));
+    outline-offset: 2px;
+  }
+}
+
+@layer components {
+  .btn {
+    @apply inline-flex min-h-[40px] items-center justify-center gap-2 rounded-md px-4 text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50;
+  }
+  .btn-primary {
+    @apply btn bg-brand text-brand-ink hover:bg-brand-strong;
+  }
+  .btn-secondary {
+    @apply btn border border-line bg-surface text-ink hover:bg-sunken;
+  }
+  .btn-ghost {
+    @apply btn text-muted hover:bg-sunken hover:text-ink;
+  }
+  .btn-danger {
+    @apply btn bg-danger text-white hover:opacity-90;
+  }
+  .btn-ok {
+    @apply btn bg-ok text-white hover:opacity-90;
+  }
+  .btn-sm {
+    @apply min-h-[32px] px-3 text-xs;
+  }
+  .input {
+    @apply block w-full rounded-md border border-line bg-surface px-3 py-2 text-sm text-ink placeholder:text-muted/70 transition-colors focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/25 disabled:bg-sunken;
+  }
+  .label {
+    @apply mb-1 block text-sm font-semibold text-ink;
+  }
+  .panel {
+    @apply rounded-lg border border-line bg-surface;
+  }
+  .tag {
+    @apply inline-flex items-center gap-1 rounded-sm px-2 py-0.5 text-xs font-semibold;
+  }
+  .tag-neutral {
+    @apply tag bg-sunken text-muted;
+  }
+  .tag-ok {
+    @apply tag bg-ok-soft text-ok;
+  }
+  .tag-warn {
+    @apply tag bg-amber-soft text-ink;
+  }
+  .tag-danger {
+    @apply tag bg-danger-soft text-danger;
+  }
+  .tag-info {
+    @apply tag bg-info-soft text-info;
+  }
+}
+
+/* The one signature element: a boom-barrier stripe, used on the sidebar edge and active nav state. */
+.hazard {
+  background-image: repeating-linear-gradient(
+    -45deg,
+    #f5a800 0 10px,
+    rgb(var(--brand-strong)) 10px 20px
+  );
+}
+
+@keyframes skeleton {
+  0% {
+    background-position: 100% 0;
+  }
+  100% {
+    background-position: -100% 0;
+  }
+}
+.skeleton {
+  background: linear-gradient(90deg, rgb(var(--sunken)) 30%, rgb(var(--line)) 50%, rgb(var(--sunken)) 70%);
+  background-size: 200% 100%;
+  animation: skeleton 1.4s linear infinite;
+  border-radius: 6px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton {
+    animation: none;
+  }
+  * {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
 }

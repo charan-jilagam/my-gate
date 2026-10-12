@@ -18,6 +18,17 @@ if (process.env.RAZORPAY_KEY_ID && process.env.RAZORPAY_KEY_SECRET) {
   console.warn('⚠️  Razorpay credentials not configured. Payment features will be disabled.');
 }
 
+// @route   GET /api/payments/config
+// @desc    Whether online payments are available, plus the public Razorpay key for checkout
+// @access  Private
+router.get('/config', protect, (req, res) => {
+  res.json({
+    success: true,
+    enabled: !!razorpay,
+    keyId: razorpay ? process.env.RAZORPAY_KEY_ID : null
+  });
+});
+
 // @route   POST /api/payments/create-order
 // @desc    Create Razorpay order
 // @access  Private (Residents)
@@ -86,6 +97,7 @@ router.post('/create-order', protect, authorize('resident'), [
         receipt: order.receipt
       },
       paymentId: payment._id,
+      keyId: process.env.RAZORPAY_KEY_ID,
       message: 'Order created successfully'
     });
   } catch (error) {

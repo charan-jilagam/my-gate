@@ -1,174 +1,255 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
+import { FiBell, FiCalendar, FiMapPin, FiPlus, FiTrash2 } from 'react-icons/fi'
 import { useAuth } from '../contexts/AuthContext'
 import api from '../services/api'
-import toast from 'react-hot-toast'
-import { FiBell, FiPlus } from 'react-icons/fi'
+import useApi from '../hooks/useApi'
+import useAction from '../hooks/useAction'
+import { ConfirmDialog, EmptyState, ErrorState, Field, ListSkeleton, Modal, PageHeader, Spinner, formatDate, titleCase } from '../components/ui'
+
+const TYPES = ['notice', 'announcement', 'poll', 'event', 'maintenance']
+const PRIORITIES = ['low', 'medium', 'high', 'urgent']
+const CATEGORIES = ['general', 'maintenance', 'security', 'amenities', 'billing', 'other']
+const EMPTY_FORM = {
+  title: '',
+  content: '',
+  type: 'notice',
+  priority: 'medium',
+  category: 'general',
+  pollOptions: '',
+  eventDate: '',
+  eventLocation: '',
+  expiresAt: '',
+  societyId: ''
+}
+
+const PRIORITY_TAG = { urgent: 'tag-danger', high: 'tag-warn', medium: 'tag-neutral', low: 'tag-neutral' }
+
+const Poll = ({ notice, userId, canVote, onVote, busy }) => {
+  const total = notice.pollOptions.reduce((n, o) => n + o.votes.length, 0)
+  const voted = notice.pollOptions.some((o) => o.votes.some((v) => String(v?._id || v) === String(userId)))
+  const ended = notice.pollEndDate && new Date(notice.pollEndDate) < new Date()
+  const showResults = voted || ended || !canVote
+
+  return (
+    <div className="mt-4 space-y-2">
+      {notice.pollOptions.map((o, i) => {
+        const pct = total ? Math.round((o.votes.length / total) * 100) : 0
+        return showResults ? (
+          <div key={o._id || i} className="relative overflow-hidden rounded-md border border-line px-3 py-2 text-sm">
+            <span className="absolute inset-y-0 left-0 bg-brand-soft" style={{ width: `${pct}%` }} aria-hidden="true" />
+            <span className="relative flex justify-between gap-3">
+              <span className="font-medium">{o.option}</span>
+              <span className="text-muted">{o.votes.length} {o.votes.length === 1 ? 'vote' : 'votes'} · {pct}%</span>
+            </span>
+          </div>
+        ) : (
+          <button key={o._id || i} disabled={busy} onClick={() => onVote(i)} className="btn-secondary w-full justify-start">
+            {o.option}
+          </button>
+        )
+      })}
+      <p className="text-xs text-muted">
+        {total} {total === 1 ? 'vote' : 'votes'}
+        {ended ? ' · Poll closed' : voted ? ' · You voted' : ''}
+      </p>
+    </div>
+  )
+}
 
 const Notices = () => {
-  const { user, isAdmin } = useAuth()
-  const [notices, setNotices] = useState([])
-  const [societies, setSocieties] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [showModal, setShowModal] = useState(false)
-  const [formData, setFormData] = useState({
-    title: '',
-    content: '',
-    type: 'notice',
-    priority: 'medium',
-    societyId: ''
-  })
+  const { user, isAdmin, isResident, isSuperAdmin } = useAuth()
+  const { data, loading, error, reload } = useApi('/notices', { select: (d) => d.notices || [] })
+  const { data: societies } = useApi('/societies', { enabled: isSuperAdmin, live: false, select: (d) => d.societies || [] })
+  const { busy, run } = useAction(reload)
+  const [open, setOpen] = useState(false)
+  const [form, setForm] = useState(EMPTY_FORM)
+  const [formError, setFormError] = useState('')
+  const [deleting, setDeleting] = useState(null)
 
-  useEffect(() => {
-    fetchNotices()
-    if (isAdmin) fetchSocieties()
-  }, [isAdmin])
-
-  const fetchNotices = async () => {
-    try {
-      const response = await api.get('/notices')
-      setNotices(response.data.notices || [])
-    } catch (error) {
-      toast.error('Error fetching notices')
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const fetchSocieties = async () => {
-    try {
-      const response = await api.get('/societies')
-      setSocieties(response.data.societies || [])
-      if (user?.role === 'super_admin' && response.data.societies?.length && !formData.societyId) {
-        setFormData(f => ({ ...f, societyId: response.data.societies[0]._id }))
-      } else if (user?.societyId) {
-        setFormData(f => ({ ...f, societyId: user.societyId }))
-      }
-    } catch (error) {
-      console.error('Error fetching societies', error)
-    }
-  }
-
-  const handleCreate = async (e) => {
+  const submit = async (e) => {
     e.preventDefault()
-    try {
-      const payload = { ...formData }
-      if (user?.role !== 'super_admin') delete payload.societyId
-      await api.post('/notices', payload)
-      toast.success('Notice created!')
-      setShowModal(false)
-      setFormData({ title: '', content: '', type: 'notice', priority: 'medium', societyId: formData.societyId })
-      fetchNotices()
-    } catch (error) {
-      toast.error(error.response?.data?.message || 'Error creating notice')
+    setFormError('')
+    const payload = {
+      title: form.title.trim(),
+      content: form.content.trim(),
+      type: form.type,
+      priority: form.priority,
+      category: form.category
     }
-  }
+    if (form.type === 'poll') {
+      const options = form.pollOptions.split('\n').map((s) => s.trim()).filter(Boolean)
+      if (options.length < 2) return setFormError('Add at least two poll options, one per line.')
+      payload.pollOptions = options.map((option) => ({ option }))
+    }
+    if (form.type === 'event') {
+      if (form.eventDate) payload.eventDate = new Date(form.eventDate).toISOString()
+      if (form.eventLocation) payload.eventLocation = form.eventLocation.trim()
+    }
+    if (form.expiresAt) payload.expiresAt = new Date(form.expiresAt).toISOString()
+    if (isSuperAdmin) {
+      const id = form.societyId || societies?.[0]?._id
+      if (!id) return setFormError('Choose a society for this notice.')
+      payload.societyId = id
+    }
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600"></div>
-      </div>
-    )
+    const ok = await run('create', () => api.post('/notices', payload), 'Notice published')
+    if (ok) {
+      setOpen(false)
+      setForm(EMPTY_FORM)
+    }
   }
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-      <div className="flex justify-between items-center mb-6">
-        <h1 className="text-3xl font-bold text-gray-900">Notices & Announcements</h1>
-        {isAdmin && (
-          <button
-            onClick={() => setShowModal(true)}
-            className="flex items-center px-4 py-2 bg-primary-600 text-white rounded-md hover:bg-primary-700"
-          >
-            <FiPlus className="mr-2" />
-            Create Notice
-          </button>
-        )}
-      </div>
+    <>
+      <PageHeader
+        title="Notices"
+        subtitle="Announcements, polls and events from your society."
+        action={
+          isAdmin && (
+            <button className="btn-primary" onClick={() => setOpen(true)}>
+              <FiPlus size={16} /> New notice
+            </button>
+          )
+        }
+      />
 
-      <div className="space-y-4">
-        {notices.length === 0 ? (
-          <div className="bg-white rounded-lg shadow-md p-8 text-center text-gray-500">No notices yet.</div>
-        ) : (
-          notices.map((notice) => (
-            <div key={notice._id} className="bg-white rounded-lg shadow-md p-6">
-              <div className="flex items-start justify-between">
-                <div className="flex-1">
-                  <div className="flex items-center flex-wrap gap-2 mb-2">
-                    <FiBell className="text-primary-600 flex-shrink-0" />
-                    <h3 className="text-xl font-semibold">{notice.title}</h3>
-                    <span className="px-2 py-1 text-xs font-semibold rounded-full bg-primary-100 text-primary-800">
-                      {notice.type}
-                    </span>
-                    <span className="px-2 py-1 text-xs font-semibold rounded-full bg-gray-100 text-gray-800">
-                      {notice.priority}
-                    </span>
-                  </div>
-                  <p className="text-gray-600 mb-4 whitespace-pre-wrap">{notice.content}</p>
-                  <p className="text-sm text-gray-500">
-                    {new Date(notice.createdAt).toLocaleDateString()}
-                  </p>
-                </div>
-              </div>
-            </div>
-          ))
-        )}
-      </div>
-
-      {showModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg p-6 max-w-md w-full max-h-[90vh] overflow-y-auto">
-            <h2 className="text-2xl font-bold mb-4">Create Notice</h2>
-            <form onSubmit={handleCreate} className="space-y-4">
-              {user?.role === 'super_admin' && (
-                <div>
-                  <label className="block text-sm font-medium text-gray-700">Society *</label>
-                  <select required className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md"
-                    value={formData.societyId} onChange={(e) => setFormData({ ...formData, societyId: e.target.value })}>
-                    <option value="">Select society</option>
-                    {societies.map(s => <option key={s._id} value={s._id}>{s.name}</option>)}
-                  </select>
-                </div>
-              )}
-              <div>
-                <label className="block text-sm font-medium text-gray-700">Title *</label>
-                <input type="text" required className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md"
-                  value={formData.title} onChange={(e) => setFormData({ ...formData, title: e.target.value })} />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700">Content *</label>
-                <textarea required rows={4} className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md"
-                  value={formData.content} onChange={(e) => setFormData({ ...formData, content: e.target.value })} />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700">Type</label>
-                <select className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md"
-                  value={formData.type} onChange={(e) => setFormData({ ...formData, type: e.target.value })}>
-                  <option value="notice">Notice</option>
-                  <option value="announcement">Announcement</option>
-                  <option value="event">Event</option>
-                  <option value="maintenance">Maintenance</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700">Priority</label>
-                <select className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md"
-                  value={formData.priority} onChange={(e) => setFormData({ ...formData, priority: e.target.value })}>
-                  <option value="low">Low</option>
-                  <option value="medium">Medium</option>
-                  <option value="high">High</option>
-                  <option value="urgent">Urgent</option>
-                </select>
-              </div>
-              <div className="flex justify-end gap-2 pt-2">
-                <button type="button" onClick={() => setShowModal(false)} className="px-4 py-2 border border-gray-300 rounded-md">Cancel</button>
-                <button type="submit" className="px-4 py-2 bg-primary-600 text-white rounded-md hover:bg-primary-700">Create</button>
-              </div>
-            </form>
-          </div>
+      {loading ? (
+        <div className="panel"><ListSkeleton rows={4} /></div>
+      ) : error ? (
+        <div className="panel"><ErrorState message={error} onRetry={reload} /></div>
+      ) : !data?.length ? (
+        <div className="panel">
+          <EmptyState
+            icon={FiBell}
+            title="No notices right now"
+            text={isAdmin ? 'Post an announcement, poll or event for residents.' : 'New announcements from your society will appear here.'}
+            action={isAdmin ? <button className="btn-primary" onClick={() => setOpen(true)}>New notice</button> : null}
+          />
         </div>
+      ) : (
+        <ul className="space-y-3">
+          {data.map((n) => (
+            <li key={n._id} className="panel p-5">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="mb-1.5 flex flex-wrap items-center gap-2">
+                    <span className="tag-info">{titleCase(n.type)}</span>
+                    {['urgent', 'high'].includes(n.priority) && <span className={PRIORITY_TAG[n.priority]}>{titleCase(n.priority)} priority</span>}
+                    <span className="text-xs text-muted">{formatDate(n.publishedAt || n.createdAt, true)}</span>
+                  </div>
+                  <h2 className="text-lg font-bold">{n.title}</h2>
+                </div>
+                {isAdmin && (
+                  <button className="btn-ghost btn-sm" onClick={() => setDeleting(n)} aria-label={`Delete ${n.title}`}>
+                    <FiTrash2 size={15} />
+                  </button>
+                )}
+              </div>
+              <p className="mt-2 whitespace-pre-line text-sm leading-relaxed text-ink/90">{n.content}</p>
+
+              {n.type === 'event' && (n.eventDate || n.eventLocation) && (
+                <p className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-muted">
+                  {n.eventDate && <span className="inline-flex items-center gap-1.5"><FiCalendar size={14} />{formatDate(n.eventDate, true)}</span>}
+                  {n.eventLocation && <span className="inline-flex items-center gap-1.5"><FiMapPin size={14} />{n.eventLocation}</span>}
+                </p>
+              )}
+
+              {n.type === 'poll' && n.pollOptions?.length > 0 && (
+                <Poll
+                  notice={n}
+                  userId={user?.id}
+                  canVote={isResident}
+                  busy={busy === n._id}
+                  onVote={(i) => run(n._id, () => api.post(`/notices/${n._id}/vote`, { optionIndex: i }), 'Vote recorded')}
+                />
+              )}
+            </li>
+          ))}
+        </ul>
       )}
-    </div>
+
+      <Modal
+        open={open}
+        onClose={() => setOpen(false)}
+        title="New notice"
+        size="lg"
+        footer={
+          <>
+            <button className="btn-secondary" onClick={() => setOpen(false)}>Cancel</button>
+            <button className="btn-primary" form="notice-form" type="submit" disabled={busy === 'create'}>
+              {busy === 'create' && <Spinner className="h-4 w-4" />}
+              Publish
+            </button>
+          </>
+        }
+      >
+        <form id="notice-form" onSubmit={submit} className="space-y-4">
+          {isSuperAdmin && (
+            <Field label="Society" htmlFor="n-society">
+              <select id="n-society" className="input" value={form.societyId || societies?.[0]?._id || ''} onChange={(e) => setForm({ ...form, societyId: e.target.value })}>
+                {(societies || []).map((s) => <option key={s._id} value={s._id}>{s.name}</option>)}
+              </select>
+            </Field>
+          )}
+          <Field label="Title" htmlFor="n-title">
+            <input id="n-title" required className="input" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} />
+          </Field>
+          <Field label="Message" htmlFor="n-content">
+            <textarea id="n-content" required rows={4} className="input" value={form.content} onChange={(e) => setForm({ ...form, content: e.target.value })} />
+          </Field>
+          <div className="grid gap-4 sm:grid-cols-3">
+            <Field label="Type" htmlFor="n-type">
+              <select id="n-type" className="input" value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })}>
+                {TYPES.map((t) => <option key={t} value={t}>{titleCase(t)}</option>)}
+              </select>
+            </Field>
+            <Field label="Priority" htmlFor="n-priority">
+              <select id="n-priority" className="input" value={form.priority} onChange={(e) => setForm({ ...form, priority: e.target.value })}>
+                {PRIORITIES.map((t) => <option key={t} value={t}>{titleCase(t)}</option>)}
+              </select>
+            </Field>
+            <Field label="Category" htmlFor="n-category">
+              <select id="n-category" className="input" value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })}>
+                {CATEGORIES.map((t) => <option key={t} value={t}>{titleCase(t)}</option>)}
+              </select>
+            </Field>
+          </div>
+          {form.type === 'poll' && (
+            <Field label="Poll options" htmlFor="n-options" hint="One option per line.">
+              <textarea id="n-options" rows={3} className="input" value={form.pollOptions} onChange={(e) => setForm({ ...form, pollOptions: e.target.value })} />
+            </Field>
+          )}
+          {form.type === 'event' && (
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Field label="Date and time" htmlFor="n-edate">
+                <input id="n-edate" type="datetime-local" className="input" value={form.eventDate} onChange={(e) => setForm({ ...form, eventDate: e.target.value })} />
+              </Field>
+              <Field label="Location" htmlFor="n-eloc">
+                <input id="n-eloc" className="input" value={form.eventLocation} onChange={(e) => setForm({ ...form, eventLocation: e.target.value })} />
+              </Field>
+            </div>
+          )}
+          <Field label="Hide after" htmlFor="n-expires" hint="Optional. The notice disappears from residents' feeds after this time.">
+            <input id="n-expires" type="datetime-local" className="input" value={form.expiresAt} onChange={(e) => setForm({ ...form, expiresAt: e.target.value })} />
+          </Field>
+          {formError && <p role="alert" className="text-sm font-medium text-danger">{formError}</p>}
+        </form>
+      </Modal>
+
+      <ConfirmDialog
+        open={!!deleting}
+        danger
+        title="Delete this notice?"
+        text={`"${deleting?.title}" will be removed for all residents. This cannot be undone.`}
+        confirmLabel="Delete notice"
+        busy={busy === deleting?._id}
+        onClose={() => setDeleting(null)}
+        onConfirm={async () => {
+          const ok = await run(deleting._id, () => api.delete(`/notices/${deleting._id}`), 'Notice deleted')
+          if (ok) setDeleting(null)
+        }}
+      />
+    </>
   )
 }
 

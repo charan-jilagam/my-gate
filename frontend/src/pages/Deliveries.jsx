@@ -1,217 +1,157 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
+import { FiCheck, FiLogIn, FiPackage, FiPlus } from 'react-icons/fi'
 import { useAuth } from '../contexts/AuthContext'
 import api from '../services/api'
-import toast from 'react-hot-toast'
-import { FiPackage, FiPlus, FiCheck, FiX } from 'react-icons/fi'
+import useApi from '../hooks/useApi'
+import useAction from '../hooks/useAction'
+import { DataList, EmptyState, Field, Modal, PageHeader, Spinner, StatusTag, formatDate } from '../components/ui'
+
+const EMPTY_FORM = { deliveryPersonName: '', deliveryPersonPhone: '', company: '', trackingNumber: '', items: '', notes: '' }
 
 const Deliveries = () => {
-  const { user, isResident, isAdmin, isSecurity } = useAuth()
-  const [deliveries, setDeliveries] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [showModal, setShowModal] = useState(false)
-  const [formData, setFormData] = useState({
-    deliveryPersonName: '',
-    deliveryPersonPhone: '',
-    company: '',
-    trackingNumber: '',
-    items: [{ description: '', quantity: 1 }],
-    notes: ''
-  })
+  const { isResident, isSecurity, isAdmin } = useAuth()
+  const { data, loading, error, reload } = useApi('/deliveries', { params: { limit: 100 }, select: (d) => d.deliveries || [] })
+  const { busy, run } = useAction(reload)
+  const [open, setOpen] = useState(false)
+  const [form, setForm] = useState(EMPTY_FORM)
+  const [formError, setFormError] = useState('')
 
-  useEffect(() => {
-    fetchDeliveries()
-  }, [])
-
-  const fetchDeliveries = async () => {
-    try {
-      const response = await api.get('/deliveries')
-      setDeliveries(response.data.deliveries || [])
-    } catch (error) {
-      toast.error('Error fetching deliveries')
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const handleExpectDelivery = async (e) => {
+  const submit = async (e) => {
     e.preventDefault()
-    try {
-      const payload = {
-        deliveryPersonName: formData.deliveryPersonName,
-        deliveryPersonPhone: formData.deliveryPersonPhone,
-        company: formData.company || undefined,
-        trackingNumber: formData.trackingNumber || undefined,
-        items: formData.items.filter(i => i.description.trim()),
-        notes: formData.notes || undefined
+    setFormError('')
+    if (!/^[0-9]{10}$/.test(form.deliveryPersonPhone)) return setFormError('Enter the courier\'s 10-digit phone number.')
+    const payload = {
+      deliveryPersonName: form.deliveryPersonName.trim(),
+      deliveryPersonPhone: form.deliveryPersonPhone,
+      company: form.company.trim() || undefined,
+      trackingNumber: form.trackingNumber.trim() || undefined,
+      items: [{ description: form.items.trim() || 'Package', quantity: 1 }],
+      notes: form.notes.trim() || undefined
+    }
+    const ok = await run('create', () => api.post('/deliveries/invite', payload), 'Delivery added. The guard will let the courier in.')
+    if (ok) {
+      setOpen(false)
+      setForm(EMPTY_FORM)
+    }
+  }
+
+  const columns = [
+    {
+      key: 'who',
+      header: 'Courier',
+      render: (d) => (
+        <div className="md:text-left">
+          <p className="font-semibold">{d.deliveryPersonName}</p>
+          <p className="text-xs text-muted">{d.company || d.deliveryPersonPhone}</p>
+        </div>
+      )
+    },
+    ...(isResident
+      ? []
+      : [{ key: 'flat', header: 'For', render: (d) => `${d.block ? `${d.block}-` : ''}${d.flatNo || '-'}` }]),
+    { key: 'tracking', header: 'Tracking', render: (d) => d.trackingNumber || '-' },
+    { key: 'when', header: 'Added', render: (d) => formatDate(d.createdAt, true) },
+    { key: 'status', header: 'Status', render: (d) => <StatusTag status={d.status} /> },
+    {
+      key: 'actions',
+      header: 'Actions',
+      className: 'md:text-right',
+      render: (d) => {
+        const isBusy = busy === d._id
+        return (
+          <div className="flex flex-wrap justify-end gap-2">
+            {(isResident || isAdmin) && d.status === 'pending' && (
+              <button className="btn-ok btn-sm" disabled={isBusy} onClick={() => run(d._id, () => api.put(`/deliveries/${d._id}/approve`), 'Delivery approved')}>
+                <FiCheck size={14} /> Approve
+              </button>
+            )}
+            {(isSecurity || isAdmin) && d.status === 'approved' && (
+              <button className="btn-primary btn-sm" disabled={isBusy} onClick={() => run(d._id, () => api.put(`/deliveries/${d._id}/check-in`), 'Courier checked in')}>
+                <FiLogIn size={14} /> Check in
+              </button>
+            )}
+            {(isResident || isSecurity || isAdmin) && ['approved', 'in_transit'].includes(d.status) && (
+              <button className="btn-secondary btn-sm" disabled={isBusy} onClick={() => run(d._id, () => api.put(`/deliveries/${d._id}/deliver`), 'Marked as delivered')}>
+                {isResident ? 'Received' : 'Delivered'}
+              </button>
+            )}
+          </div>
+        )
       }
-      if (!payload.items.length) payload.items = [{ description: 'Package', quantity: 1 }]
-      await api.post('/deliveries/invite', payload)
-      toast.success('Delivery expectation added!')
-      setShowModal(false)
-      setFormData({ deliveryPersonName: '', deliveryPersonPhone: '', company: '', trackingNumber: '', items: [{ description: '', quantity: 1 }], notes: '' })
-      fetchDeliveries()
-    } catch (error) {
-      toast.error(error.response?.data?.message || 'Error adding delivery')
     }
-  }
-
-  const handleApprove = async (id) => {
-    try {
-      await api.put(`/deliveries/${id}/approve`)
-      toast.success('Delivery approved!')
-      fetchDeliveries()
-    } catch (error) {
-      toast.error('Error approving delivery')
-    }
-  }
-
-  const handleCheckIn = async (id) => {
-    try {
-      await api.put(`/deliveries/${id}/check-in`)
-      toast.success('Delivery checked in!')
-      fetchDeliveries()
-    } catch (error) {
-      toast.error('Error checking in delivery')
-    }
-  }
-
-  const handleDeliver = async (id) => {
-    try {
-      await api.put(`/deliveries/${id}/deliver`)
-      toast.success('Marked as delivered!')
-      fetchDeliveries()
-    } catch (error) {
-      toast.error('Error marking delivery')
-    }
-  }
-
-  const getStatusBadge = (status) => {
-    const map = {
-      pending: 'bg-yellow-100 text-yellow-800',
-      approved: 'bg-green-100 text-green-800',
-      rejected: 'bg-red-100 text-red-800',
-      in_transit: 'bg-blue-100 text-blue-800',
-      delivered: 'bg-gray-100 text-gray-800'
-    }
-    return map[status] || 'bg-gray-100 text-gray-800'
-  }
-
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600"></div>
-      </div>
-    )
-  }
+  ]
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-      <div className="flex justify-between items-center mb-6">
-        <h1 className="text-3xl font-bold text-gray-900">Deliveries</h1>
-        {isResident && (
-          <button
-            onClick={() => setShowModal(true)}
-            className="flex items-center px-4 py-2 bg-primary-600 text-white rounded-md hover:bg-primary-700"
-          >
-            <FiPlus className="mr-2" />
-            Expect Delivery
-          </button>
-        )}
-      </div>
+    <>
+      <PageHeader
+        title="Deliveries"
+        subtitle={isResident ? 'Tell the gate what you are expecting so couriers are not held up.' : 'Parcels and food orders expected across the society.'}
+        action={
+          isResident && (
+            <button className="btn-primary" onClick={() => setOpen(true)}>
+              <FiPlus size={16} /> Expect delivery
+            </button>
+          )
+        }
+      />
 
-      <div className="bg-white shadow-md rounded-lg overflow-hidden">
-        <table className="min-w-full divide-y divide-gray-200">
-          <thead className="bg-gray-50">
-            <tr>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Person / Company</th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Tracking</th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
-            </tr>
-          </thead>
-          <tbody className="bg-white divide-y divide-gray-200">
-            {deliveries.length === 0 ? (
-              <tr><td colSpan={4} className="px-6 py-8 text-center text-gray-500">No deliveries</td></tr>
-            ) : (
-              deliveries.map((d) => (
-                <tr key={d._id}>
-                  <td className="px-6 py-4">
-                    <div className="font-medium text-gray-900">{d.deliveryPersonName}</div>
-                    <div className="text-sm text-gray-500">{d.company || d.flatNo}</div>
-                  </td>
-                  <td className="px-6 py-4 text-sm text-gray-900">{d.trackingNumber || '—'}</td>
-                  <td className="px-6 py-4">
-                    <span className={`px-2 py-1 text-xs font-semibold rounded-full ${getStatusBadge(d.status)}`}>
-                      {d.status.replace('_', ' ')}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4">
-                    <div className="flex flex-wrap gap-2">
-                      {(isResident || isAdmin) && d.status === 'pending' && (
-                        <>
-                          <button onClick={() => handleApprove(d._id)} className="text-green-600 hover:text-green-900 font-medium"><FiCheck className="inline" /> Approve</button>
-                        </>
-                      )}
-                      {(isSecurity || isAdmin) && d.status === 'approved' && (
-                        <button onClick={() => handleCheckIn(d._id)} className="text-blue-600 hover:text-blue-900 font-medium">Check In</button>
-                      )}
-                      {(isResident || isSecurity || isAdmin) && (d.status === 'in_transit' || d.status === 'approved') && (
-                        <button onClick={() => handleDeliver(d._id)} className="text-gray-700 hover:text-gray-900 font-medium">Mark Delivered</button>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
+      <DataList
+        columns={columns}
+        rows={data}
+        loading={loading}
+        error={error}
+        onRetry={reload}
+        empty={
+          <EmptyState
+            icon={FiPackage}
+            title="No deliveries yet"
+            text={isResident ? 'Add a delivery you are expecting and the guard will see it.' : 'Deliveries will show up here when residents add them.'}
+            action={isResident ? <button className="btn-primary" onClick={() => setOpen(true)}>Expect delivery</button> : null}
+          />
+        }
+      />
 
-      {showModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg p-6 max-w-md w-full max-h-[90vh] overflow-y-auto">
-            <h2 className="text-2xl font-bold mb-4">Expect Delivery</h2>
-            <form onSubmit={handleExpectDelivery} className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700">Delivery person name *</label>
-                <input type="text" required className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md"
-                  value={formData.deliveryPersonName} onChange={(e) => setFormData({ ...formData, deliveryPersonName: e.target.value })} />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700">Phone *</label>
-                <input type="tel" required pattern="[0-9]{10}" className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md"
-                  value={formData.deliveryPersonPhone} onChange={(e) => setFormData({ ...formData, deliveryPersonPhone: e.target.value })} />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700">Company</label>
-                <input type="text" className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md"
-                  value={formData.company} onChange={(e) => setFormData({ ...formData, company: e.target.value })} />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700">Tracking number</label>
-                <input type="text" className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md"
-                  value={formData.trackingNumber} onChange={(e) => setFormData({ ...formData, trackingNumber: e.target.value })} />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700">Items (description)</label>
-                <input type="text" placeholder="e.g. 2 parcels"
-                  className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md"
-                  value={formData.items[0]?.description} onChange={(e) => setFormData({ ...formData, items: [{ description: e.target.value, quantity: 1 }] })} />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700">Notes</label>
-                <textarea className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md" rows={2}
-                  value={formData.notes} onChange={(e) => setFormData({ ...formData, notes: e.target.value })} />
-              </div>
-              <div className="flex justify-end gap-2 pt-2">
-                <button type="button" onClick={() => setShowModal(false)} className="px-4 py-2 border border-gray-300 rounded-md">Cancel</button>
-                <button type="submit" className="px-4 py-2 bg-primary-600 text-white rounded-md hover:bg-primary-700">Add</button>
-              </div>
-            </form>
+      <Modal
+        open={open}
+        onClose={() => setOpen(false)}
+        title="Expect a delivery"
+        footer={
+          <>
+            <button className="btn-secondary" onClick={() => setOpen(false)}>Cancel</button>
+            <button className="btn-primary" form="delivery-form" type="submit" disabled={busy === 'create'}>
+              {busy === 'create' && <Spinner className="h-4 w-4" />}
+              Add delivery
+            </button>
+          </>
+        }
+      >
+        <form id="delivery-form" onSubmit={submit} className="space-y-4">
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field label="Courier name" htmlFor="d-name">
+              <input id="d-name" required className="input" value={form.deliveryPersonName} onChange={(e) => setForm({ ...form, deliveryPersonName: e.target.value })} />
+            </Field>
+            <Field label="Courier phone" htmlFor="d-phone">
+              <input id="d-phone" required type="tel" inputMode="numeric" maxLength={10} className="input" value={form.deliveryPersonPhone} onChange={(e) => setForm({ ...form, deliveryPersonPhone: e.target.value })} />
+            </Field>
           </div>
-        </div>
-      )}
-    </div>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field label="Company" htmlFor="d-company" hint="Amazon, Swiggy, and so on">
+              <input id="d-company" className="input" value={form.company} onChange={(e) => setForm({ ...form, company: e.target.value })} />
+            </Field>
+            <Field label="Tracking number" htmlFor="d-track" hint="Optional">
+              <input id="d-track" className="input" value={form.trackingNumber} onChange={(e) => setForm({ ...form, trackingNumber: e.target.value })} />
+            </Field>
+          </div>
+          <Field label="What is arriving" htmlFor="d-items">
+            <input id="d-items" className="input" placeholder="2 parcels" value={form.items} onChange={(e) => setForm({ ...form, items: e.target.value })} />
+          </Field>
+          <Field label="Note for the guard" htmlFor="d-notes" hint="Optional">
+            <textarea id="d-notes" rows={2} className="input" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
+          </Field>
+          {formError && <p role="alert" className="text-sm font-medium text-danger">{formError}</p>}
+        </form>
+      </Modal>
+    </>
   )
 }
 

@@ -3,58 +3,35 @@ import { io } from 'socket.io-client'
 import { useAuth } from './AuthContext'
 import toast from 'react-hot-toast'
 
-const SocketContext = createContext()
+const SocketContext = createContext({ socket: null, lastNotification: null })
 
-export const useSocket = () => {
-  const context = useContext(SocketContext)
-  if (!context) {
-    throw new Error('useSocket must be used within SocketProvider')
-  }
-  return context
-}
+export const useSocket = () => useContext(SocketContext)
+
+// Dev: same origin (Vite proxies /socket.io). Production: same origin, or VITE_SOCKET_URL.
+const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || undefined
 
 export const SocketProvider = ({ children }) => {
   const { user, isAuthenticated } = useAuth()
   const [socket, setSocket] = useState(null)
+  const [lastNotification, setLastNotification] = useState(null)
 
   useEffect(() => {
-    if (isAuthenticated && user) {
-      const newSocket = io('http://localhost:5000', {
-        transports: ['websocket']
-      })
+    if (!isAuthenticated || !user?.id) return undefined
 
-      newSocket.on('connect', () => {
-        console.log('Socket connected')
-        newSocket.emit('join-room', user.id)
-      })
+    const newSocket = io(SOCKET_URL, { transports: ['websocket', 'polling'] })
 
-      newSocket.on('notification', (notification) => {
-        toast.success(notification.title, {
-          description: notification.message,
-          duration: 5000
-        })
-      })
+    newSocket.on('connect', () => newSocket.emit('join-room', user.id))
+    newSocket.on('notification', (notification) => {
+      setLastNotification({ ...notification, receivedAt: Date.now() })
+      toast(notification.title || 'New notification', { icon: '🔔', duration: 5000 })
+    })
 
-      newSocket.on('disconnect', () => {
-        console.log('Socket disconnected')
-      })
-
-      setSocket(newSocket)
-
-      return () => {
-        newSocket.close()
-      }
-    } else {
-      if (socket) {
-        socket.close()
-        setSocket(null)
-      }
+    setSocket(newSocket)
+    return () => {
+      newSocket.close()
+      setSocket(null)
     }
-  }, [isAuthenticated, user])
+  }, [isAuthenticated, user?.id])
 
-  return (
-    <SocketContext.Provider value={{ socket }}>
-      {children}
-    </SocketContext.Provider>
-  )
+  return <SocketContext.Provider value={{ socket, lastNotification }}>{children}</SocketContext.Provider>
 }
