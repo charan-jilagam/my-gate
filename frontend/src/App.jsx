@@ -23,6 +23,13 @@ const Profile = lazy(() => import('./pages/Profile'))
 const GateConsole = lazy(() => import('./pages/GateConsole'))
 const AdminResidents = lazy(() => import('./pages/AdminResidents'))
 const AdminSocieties = lazy(() => import('./pages/AdminSocieties'))
+const Services = lazy(() => import('./pages/Services'))
+const ServiceProvider = lazy(() => import('./pages/ServiceProvider'))
+const ServiceRequests = lazy(() => import('./pages/ServiceRequests'))
+const ServiceRequestDetail = lazy(() => import('./pages/ServiceRequestDetail'))
+const WorkHome = lazy(() => import('./pages/WorkHome'))
+const WorkSetup = lazy(() => import('./pages/WorkSetup'))
+const AdminServices = lazy(() => import('./pages/AdminServices'))
 const NotFound = lazy(() => import('./pages/NotFound'))
 
 const ADMINS = ['society_admin', 'super_admin']
@@ -56,6 +63,13 @@ function App() {
                 <Route path="/complaints" element={<Complaints />} />
                 <Route path="/payments" element={<PrivateRoute roles={['resident', ...ADMINS]}><Payments /></PrivateRoute>} />
                 <Route path="/bookings" element={<PrivateRoute roles={['resident', ...ADMINS]}><Bookings /></PrivateRoute>} />
+                <Route path="/services" element={<PrivateRoute roles={['resident', ...ADMINS]}><Services /></PrivateRoute>} />
+                <Route path="/services/providers/:id" element={<PrivateRoute roles={['resident', ...ADMINS]}><ServiceProvider /></PrivateRoute>} />
+                <Route path="/services/requests" element={<PrivateRoute roles={['resident', 'vendor', ...ADMINS]}><ServiceRequests /></PrivateRoute>} />
+                <Route path="/services/requests/:id" element={<PrivateRoute roles={['resident', 'vendor', ...ADMINS]}><ServiceRequestDetail /></PrivateRoute>} />
+                <Route path="/work" element={<PrivateRoute roles={['vendor']}><WorkHome /></PrivateRoute>} />
+                <Route path="/work/setup" element={<PrivateRoute roles={['vendor']}><WorkSetup /></PrivateRoute>} />
+                <Route path="/admin/services" element={<PrivateRoute roles={ADMINS}><AdminServices /></PrivateRoute>} />
                 <Route path="/profile" element={<Profile />} />
                 <Route path="/gate" element={<PrivateRoute roles={['security', ...ADMINS]}><GateConsole /></PrivateRoute>} />
                 <Route path="/admin/residents" element={<PrivateRoute roles={ADMINS}><AdminResidents /></PrivateRoute>} />

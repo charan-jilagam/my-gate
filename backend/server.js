@@ -46,6 +46,8 @@ const bookingRoutes = require('./routes/bookings');
 const userRoutes = require('./routes/users');
 const uploadRoutes = require('./routes/uploads');
 const pushRoutes = require('./routes/push');
+const serviceRoutes = require('./routes/services');
+const serviceRequestRoutes = require('./routes/serviceRequests');
 
 // Middleware
 app.use(helmet());
@@ -116,6 +118,8 @@ app.use('/api/bookings', bookingRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/uploads', uploadRoutes);
 app.use('/api/push', pushRoutes);
+app.use('/api/services', serviceRoutes);
+app.use('/api/service-requests', serviceRequestRoutes);
 
 // Uploaded images (used only when Cloudinary is not configured). Images must be loadable from the frontend's origin.
 app.use('/uploads', express.static(require('path').join(__dirname, 'uploads'), {
@@ -149,29 +153,35 @@ app.use((req, res) => {
   res.status(404).json({ success: false, message: 'Route not found' });
 });
 
-// Connect to MongoDB
-mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/mygate', {
-  serverSelectionTimeoutMS: 10000 // fail fast with a clear message instead of hanging
-})
-.then(() => {
-  console.log('MongoDB connected successfully');
+// Connect to MongoDB and start listening. Skipped when the file is imported (for example by tests),
+// so the app can be loaded and exercised without a database.
+const start = () => {
+  mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/mygate', {
+    serverSelectionTimeoutMS: 10000 // fail fast with a clear message instead of hanging
+  })
+  .then(() => {
+    console.log('MongoDB connected successfully');
   
-  const PORT = process.env.PORT || 5000;
-  httpServer.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
+    const PORT = process.env.PORT || 5000;
+    httpServer.listen(PORT, () => {
+      console.log(`Server running on port ${PORT}`);
+    });
+  })
+  .catch((error) => {
+    console.error('\nMongoDB connection error:', error.message);
+    const uri = process.env.MONGODB_URI || '';
+    if (!uri) {
+      console.error('Hint: MONGODB_URI is not set. Create backend/.env (copy .env.example) and set it.');
+    } else if (/bad auth|authentication failed/i.test(error.message)) {
+      console.error('Hint: wrong database username or password. If the password has special characters (@ : / ? # %), URL-encode them.');
+    } else if (/ENOTFOUND|querySrv|ETIMEOUT|ECONNREFUSED|Server selection timed out|whitelist|IP/i.test(error.message)) {
+      console.error('Hint: cannot reach the database. For MongoDB Atlas, open Network Access and allow your current IP address (or 0.0.0.0/0 while testing).');
+    }
+    process.exit(1);
   });
-})
-.catch((error) => {
-  console.error('\nMongoDB connection error:', error.message);
-  const uri = process.env.MONGODB_URI || '';
-  if (!uri) {
-    console.error('Hint: MONGODB_URI is not set. Create backend/.env (copy .env.example) and set it.');
-  } else if (/bad auth|authentication failed/i.test(error.message)) {
-    console.error('Hint: wrong database username or password. If the password has special characters (@ : / ? # %), URL-encode them.');
-  } else if (/ENOTFOUND|querySrv|ETIMEOUT|ECONNREFUSED|Server selection timed out|whitelist|IP/i.test(error.message)) {
-    console.error('Hint: cannot reach the database. For MongoDB Atlas, open Network Access and allow your current IP address (or 0.0.0.0/0 while testing).');
-  }
-  process.exit(1);
-});
 
-module.exports = { app, io };
+};
+
+if (require.main === module) start();
+
+module.exports = { app, io, httpServer, start };

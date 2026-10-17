@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { FiX, FiAlertCircle, FiInbox } from 'react-icons/fi'
+import { FaRegStar, FaStar } from 'react-icons/fa'
+import { imgSrc } from '../utils/media'
 
 /* ---------- Formatting helpers ---------- */
 
@@ -105,11 +107,15 @@ const STATUS_TONE = {
   // waiting
   pending: 'warn',
   open: 'warn',
+  requested: 'warn',
   in_progress: 'warn',
   in_transit: 'info',
+  on_the_way: 'info',
   checked_in: 'info',
+  acknowledged: 'info',
   // negative
   rejected: 'danger',
+  declined: 'danger',
   failed: 'danger',
   cancelled: 'danger',
   expired: 'danger',
@@ -281,3 +287,80 @@ export const DataList = ({ columns, rows, rowKey = (r) => r._id, loading, error,
     </div>
   )
 }
+
+
+/* ---------- Small building blocks ---------- */
+
+export const Avatar = ({ name = '', src, size = 40, className = '' }) => (
+  <span
+    className={`grid shrink-0 place-items-center overflow-hidden rounded-full bg-brand-soft font-display font-bold text-brand ${className}`}
+    style={{ width: size, height: size, fontSize: Math.round(size * 0.4) }}
+    aria-hidden="true"
+  >
+    {src ? <img src={imgSrc(src)} alt="" className="h-full w-full object-cover" /> : (name.trim().charAt(0) || '?').toUpperCase()}
+  </span>
+)
+
+/** Read-only star rating, e.g. <Stars value={4.6} count={12} />. */
+export const Stars = ({ value = 0, count, size = 14, showNumber = true }) => (
+  <span className="inline-flex items-center gap-1" aria-label={count === 0 ? 'No ratings yet' : `Rated ${value} out of 5`}>
+    {count === 0 ? (
+      <span className="text-xs text-muted">New</span>
+    ) : (
+      <>
+        <FaStar size={size} className="text-amber" aria-hidden="true" />
+        {showNumber && <span className="text-sm font-semibold">{Number(value).toFixed(1)}</span>}
+        {typeof count === 'number' && <span className="text-xs text-muted">({count})</span>}
+      </>
+    )}
+  </span>
+)
+
+/** Tap-to-rate stars. */
+export const StarInput = ({ value, onChange, size = 30 }) => (
+  <div className="flex gap-1" role="radiogroup" aria-label="Rating">
+    {[1, 2, 3, 4, 5].map((n) => (
+      <button
+        key={n}
+        type="button"
+        role="radio"
+        aria-checked={value === n}
+        aria-label={`${n} ${n === 1 ? 'star' : 'stars'}`}
+        onClick={() => onChange(n)}
+        className="rounded p-0.5 text-amber transition-transform hover:scale-110"
+      >
+        {n <= (value || 0) ? <FaStar size={size} /> : <FaRegStar size={size} />}
+      </button>
+    ))}
+  </div>
+)
+
+/** Pill tabs. items: [{ key, label, count? }] */
+export const Tabs = ({ items, value, onChange, label = 'Sections' }) => (
+  <div className="mb-4 flex flex-wrap gap-2" role="tablist" aria-label={label}>
+    {items.map((t) => (
+      <button
+        key={t.key}
+        role="tab"
+        aria-selected={value === t.key}
+        onClick={() => onChange(t.key)}
+        className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-semibold transition-colors ${
+          value === t.key ? 'bg-brand text-brand-ink' : 'bg-surface text-muted ring-1 ring-line hover:text-ink'
+        }`}
+      >
+        {t.label}
+        {t.count > 0 && (
+          <span className={`grid h-5 min-w-[20px] place-items-center rounded-full px-1 text-[11px] font-bold ${value === t.key ? 'bg-white/20' : 'bg-amber text-[#1b1400]'}`}>{t.count}</span>
+        )}
+      </button>
+    ))}
+  </div>
+)
+
+export const Stat = ({ label, value, hint, tone }) => (
+  <div className="panel px-4 py-3.5">
+    <p className={`font-display text-2xl font-extrabold ${tone === 'warn' ? 'text-danger' : ''}`}>{value}</p>
+    <p className="text-xs font-semibold text-ink">{label}</p>
+    {hint && <p className="text-xs text-muted">{hint}</p>}
+  </div>
+)

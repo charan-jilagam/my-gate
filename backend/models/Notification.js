@@ -26,6 +26,12 @@ const notificationSchema = new mongoose.Schema({
       'notice_published',
       'booking_approved',
       'booking_rejected',
+      'service_request',
+      'service_update',
+      'service_review',
+      'sos_alert',
+      'daily_help',
+      'community',
       'general'
     ],
     required: true
@@ -44,7 +50,7 @@ const notificationSchema = new mongoose.Schema({
   },
   relatedModel: {
     type: String,
-    enum: ['Visitor', 'Delivery', 'Vehicle', 'Payment', 'Complaint', 'Notice', 'Booking']
+    enum: ['Visitor', 'Delivery', 'Vehicle', 'Payment', 'Complaint', 'Notice', 'Booking', 'ServiceRequest', 'EmergencyAlert', 'DailyHelp', 'Post']
   },
   isRead: {
     type: Boolean,

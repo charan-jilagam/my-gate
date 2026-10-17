@@ -38,6 +38,15 @@ const societySchema = new mongoose.Schema({
     type: String,
     default: ''
   },
+  // IANA zone name. Booking slots are worked out in this zone, not the server's.
+  timezone: {
+    type: String,
+    default: 'Asia/Kolkata',
+    validate: {
+      validator: (v) => require('../utils/timezone').isValidTimeZone(v),
+      message: 'Unknown time zone'
+    }
+  },
   settings: {
     visitorApprovalRequired: { type: Boolean, default: true },
     deliveryApprovalRequired: { type: Boolean, default: true },

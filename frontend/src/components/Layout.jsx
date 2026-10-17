@@ -15,6 +15,7 @@ import {
   FiPackage,
   FiShield,
   FiSun,
+  FiTool,
   FiTruck,
   FiUser,
   FiUsers,
@@ -34,7 +35,8 @@ const NAV = {
     { to: '/notices', icon: FiBell, label: 'Notices' },
     { to: '/complaints', icon: FiFileText, label: 'Complaints' },
     { to: '/payments', icon: FiCreditCard, label: 'Payments' },
-    { to: '/bookings', icon: FiCalendar, label: 'Amenities' }
+    { to: '/bookings', icon: FiCalendar, label: 'Amenities' },
+    { to: '/services', icon: FiTool, label: 'Services' }
   ],
   security: [
     { to: '/gate', icon: FiShield, label: 'Gate console' },
@@ -53,6 +55,7 @@ const NAV = {
     { to: '/complaints', icon: FiFileText, label: 'Complaints' },
     { to: '/payments', icon: FiCreditCard, label: 'Payments' },
     { to: '/bookings', icon: FiCalendar, label: 'Amenities' },
+    { to: '/admin/services', icon: FiTool, label: 'Services' },
     { to: '/admin/societies', icon: FiHome, label: 'Society' }
   ],
   super_admin: [
@@ -64,13 +67,16 @@ const NAV = {
     { to: '/notices', icon: FiBell, label: 'Notices' },
     { to: '/complaints', icon: FiFileText, label: 'Complaints' },
     { to: '/payments', icon: FiCreditCard, label: 'Payments' },
-    { to: '/bookings', icon: FiCalendar, label: 'Amenities' }
+    { to: '/bookings', icon: FiCalendar, label: 'Amenities' },
+    { to: '/admin/services', icon: FiTool, label: 'Services' }
   ],
   staff: [
     { to: '/complaints', icon: FiFileText, label: 'Complaints' },
     { to: '/notices', icon: FiBell, label: 'Notices' }
   ],
   vendor: [
+    { to: '/work', icon: FiTool, label: 'My jobs' },
+    { to: '/work/setup', icon: FiCalendar, label: 'My schedule' },
     { to: '/complaints', icon: FiFileText, label: 'Complaints' },
     { to: '/notices', icon: FiBell, label: 'Notices' }
   ]
