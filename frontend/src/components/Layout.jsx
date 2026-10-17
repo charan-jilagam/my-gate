@@ -162,12 +162,45 @@ const useTheme = () => {
   return [dark, toggle]
 }
 
+// What each notification looks like in the list: an icon and a colour, so people can tell them apart at a glance.
+const NOTE_STYLE = {
+  sos_alert: [FiAlertTriangle, 'danger'],
+  visitor_approval: [FiUser, 'brand'], visitor_entry: [FiUser, 'brand'],
+  delivery_approval: [FiPackage, 'brand'], delivery_entry: [FiPackage, 'brand'],
+  vehicle_entry: [FiTruck, 'brand'], vehicle_exit: [FiTruck, 'brand'],
+  payment_due: [FiCreditCard, 'amber'], payment_received: [FiCreditCard, 'good'],
+  complaint_update: [FiFileText, 'amber'], complaint_assigned: [FiFileText, 'amber'],
+  notice_published: [FiBell, 'brand'], community: [FiMessageSquare, 'brand'],
+  booking_request: [FiCalendar, 'brand'], booking_approved: [FiCheckCircle, 'good'], booking_rejected: [FiX, 'danger'],
+  service_request: [FiTool, 'brand'], service_update: [FiTool, 'brand'], service_review: [FiTool, 'good'],
+  daily_help: [FiUsers, 'brand'], election: [FiThumbsUp, 'brand'], document: [FiFolder, 'brand'],
+  facility: [FiClipboard, 'brand'], shift: [FiClock, 'brand']
+}
+const TONE = {
+  brand: 'bg-brand-soft text-brand',
+  good: 'bg-brand-soft text-brand',
+  amber: 'bg-amber-soft text-amber',
+  danger: 'bg-red-500/15 text-red-500'
+}
+
+const timeAgo = (value) => {
+  const mins = Math.round((Date.now() - new Date(value).getTime()) / 60000)
+  if (!Number.isFinite(mins) || mins < 1) return 'Just now'
+  if (mins < 60) return `${mins} min ago`
+  const hrs = Math.floor(mins / 60)
+  if (hrs < 24) return `${hrs} h ago`
+  const days = Math.floor(hrs / 24)
+  return days < 7 ? `${days} d ago` : null
+}
+
 const Notifications = () => {
   const navigate = useNavigate()
   const { lastNotification } = useSocket()
   const [open, setOpen] = useState(false)
   const [items, setItems] = useState([])
   const [unread, setUnread] = useState(0)
+  const [ring, setRing] = useState(false)
+  const first = useRef(true)
   const ref = useRef(null)
 
   const load = useCallback(async () => {
@@ -182,6 +215,14 @@ const Notifications = () => {
 
   useEffect(() => {
     load()
+    if (first.current) {
+      first.current = false
+      return undefined
+    }
+    // A new one just arrived: wiggle the bell for a moment.
+    setRing(true)
+    const timer = setTimeout(() => setRing(false), 1400)
+    return () => clearTimeout(timer)
   }, [load, lastNotification])
 
   useEffect(() => {
@@ -228,37 +269,62 @@ const Notifications = () => {
         aria-label={`Notifications${unread ? `, ${unread} unread` : ''}`}
         aria-expanded={open}
       >
-        <FiBell size={19} />
+        <FiBell size={19} className={ring ? 'bell-ring' : ''} />
         {unread > 0 && (
-          <span className="absolute right-0.5 top-0.5 grid h-4 min-w-[16px] place-items-center rounded-full bg-amber px-1 text-[10px] font-bold text-[#1b1400]">
+          <span key={unread} className="badge-pop absolute -right-0.5 -top-0.5 grid h-[18px] min-w-[18px] place-items-center rounded-full bg-amber px-1 text-[10px] font-extrabold leading-none text-[#1b1400] ring-2 ring-bg">
             {unread > 9 ? '9+' : unread}
           </span>
         )}
       </button>
       {open && (
-        <div className="absolute right-0 z-40 mt-2 w-[min(92vw,380px)] overflow-hidden rounded-lg border border-line bg-surface shadow-pop">
+        <div className="absolute right-0 z-40 mt-2 w-[min(92vw,400px)] overflow-hidden rounded-xl border border-line bg-surface shadow-pop">
           <div className="flex items-center justify-between border-b border-line px-4 py-3">
-            <p className="font-display font-bold">Notifications</p>
+            <div>
+              <p className="font-display font-bold">Notifications</p>
+              <p className="text-xs text-muted">{unread > 0 ? `${unread > 9 ? '9+' : unread} new` : 'All caught up'}</p>
+            </div>
             {unread > 0 && (
-              <button className="text-xs font-semibold text-brand hover:underline" onClick={markAll}>
+              <button className="rounded-md bg-brand-soft px-2.5 py-1 text-xs font-semibold text-brand hover:underline" onClick={markAll}>
                 Mark all as read
               </button>
             )}
           </div>
-          <ul className="max-h-[60vh] divide-y divide-line overflow-y-auto">
-            {items.length === 0 && <li className="px-4 py-8 text-center text-sm text-muted">You are all caught up.</li>}
-            {items.map((n) => (
-              <li key={n._id}>
-                <button
-                  onClick={() => markOne(n)}
-                  className={`block w-full px-4 py-3 text-left hover:bg-sunken ${n.isRead ? '' : 'bg-brand-soft/50'}`}
-                >
-                  <p className="text-sm font-semibold">{n.title}</p>
-                  <p className="mt-0.5 text-sm text-muted">{n.message}</p>
-                  <p className="mt-1 text-xs text-muted">{formatDate(n.createdAt, true)}</p>
-                </button>
+          <ul className="max-h-[65vh] overflow-y-auto">
+            {items.length === 0 && (
+              <li className="px-4 py-10 text-center">
+                <span className="mx-auto mb-3 grid h-12 w-12 place-items-center rounded-full bg-brand-soft text-brand">
+                  <FiCheckCircle size={24} />
+                </span>
+                <p className="text-sm font-semibold">You are all caught up.</p>
+                <p className="mt-0.5 text-xs text-muted">New updates will show up here.</p>
               </li>
-            ))}
+            )}
+            {items.map((n, i) => {
+              const [Icon, tone] = NOTE_STYLE[n.type] || [FiBell, 'brand']
+              const heading = !n.isRead && i === 0 ? 'New' : n.isRead && (i === 0 || !items[i - 1].isRead) ? 'Earlier' : null
+              return (
+                <li key={n._id}>
+                  {heading && <p className="bg-sunken px-4 py-1.5 text-[11px] font-bold uppercase tracking-wide text-muted">{heading}</p>}
+                  <button
+                    onClick={() => markOne(n)}
+                    className={`relative flex w-full gap-3 border-b border-line px-4 py-3 text-left transition-colors hover:bg-sunken ${n.isRead ? 'opacity-75' : 'bg-brand-soft/40'}`}
+                  >
+                    {!n.isRead && <span className="absolute inset-y-0 left-0 w-1 bg-brand" aria-hidden="true" />}
+                    <span className={`mt-0.5 grid h-9 w-9 shrink-0 place-items-center rounded-full ${n.isRead ? 'bg-sunken text-muted' : TONE[tone]}`}>
+                      {n.isRead ? <FiCheckCircle size={16} /> : <Icon size={16} />}
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="flex items-start justify-between gap-2">
+                        <span className={`text-sm ${n.isRead ? 'font-medium' : 'font-bold'}`}>{n.title}</span>
+                        {!n.isRead && <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-amber" aria-label="Unread" />}
+                      </span>
+                      <span className="mt-0.5 line-clamp-2 block text-sm text-muted">{n.message}</span>
+                      <span className="mt-1 block text-xs text-muted">{timeAgo(n.createdAt) || formatDate(n.createdAt, true)}</span>
+                    </span>
+                  </button>
+                </li>
+              )
+            })}
           </ul>
         </div>
       )}
