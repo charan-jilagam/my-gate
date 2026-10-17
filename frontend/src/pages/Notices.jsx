@@ -5,6 +5,7 @@ import api from '../services/api'
 import useApi from '../hooks/useApi'
 import useAction from '../hooks/useAction'
 import { ConfirmDialog, EmptyState, ErrorState, Field, ListSkeleton, Modal, PageHeader, Spinner, formatDate, titleCase } from '../components/ui'
+import Rsvp from '../components/Rsvp'
 
 const TYPES = ['notice', 'announcement', 'poll', 'event', 'maintenance']
 const PRIORITIES = ['low', 'medium', 'high', 'urgent']
@@ -165,6 +166,8 @@ const Notices = () => {
                   {n.eventLocation && <span className="inline-flex items-center gap-1.5"><FiMapPin size={14} />{n.eventLocation}</span>}
                 </p>
               )}
+
+              {n.type === 'event' && <Rsvp notice={n} canReply={isResident} onDone={reload} />}
 
               {n.type === 'poll' && n.pollOptions?.length > 0 && (
                 <Poll

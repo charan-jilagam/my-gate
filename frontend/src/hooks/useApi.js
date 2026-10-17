@@ -19,10 +19,14 @@ const useApi = (path, { params, select = (d) => d, enabled = true, live = true }
   // Switching to a different resource (say, opening another complaint) must not show the previous one's data.
   const resourceKey = `${path}?${paramsKey}`
   const lastResource = useRef(resourceKey)
-  if (lastResource.current !== resourceKey) {
+  // React re-renders right after a state update made while rendering, but this pass still runs to the end.
+  // So this pass must also *return* the reset values, or a caller could read old data (or null) with a stale loading flag.
+  const switched = lastResource.current !== resourceKey
+  if (switched) {
     lastResource.current = resourceKey
     setData(null)
     setLoading(enabled)
+    setError('')
   }
 
   const load = useCallback(
@@ -49,7 +53,7 @@ const useApi = (path, { params, select = (d) => d, enabled = true, live = true }
   }, [load, enabled, live ? lastNotification : null])
 
   const reload = useCallback(() => load(), [load])
-  return { data, loading, error, reload, setData }
+  return switched ? { data: null, loading: enabled, error: '', reload, setData } : { data, loading, error, reload, setData }
 }
 
 export default useApi

@@ -14,6 +14,20 @@ const matchesFlat = (user, flats) => {
   return flats.includes(flat) || flats.includes(full);
 };
 
+
+// Counts people (a "going" reply with 2 guests is 3 people), plus the viewer's own answer.
+const summarizeRsvps = (notice, user) => {
+  const mine = (notice.rsvps || []).find((r) => String(r.userId) === String(user.id));
+  const going = (notice.rsvps || []).filter((r) => r.status === 'going');
+  return {
+    going: going.length,
+    people: going.reduce((n, r) => n + 1 + (r.guests || 0), 0),
+    maybe: (notice.rsvps || []).filter((r) => r.status === 'maybe').length,
+    no: (notice.rsvps || []).filter((r) => r.status === 'no').length,
+    mine: mine ? { status: mine.status, guests: mine.guests } : null
+  };
+};
+
 // @route   POST /api/notices
 // @desc    Create a notice
 // @access  Private (Admins)
@@ -181,7 +195,12 @@ router.get('/', protect, async (req, res) => {
     res.json({
       success: true,
       count: notices.length,
-      notices
+      notices: notices.map((n) => {
+        const o = n.toObject();
+        if (n.type === 'event') o.rsvp = summarizeRsvps(n, req.user);
+        delete o.rsvps; // who said what stays private; only the counts and your own answer are sent
+        return o;
+      })
     });
   } catch (error) {
     res.status(500).json({
@@ -220,9 +239,12 @@ router.get('/:id', protect, async (req, res) => {
       }
     }
 
+    const detail = notice.toObject();
+    if (notice.type === 'event') detail.rsvp = summarizeRsvps(notice, req.user);
+    delete detail.rsvps;
     res.json({
       success: true,
-      notice
+      notice: detail
     });
   } catch (error) {
     res.status(500).json({
@@ -301,6 +323,46 @@ router.post('/:id/vote', protect, authorize('resident'), [
       success: false,
       message: 'Server error'
     });
+  }
+});
+
+// @route   POST /api/notices/:id/rsvp
+// @desc    Say whether you are coming to an event. Sending it again changes your answer.
+// @access  Private (Residents)
+router.post('/:id/rsvp', protect, authorize('resident'), [
+  body('status').isIn(['going', 'maybe', 'no']).withMessage('Choose going, maybe or no'),
+  body('guests').optional().isInt({ min: 0, max: 10 }).withMessage('Guests must be between 0 and 10')
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ success: false, message: errors.array()[0].msg, errors: errors.array() });
+    }
+    const notice = await Notice.findById(req.params.id);
+    if (!notice || !notice.isActive || !notice.isPublished) {
+      return res.status(404).json({ success: false, message: 'Event not found' });
+    }
+    if (notice.type !== 'event') {
+      return res.status(400).json({ success: false, message: 'This notice is not an event' });
+    }
+    if (notice.eventDate && new Date(notice.eventDate) < new Date()) {
+      return res.status(400).json({ success: false, message: 'This event has already happened' });
+    }
+
+    const guests = req.body.status === 'no' ? 0 : Number(req.body.guests) || 0;
+    const existing = notice.rsvps.find((r) => String(r.userId) === String(req.user.id));
+    if (existing) {
+      existing.status = req.body.status;
+      existing.guests = guests;
+    } else {
+      notice.rsvps.push({ userId: req.user.id, status: req.body.status, guests });
+    }
+    await notice.save();
+
+    res.json({ success: true, rsvp: summarizeRsvps(notice, req.user), message: req.body.status === 'going' ? 'See you there!' : 'Your reply is saved' });
+  } catch (error) {
+    console.error('RSVP error:', error);
+    res.status(500).json({ success: false, message: 'Server error' });
   }
 });
 

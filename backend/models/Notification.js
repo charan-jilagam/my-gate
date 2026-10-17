@@ -24,6 +24,7 @@ const notificationSchema = new mongoose.Schema({
       'complaint_update',
       'complaint_assigned',
       'notice_published',
+      'booking_request',
       'booking_approved',
       'booking_rejected',
       'service_request',

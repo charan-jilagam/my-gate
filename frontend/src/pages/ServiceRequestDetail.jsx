@@ -60,7 +60,7 @@ const ServiceRequestDetail = () => {
         </div>
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-[3fr_2fr]">
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[3fr_2fr]">
         <div className="space-y-6">
           {/* Start code: the resident reads it out when the vendor arrives */}
           {isResident && r.startOtp && (

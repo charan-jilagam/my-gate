@@ -59,6 +59,14 @@ const noticeSchema = new mongoose.Schema({
   eventLocation: {
     type: String
   },
+  rsvps: {
+    type: [new mongoose.Schema({
+      userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+      status: { type: String, enum: ['going', 'maybe', 'no'], required: true },
+      guests: { type: Number, min: 0, max: 10, default: 0 }
+    }, { _id: false })],
+    default: []
+  },
   isPublished: {
     type: Boolean,
     default: false

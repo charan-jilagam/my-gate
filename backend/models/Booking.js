@@ -19,6 +19,7 @@ const bookingSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Society.amenities'
   },
+  dateStr: { type: String, match: /^\d{4}-\d{2}-\d{2}$/ }, // the society-local day, e.g. 2026-10-20
   slotDate: {
     type: Date,
     required: [true, 'Please provide booking date']

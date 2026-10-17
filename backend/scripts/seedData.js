@@ -9,6 +9,15 @@ const Complaint = require('../models/Complaint');
 const Payment = require('../models/Payment');
 const Booking = require('../models/Booking');
 const Notification = require('../models/Notification');
+const ServiceProvider = require('../models/ServiceProvider');
+const ServiceRequest = require('../models/ServiceRequest');
+const Post = require('../models/Post');
+const EmergencyAlert = require('../models/EmergencyAlert');
+const EmergencyContact = require('../models/EmergencyContact');
+const DailyHelp = require('../models/DailyHelp');
+const HelpAttendance = require('../models/HelpAttendance');
+const Expense = require('../models/Expense');
+const { VENDORS, vendorUserData, buildCommunitySeed } = require('./seedCommunity');
 require('dotenv').config();
 
 // Dummy data generators
@@ -34,6 +43,9 @@ const seedData = async () => {
     await Payment.deleteMany({});
     await Booking.deleteMany({});
     await Notification.deleteMany({});
+    for (const Model of [ServiceProvider, ServiceRequest, Post, EmergencyAlert, EmergencyContact, DailyHelp, HelpAttendance, Expense]) {
+      await Model.deleteMany({});
+    }
 
     // 1. Create Super Admin first (needed for society.createdBy)
     console.log('👥 Creating super admin...');
@@ -461,13 +473,47 @@ const seedData = async () => {
     }
     console.log(`✅ Created ${bookings.length} bookings`);
 
+    // 10b. Home services, community, daily help, emergency contacts and accounts
+    console.log('🛠️  Creating home services and community data...');
+    // Indexes first, so the unique slot and gate-code rules are enforced for the seed too.
+    await Promise.all([ServiceRequest.init(), DailyHelp.init(), ServiceProvider.init()]);
+    const counts = { vendors: 0, providers: 0, requests: 0, posts: 0, contacts: 0, helpers: 0, attendance: 0, expenses: 0 };
+    for (const society of societies) {
+      const vendorUsers = [];
+      for (let i = 0; i < VENDORS.length; i++) {
+        vendorUsers.push(await User.create(vendorUserData(society, i)));
+      }
+      const here = residents.filter((r) => r.isApproved && String(r.societyId) === String(society._id));
+      const admin = societyAdmins.find((a) => String(a.societyId) === String(society._id));
+      const built = buildCommunitySeed({ society, vendorUsers, residents: here, admin });
+      if (!here.length) continue;
+      await ServiceProvider.insertMany(built.providers);
+      await ServiceRequest.insertMany(built.requests);
+      await Post.insertMany(built.posts);
+      await EmergencyContact.insertMany(built.contacts);
+      await DailyHelp.insertMany(built.helpers);
+      await HelpAttendance.insertMany(built.attendance);
+      await Expense.insertMany(built.expenses);
+      // Event notices get a few replies
+      await Notice.updateMany({ societyId: society._id, type: 'event' }, { $set: { rsvps: built.rsvps } });
+      counts.vendors += vendorUsers.length;
+      counts.providers += built.providers.length;
+      counts.requests += built.requests.length;
+      counts.posts += built.posts.length;
+      counts.contacts += built.contacts.length;
+      counts.helpers += built.helpers.length;
+      counts.attendance += built.attendance.length;
+      counts.expenses += built.expenses.length;
+    }
+    console.log(`✅ Created ${counts.vendors} vendors, ${counts.requests} service bookings, ${counts.posts} posts, ${counts.helpers} daily helpers, ${counts.expenses} expenses`);
+
     // 11. Create Notifications
     console.log('🔔 Creating notifications...');
     const notificationTypes = [
       'visitor_approval', 'delivery_approval', 'visitor_entry', 'delivery_entry',
       'vehicle_entry', 'vehicle_exit', 'payment_due', 'payment_received',
       'complaint_update', 'complaint_assigned', 'notice_published',
-      'booking_approved', 'booking_rejected', 'general'
+      'booking_approved', 'booking_rejected', 'booking_request', 'service_request', 'service_update', 'community', 'general'
     ];
     
     const allUsers = [...residents, ...societyAdmins, ...securityGuards, ...staff];
@@ -499,6 +545,8 @@ const seedData = async () => {
     console.log(`   - ${complaints.length} Complaints`);
     console.log(`   - ${payments.length} Payments`);
     console.log(`   - ${bookings.length} Bookings`);
+    console.log(`   - ${counts.vendors} Vendors with ${counts.providers} service profiles, ${counts.requests} service bookings`);
+    console.log(`   - ${counts.posts} Community posts, ${counts.helpers} Daily helpers, ${counts.contacts} Emergency contacts, ${counts.expenses} Expenses`);
     console.log(`   - 50 Notifications`);
     
     console.log('\n🔐 Default Login Credentials:');
@@ -514,6 +562,9 @@ const seedData = async () => {
     console.log('\n   Security:');
     console.log('     Email: security1@example.com');
     console.log('     Password: security123');
+    console.log('\n   Vendor (home services):');
+    console.log('     Email: vendor1.<last 4 chars of a society id>@example.com');
+    console.log('     Password: vendor123');
     console.log('\n   Staff:');
     console.log('     Email: staff1@example.com');
     console.log('     Password: staff123');

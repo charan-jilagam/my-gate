@@ -48,6 +48,10 @@ const uploadRoutes = require('./routes/uploads');
 const pushRoutes = require('./routes/push');
 const serviceRoutes = require('./routes/services');
 const serviceRequestRoutes = require('./routes/serviceRequests');
+const communityRoutes = require('./routes/community');
+const emergencyRoutes = require('./routes/emergency');
+const dailyHelpRoutes = require('./routes/dailyHelp');
+const expenseRoutes = require('./routes/expenses');
 
 // Middleware
 app.use(helmet());
@@ -120,6 +124,10 @@ app.use('/api/uploads', uploadRoutes);
 app.use('/api/push', pushRoutes);
 app.use('/api/services', serviceRoutes);
 app.use('/api/service-requests', serviceRequestRoutes);
+app.use('/api/community', communityRoutes);
+app.use('/api/emergency', emergencyRoutes);
+app.use('/api/daily-help', dailyHelpRoutes);
+app.use('/api/expenses', expenseRoutes);
 
 // Uploaded images (used only when Cloudinary is not configured). Images must be loadable from the frontend's origin.
 app.use('/uploads', express.static(require('path').join(__dirname, 'uploads'), {

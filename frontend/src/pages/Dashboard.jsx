@@ -1,13 +1,45 @@
-import { Link } from 'react-router-dom'
-import { FiArrowRight, FiBell, FiCheckCircle } from 'react-icons/fi'
+import { Link, Navigate } from 'react-router-dom'
+import { FiAlertTriangle, FiArrowRight, FiBell, FiCalendar, FiCheckCircle, FiClock, FiCreditCard, FiFileText, FiMessageSquare, FiPackage, FiPieChart, FiShield, FiTool, FiUserPlus, FiUsers } from 'react-icons/fi'
 import { useAuth } from '../contexts/AuthContext'
 import useApi from '../hooks/useApi'
 import { PageHeader, formatDate, formatINR } from '../components/ui'
+import RequestCard from '../components/RequestCard'
+import { resolveActionUrl } from '../components/Layout'
 
 const greeting = () => {
   const h = new Date().getHours()
   return h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening'
 }
+
+// The things each role does most, one tap from the home screen.
+const QUICK = {
+  resident: [
+    { to: '/visitors', icon: FiUserPlus, label: 'Pre-approve a visitor' },
+    { to: '/services', icon: FiTool, label: 'Book a home service' },
+    { to: '/bookings', icon: FiCalendar, label: 'Book an amenity' },
+    { to: '/payments', icon: FiCreditCard, label: 'Pay dues' },
+    { to: '/complaints', icon: FiFileText, label: 'Raise a complaint' },
+    { to: '/daily-help', icon: FiClock, label: 'Daily help' },
+    { to: '/community', icon: FiMessageSquare, label: 'Community' },
+    { to: '/emergency', icon: FiAlertTriangle, label: 'SOS', danger: true }
+  ],
+  security: [
+    { to: '/gate', icon: FiShield, label: 'Gate console' },
+    { to: '/visitors', icon: FiUsers, label: 'Visitors' },
+    { to: '/deliveries', icon: FiPackage, label: 'Deliveries' },
+    { to: '/daily-help', icon: FiClock, label: 'Check in daily help' },
+    { to: '/emergency', icon: FiAlertTriangle, label: 'Alerts', danger: true }
+  ],
+  society_admin: [
+    { to: '/admin/residents', icon: FiCheckCircle, label: 'Approve people' },
+    { to: '/notices', icon: FiBell, label: 'Post a notice' },
+    { to: '/complaints', icon: FiFileText, label: 'Complaints' },
+    { to: '/accounts', icon: FiPieChart, label: 'Accounts' },
+    { to: '/admin/services', icon: FiTool, label: 'Home services' },
+    { to: '/emergency', icon: FiAlertTriangle, label: 'Emergency', danger: true }
+  ]
+}
+QUICK.super_admin = QUICK.society_admin
 
 const count = (d, key) => d?.count ?? d?.[key]?.length ?? 0
 
@@ -24,6 +56,8 @@ const Dashboard = () => {
   const complaintsOpen = useApi('/complaints', { params: { status: 'open', limit: 100 }, enabled: sees('resident', 'society_admin', 'super_admin', 'staff') })
   const paymentsPending = useApi('/payments', { params: { status: 'pending', limit: 100 }, enabled: sees('resident', 'society_admin', 'super_admin') })
   const approvals = useApi('/users/pending-approvals', { enabled: isAdmin })
+  const services = useApi('/service-requests', { params: { scope: 'upcoming', limit: 3 }, enabled: isResident, select: (d) => d.requests || [] })
+  const sosOpen = useApi('/emergency/alerts', { params: { status: 'open', limit: 20 }, enabled: sees('security', 'society_admin', 'super_admin'), select: (d) => (d.alerts || []).filter((a) => a.status !== 'resolved') })
   const notifications = useApi('/users/notifications', { params: { limit: 6 }, select: (d) => d.notifications || [] })
 
   const pendingPaymentTotal = (paymentsPending.data?.payments || []).reduce((n, p) => n + (p.amount || 0), 0)
@@ -39,6 +73,7 @@ const Dashboard = () => {
     },
     isResident && { n: count(paymentsPending.data, 'payments'), label: `payments pending (${formatINR(pendingPaymentTotal)})`, to: '/payments', cta: 'Pay' },
     sees('resident', 'society_admin', 'super_admin', 'staff') && { n: count(complaintsOpen.data, 'complaints'), label: 'open complaints', to: '/complaints', cta: 'Open' },
+    sees('security', 'society_admin', 'super_admin') && { n: sosOpen.data?.length || 0, label: 'open emergency alerts', to: '/emergency', cta: 'Respond' },
     isSecurity && { n: count(visitorsExpected.data, 'visitors'), label: 'invited visitors expected', to: '/gate', cta: 'Open console' }
   ].filter((x) => x && x.n > 0)
 
@@ -53,11 +88,41 @@ const Dashboard = () => {
   const flat = user?.flatNo ? `${user.block ? `${user.block}-` : ''}${user.flatNo}` : ''
   const subtitle = [user?.societyId?.name, flat && `Flat ${flat}`].filter(Boolean).join(' · ')
 
+  if (role === 'vendor') return <Navigate to="/work" replace />
+
+  const quick = QUICK[role] || []
+
   return (
     <>
       <PageHeader title={`${greeting()}, ${user?.name?.split(' ')[0] || 'there'}`} subtitle={subtitle || undefined} />
 
-      <div className="grid gap-6 lg:grid-cols-[3fr_2fr]">
+      {quick.length > 0 && (
+        <section aria-labelledby="quick-h" className="mb-6">
+          <h2 id="quick-h" className="sr-only">Quick actions</h2>
+          <ul className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+            {quick.map(({ to, icon: Icon, label, danger }) => (
+              <li key={to + label}>
+                <Link to={to} className={`flex h-full min-h-[76px] flex-col items-start justify-between gap-2 rounded-lg border p-3 text-sm font-semibold transition-colors ${danger ? 'border-danger/40 bg-danger-soft text-danger hover:border-danger' : 'border-line bg-surface hover:border-brand'}`}>
+                  <Icon size={22} className={danger ? '' : 'text-brand'} aria-hidden="true" />
+                  {label}
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {isResident && services.data?.length > 0 && (
+        <section aria-labelledby="svc-h" className="mb-6">
+          <div className="mb-2 flex items-baseline justify-between">
+            <h2 id="svc-h" className="text-base font-bold">Your home services</h2>
+            <Link to="/services/requests" className="text-sm font-semibold text-brand hover:underline">See all</Link>
+          </div>
+          <ul className="space-y-2">{services.data.map((r) => <RequestCard key={r._id} request={r} />)}</ul>
+        </section>
+      )}
+
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[3fr_2fr]">
         <section aria-labelledby="attention-h" className="panel">
           <h2 id="attention-h" className="border-b border-line px-5 py-3.5 text-base font-bold">Needs your attention</h2>
           {attention.length === 0 ? (
@@ -100,13 +165,21 @@ const Dashboard = () => {
           <h2 id="recent-h" className="border-b border-line px-5 py-3.5 text-base font-bold">Recent activity</h2>
           {notifications.data?.length ? (
             <ul className="divide-y divide-line">
-              {notifications.data.map((n) => (
-                <li key={n._id} className="px-5 py-3.5">
-                  <p className="text-sm font-semibold">{n.title}</p>
-                  <p className="text-sm text-muted">{n.message}</p>
-                  <p className="mt-1 text-xs text-muted">{formatDate(n.createdAt, true)}</p>
-                </li>
-              ))}
+              {notifications.data.map((n) => {
+                const to = resolveActionUrl(n.actionUrl)
+                const body = (
+                  <>
+                    <p className="text-sm font-semibold">{n.title}</p>
+                    <p className="text-sm text-muted">{n.message}</p>
+                    <p className="mt-1 text-xs text-muted">{formatDate(n.createdAt, true)}</p>
+                  </>
+                )
+                return (
+                  <li key={n._id}>
+                    {to ? <Link to={to} className="block px-5 py-3.5 hover:bg-sunken/60">{body}</Link> : <div className="px-5 py-3.5">{body}</div>}
+                  </li>
+                )
+              })}
             </ul>
           ) : (
             <div className="flex items-center gap-3 px-5 py-8 text-sm text-muted">

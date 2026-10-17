@@ -4,10 +4,10 @@ import { useAuth } from '../contexts/AuthContext'
 import api from '../services/api'
 import useApi from '../hooks/useApi'
 import useAction from '../hooks/useAction'
-import { ConfirmDialog, DataList, EmptyState, Field, Modal, PageHeader, Spinner, StatusTag, formatDate } from '../components/ui'
+import { ConfirmDialog, DataList, EmptyState, ErrorState, Field, Modal, PageHeader, Spinner, StatusTag, formatDate, formatINR } from '../components/ui'
+import { dayLabel, dayParts, timeLabel } from '../utils/services'
 
-const today = () => new Date().toISOString().slice(0, 10)
-const EMPTY_FORM = { amenity: '', slotDate: today(), startTime: '18:00', endTime: '19:00', numberOfGuests: 0, notes: '' }
+const EMPTY_FORM = { amenity: '', date: '', picked: [], numberOfGuests: 0, notes: '' }
 const FILTERS = [
   { key: 'all', label: 'All' },
   { key: 'pending', label: 'Pending' },
@@ -15,18 +15,83 @@ const FILTERS = [
 ]
 
 const timeRange = (b) => {
-  const f = (v) => new Date(v).toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' })
+  const f = (v) => new Date(v).toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit', timeZone: 'Asia/Kolkata' })
   return `${f(b.startTime)} to ${f(b.endTime)}`
+}
+
+const REASON = { past: 'That day has passed', too_far: 'Too far ahead to book', paused: 'Not available', no_slots: 'No slots on this day', invalid_date: 'Pick a valid date', too_soon: 'Too soon', booked: 'Booked' }
+
+/** Day strip + slot grid for one amenity. Slots in a row can be picked together. */
+const SlotGrid = ({ amenity, date, onDate, picked, onPick, today, refreshKey }) => {
+  const day = useApi('/bookings/availability', { params: { amenity: amenity.name, date, k: refreshKey }, enabled: !!date, live: false })
+  const strip = Array.from({ length: Math.min(amenity.maxAdvanceDays, 14) + 1 }, (_, i) => {
+    const d = new Date(`${today}T00:00:00Z`)
+    d.setUTCDate(d.getUTCDate() + i)
+    return d.toISOString().slice(0, 10)
+  })
+  const max = amenity.maxSlotsPerBooking
+
+  const toggle = (slot) => {
+    const has = picked.some((p) => p.start === slot.start)
+    if (has) {
+      // Only an end slot can be removed, so the selection stays one unbroken block.
+      const sorted = [...picked].sort((a, b) => a.start.localeCompare(b.start))
+      const edge = sorted[0].start === slot.start || sorted[sorted.length - 1].start === slot.start
+      return onPick(edge ? picked.filter((p) => p.start !== slot.start) : [slot])
+    }
+    if (!picked.length) return onPick([slot])
+    const sorted = [...picked].sort((a, b) => a.start.localeCompare(b.start))
+    const first = sorted[0]
+    const last = sorted[sorted.length - 1]
+    if (slot.start === last.end && picked.length < max) return onPick([...sorted, slot])
+    if (slot.end === first.start && picked.length < max) return onPick([slot, ...sorted])
+    return onPick([slot])
+  }
+
+  return (
+    <div>
+      <div className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-2" role="listbox" aria-label="Pick a day">
+        {strip.map((d) => {
+          const p = dayParts(d)
+          const on = d === date
+          return (
+            <button key={d} type="button" role="option" aria-selected={on} onClick={() => onDate(d)}
+              className={`flex w-14 shrink-0 flex-col items-center rounded-lg border py-2 ${on ? 'border-brand bg-brand text-brand-ink' : 'border-line bg-surface hover:border-brand'}`}>
+              <span className="text-[11px] font-semibold uppercase">{p.weekday}</span>
+              <span className="font-display text-xl font-extrabold leading-none">{p.day}</span>
+              <span className="text-[11px]">{p.month}</span>
+            </button>
+          )
+        })}
+      </div>
+
+      {!date ? <p className="mt-2 text-sm text-muted">Choose a day to see the free slots.</p> : day.loading ? <div className="skeleton mt-2 h-32" /> : day.error ? <ErrorState message={day.error} onRetry={day.reload} /> : day.data.closed ? (
+        <p className="mt-2 rounded-md bg-sunken px-3 py-3 text-sm text-muted">{REASON[day.data.reason] || 'Closed'}</p>
+      ) : (
+        <div className="mt-2 grid grid-cols-3 gap-2 sm:grid-cols-4" role="group" aria-label="Time slots">
+          {day.data.slots.map((s) => {
+            const on = picked.some((p) => p.start === s.start)
+            return (
+              <button key={s.start} type="button" disabled={!s.available} aria-pressed={on} onClick={() => toggle(s)}
+                className={`rounded-md border px-2 py-2 text-sm font-semibold ${on ? 'border-brand bg-brand text-brand-ink' : s.available ? 'border-line bg-surface hover:border-brand' : 'cursor-not-allowed border-line bg-sunken text-muted line-through'}`}
+                title={s.available ? undefined : REASON[s.reason]}>
+                {timeLabel(s.start)}
+              </button>
+            )
+          })}
+        </div>
+      )}
+      {max > 1 && <p className="mt-2 text-xs text-muted">Tap neighbouring slots to book up to {max} in a row.</p>}
+    </div>
+  )
 }
 
 const Bookings = () => {
   const { isResident, isAdmin } = useAuth()
   const { data, loading, error, reload } = useApi('/bookings', { params: { limit: 100 }, select: (d) => d.bookings || [] })
-  const { data: amenities } = useApi('/societies', {
-    enabled: isResident,
-    live: false,
-    select: (d) => (d.societies?.[0]?.amenities || []).filter((a) => a.isActive !== false)
-  })
+  const amenityInfo = useApi('/bookings/amenities', { enabled: isResident, live: false })
+  const amenities = amenityInfo.data?.amenities
+  const [refreshKey, setRefreshKey] = useState(0)
   const { busy, run } = useAction(reload)
   const [filter, setFilter] = useState('all')
   const [open, setOpen] = useState(false)
@@ -38,35 +103,44 @@ const Bookings = () => {
 
   const rows = useMemo(() => (filter === 'all' ? data || [] : (data || []).filter((b) => b.status === filter)), [data, filter])
 
+  const chosen = amenities?.find((a) => a.name === form.amenity)
+  const sortedPick = [...form.picked].sort((a, b) => a.start.localeCompare(b.start))
+  const startTime = sortedPick[0]?.start
+  const endTime = sortedPick[sortedPick.length - 1]?.end
+  const price = chosen && sortedPick.length ? (chosen.hourlyRate * sortedPick.length * chosen.slotMinutes) / 60 : 0
+  const todayStr = amenityInfo.data ? new Intl.DateTimeFormat('en-CA', { timeZone: amenityInfo.data.timezone }).format(new Date()) : ''
+
   const submit = async (e) => {
     e.preventDefault()
     setFormError('')
-    const start = new Date(`${form.slotDate}T${form.startTime}`)
-    const end = new Date(`${form.slotDate}T${form.endTime}`)
-    if (!form.amenity.trim()) return setFormError('Choose or enter an amenity.')
-    if (!(end > start)) return setFormError('The end time must be after the start time.')
-    if (start < new Date()) return setFormError('Pick a time in the future.')
+    if (!chosen) return setFormError('Choose an amenity.')
+    if (!form.date || !sortedPick.length) return setFormError('Pick a day and at least one time slot.')
+    if (chosen.capacity && Number(form.numberOfGuests) + 1 > chosen.capacity) return setFormError(`${chosen.name} fits ${chosen.capacity} people.`)
 
-    const payload = {
-      amenity: form.amenity.trim(),
-      slotDate: new Date(`${form.slotDate}T00:00`).toISOString(),
-      startTime: start.toISOString(),
-      endTime: end.toISOString(),
+    const ok = await run('create', () => api.post('/bookings', {
+      amenity: chosen.name,
+      date: form.date,
+      startTime,
+      endTime,
       numberOfGuests: Number(form.numberOfGuests) || 0,
       notes: form.notes.trim() || undefined
-    }
-    const ok = await run('create', () => api.post('/bookings', payload), 'Booking requested')
+    }), chosen.requiresApproval ? 'Request sent' : 'Booked')
     if (ok) {
       setOpen(false)
       setForm(EMPTY_FORM)
+    } else {
+      // The slot may have just been taken: show what is free now.
+      setForm((f) => ({ ...f, picked: [] }))
+      setRefreshKey((n) => n + 1)
     }
   }
 
   const columns = [
     { key: 'amenity', header: 'Amenity', render: (b) => <span className="font-semibold">{b.amenity}</span> },
     ...(isResident ? [] : [{ key: 'who', header: 'Booked by', render: (b) => `${b.residentId?.name || '-'}${b.residentId?.flatNo ? ` (${b.residentId.flatNo})` : ''}` }]),
-    { key: 'date', header: 'Date', render: (b) => formatDate(b.slotDate) },
+    { key: 'date', header: 'Date', render: (b) => (b.dateStr ? dayLabel(b.dateStr) : formatDate(b.slotDate)) },
     { key: 'time', header: 'Time', render: timeRange },
+    { key: 'amount', header: 'Amount', render: (b) => (b.amount ? formatINR(b.amount) : 'Free') },
     { key: 'status', header: 'Status', render: (b) => <StatusTag status={b.status} /> },
     {
       key: 'actions',
@@ -84,7 +158,7 @@ const Bookings = () => {
               </button>
             </>
           )}
-          {isResident && ['pending', 'approved'].includes(b.status) && new Date(b.startTime) > new Date() && (
+          {['pending', 'approved'].includes(b.status) && new Date(b.startTime) > new Date() && (isResident || isAdmin) && (
             <button className="btn-secondary btn-sm" onClick={() => setCancelling(b)}>Cancel</button>
           )}
         </div>
@@ -138,41 +212,40 @@ const Bookings = () => {
         footer={
           <>
             <button className="btn-secondary" onClick={() => setOpen(false)}>Cancel</button>
-            <button className="btn-primary" form="booking-form" type="submit" disabled={busy === 'create'}>
+            <button className="btn-primary" form="booking-form" type="submit" disabled={busy === 'create' || !sortedPick.length}>
               {busy === 'create' && <Spinner className="h-4 w-4" />}
-              Request booking
+              {chosen && !chosen.requiresApproval ? 'Book now' : 'Request booking'}
             </button>
           </>
         }
       >
         <form id="booking-form" onSubmit={submit} className="space-y-4">
-          <Field label="Amenity" htmlFor="b-amenity">
-            {amenities?.length ? (
-              <select id="b-amenity" required className="input" value={form.amenity} onChange={(e) => setForm({ ...form, amenity: e.target.value })}>
-                <option value="">Select amenity</option>
-                {amenities.map((a) => <option key={a._id || a.name} value={a.name}>{a.name}</option>)}
-              </select>
-            ) : (
-              <input id="b-amenity" required className="input" placeholder="Clubhouse" value={form.amenity} onChange={(e) => setForm({ ...form, amenity: e.target.value })} />
-            )}
-          </Field>
-          <div className="grid gap-4 sm:grid-cols-3">
-            <Field label="Date" htmlFor="b-date">
-              <input id="b-date" type="date" required min={today()} className="input" value={form.slotDate} onChange={(e) => setForm({ ...form, slotDate: e.target.value })} />
-            </Field>
-            <Field label="From" htmlFor="b-start">
-              <input id="b-start" type="time" required className="input" value={form.startTime} onChange={(e) => setForm({ ...form, startTime: e.target.value })} />
-            </Field>
-            <Field label="To" htmlFor="b-end">
-              <input id="b-end" type="time" required className="input" value={form.endTime} onChange={(e) => setForm({ ...form, endTime: e.target.value })} />
-            </Field>
-          </div>
-          <Field label="Number of guests" htmlFor="b-guests">
-            <input id="b-guests" type="number" min="0" className="input" value={form.numberOfGuests} onChange={(e) => setForm({ ...form, numberOfGuests: e.target.value })} />
-          </Field>
-          <Field label="Notes" htmlFor="b-notes" hint="Optional">
-            <textarea id="b-notes" rows={2} className="input" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
-          </Field>
+          {amenityInfo.loading ? <div className="skeleton h-10" /> : !amenities?.length ? (
+            <p className="rounded-md bg-sunken px-3 py-3 text-sm text-muted">The society office has not set up any amenities for booking yet.</p>
+          ) : (
+            <>
+              <Field label="Amenity" htmlFor="b-amenity" hint={chosen ? `Open ${timeLabel(chosen.openTime)} to ${timeLabel(chosen.closeTime)}. ${chosen.hourlyRate ? `${formatINR(chosen.hourlyRate)} per hour.` : 'Free.'}${chosen.requiresApproval ? ' Needs approval from the office.' : ' Confirmed instantly.'}` : undefined}>
+                <select id="b-amenity" required className="input" value={form.amenity} onChange={(e) => setForm({ ...EMPTY_FORM, amenity: e.target.value })}>
+                  <option value="">Select amenity</option>
+                  {amenities.map((a) => <option key={a._id} value={a.name}>{a.name}</option>)}
+                </select>
+              </Field>
+              {chosen && (
+                <SlotGrid amenity={chosen} today={todayStr} date={form.date} onDate={(d) => setForm({ ...form, date: d, picked: [] })} picked={form.picked} onPick={(picked) => setForm({ ...form, picked })} refreshKey={refreshKey} />
+              )}
+              {chosen && sortedPick.length > 0 && (
+                <p className="rounded-md bg-brand-soft px-3 py-2 text-sm font-semibold" role="status">
+                  {dayLabel(form.date)}, {timeLabel(startTime)} to {timeLabel(endTime)} · {price ? formatINR(price) : 'Free'}
+                </p>
+              )}
+              <Field label="Number of guests" htmlFor="b-guests" hint={chosen?.capacity ? `Capacity ${chosen.capacity} including you` : undefined}>
+                <input id="b-guests" type="number" min="0" className="input" value={form.numberOfGuests} onChange={(e) => setForm({ ...form, numberOfGuests: e.target.value })} />
+              </Field>
+              <Field label="Notes" htmlFor="b-notes" hint="Optional">
+                <textarea id="b-notes" rows={2} className="input" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
+              </Field>
+            </>
+          )}
           {formError && <p role="alert" className="text-sm font-medium text-danger">{formError}</p>}
         </form>
       </Modal>
@@ -181,7 +254,7 @@ const Bookings = () => {
         open={!!cancelling}
         danger
         title="Cancel this booking?"
-        text={`Your ${cancelling?.amenity} booking on ${formatDate(cancelling?.slotDate)} will be released for others.`}
+        text={`Your ${cancelling?.amenity} booking on ${cancelling?.dateStr ? dayLabel(cancelling.dateStr) : formatDate(cancelling?.slotDate)} will be released for others.`}
         confirmLabel="Cancel booking"
         busy={busy === cancelling?._id}
         onClose={() => setCancelling(null)}

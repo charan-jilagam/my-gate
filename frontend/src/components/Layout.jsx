@@ -2,17 +2,22 @@ import { imgSrc } from '../utils/media'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import {
+  FiAlertTriangle,
   FiBell,
   FiCalendar,
   FiCheckCircle,
+  FiClock,
   FiCreditCard,
   FiFileText,
   FiGrid,
   FiHome,
   FiLogOut,
   FiMenu,
+  FiMessageSquare,
   FiMoon,
+  FiMoreHorizontal,
   FiPackage,
+  FiPieChart,
   FiShield,
   FiSun,
   FiTool,
@@ -26,60 +31,75 @@ import { useSocket } from '../contexts/SocketContext'
 import api from '../services/api'
 import { formatDate } from './ui'
 
+const I = {
+  home: { to: '/dashboard', icon: FiGrid, label: 'Home' },
+  visitors: { to: '/visitors', icon: FiUsers, label: 'Visitors' },
+  deliveries: { to: '/deliveries', icon: FiPackage, label: 'Deliveries' },
+  vehicles: { to: '/vehicles', icon: FiTruck, label: 'Vehicles' },
+  help: { to: '/daily-help', icon: FiClock, label: 'Daily help' },
+  services: { to: '/services', icon: FiTool, label: 'Services' },
+  bookings: { to: '/bookings', icon: FiCalendar, label: 'Amenities' },
+  community: { to: '/community', icon: FiMessageSquare, label: 'Community' },
+  notices: { to: '/notices', icon: FiBell, label: 'Notices' },
+  complaints: { to: '/complaints', icon: FiFileText, label: 'Complaints' },
+  payments: { to: '/payments', icon: FiCreditCard, label: 'Payments' },
+  accounts: { to: '/accounts', icon: FiPieChart, label: 'Accounts' },
+  emergency: { to: '/emergency', icon: FiAlertTriangle, label: 'Emergency' },
+  gate: { to: '/gate', icon: FiShield, label: 'Gate console' },
+  people: { to: '/admin/residents', icon: FiCheckCircle, label: 'People' },
+  adminServices: { to: '/admin/services', icon: FiTool, label: 'Home services' },
+  societies: { to: '/admin/societies', icon: FiHome, label: 'Society' },
+  jobs: { to: '/work', icon: FiTool, label: 'My jobs' },
+  schedule: { to: '/work/setup', icon: FiCalendar, label: 'My schedule' }
+}
+
+// Sidebar and "More" menu: grouped so a long list stays scannable.
 const NAV = {
-  common: [{ to: '/dashboard', icon: FiGrid, label: 'Home' }],
   resident: [
-    { to: '/visitors', icon: FiUsers, label: 'Visitors' },
-    { to: '/deliveries', icon: FiPackage, label: 'Deliveries' },
-    { to: '/vehicles', icon: FiTruck, label: 'Vehicles' },
-    { to: '/notices', icon: FiBell, label: 'Notices' },
-    { to: '/complaints', icon: FiFileText, label: 'Complaints' },
-    { to: '/payments', icon: FiCreditCard, label: 'Payments' },
-    { to: '/bookings', icon: FiCalendar, label: 'Amenities' },
-    { to: '/services', icon: FiTool, label: 'Services' }
+    { items: [I.home] },
+    { title: 'At the gate', items: [I.visitors, I.deliveries, I.vehicles, I.help] },
+    { title: 'Home and community', items: [I.services, I.bookings, I.community, I.notices] },
+    { title: 'Money and help', items: [I.payments, I.accounts, I.complaints, I.emergency] }
   ],
   security: [
-    { to: '/gate', icon: FiShield, label: 'Gate console' },
-    { to: '/visitors', icon: FiUsers, label: 'Visitors' },
-    { to: '/deliveries', icon: FiPackage, label: 'Deliveries' },
-    { to: '/vehicles', icon: FiTruck, label: 'Vehicles' },
-    { to: '/notices', icon: FiBell, label: 'Notices' }
+    { items: [I.home, I.gate] },
+    { title: 'Gate', items: [I.visitors, I.deliveries, I.vehicles, I.help] },
+    { title: 'Society', items: [I.notices, I.emergency] }
   ],
   society_admin: [
-    { to: '/admin/residents', icon: FiCheckCircle, label: 'People' },
-    { to: '/gate', icon: FiShield, label: 'Gate console' },
-    { to: '/visitors', icon: FiUsers, label: 'Visitors' },
-    { to: '/deliveries', icon: FiPackage, label: 'Deliveries' },
-    { to: '/vehicles', icon: FiTruck, label: 'Vehicles' },
-    { to: '/notices', icon: FiBell, label: 'Notices' },
-    { to: '/complaints', icon: FiFileText, label: 'Complaints' },
-    { to: '/payments', icon: FiCreditCard, label: 'Payments' },
-    { to: '/bookings', icon: FiCalendar, label: 'Amenities' },
-    { to: '/admin/services', icon: FiTool, label: 'Services' },
-    { to: '/admin/societies', icon: FiHome, label: 'Society' }
+    { items: [I.home, I.people] },
+    { title: 'Gate', items: [I.gate, I.visitors, I.deliveries, I.vehicles, I.help] },
+    { title: 'Society', items: [I.notices, I.complaints, I.community, I.bookings, I.adminServices, I.emergency] },
+    { title: 'Money', items: [I.payments, I.accounts] },
+    { title: 'Setup', items: [I.societies] }
   ],
   super_admin: [
-    { to: '/admin/societies', icon: FiHome, label: 'Societies' },
-    { to: '/admin/residents', icon: FiCheckCircle, label: 'People' },
-    { to: '/visitors', icon: FiUsers, label: 'Visitors' },
-    { to: '/deliveries', icon: FiPackage, label: 'Deliveries' },
-    { to: '/vehicles', icon: FiTruck, label: 'Vehicles' },
-    { to: '/notices', icon: FiBell, label: 'Notices' },
-    { to: '/complaints', icon: FiFileText, label: 'Complaints' },
-    { to: '/payments', icon: FiCreditCard, label: 'Payments' },
-    { to: '/bookings', icon: FiCalendar, label: 'Amenities' },
-    { to: '/admin/services', icon: FiTool, label: 'Services' }
+    { items: [I.home, I.societies, I.people] },
+    { title: 'Gate', items: [I.visitors, I.deliveries, I.vehicles, I.help] },
+    { title: 'Society', items: [I.notices, I.complaints, I.community, I.bookings, I.adminServices, I.emergency] },
+    { title: 'Money', items: [I.payments, I.accounts] }
   ],
-  staff: [
-    { to: '/complaints', icon: FiFileText, label: 'Complaints' },
-    { to: '/notices', icon: FiBell, label: 'Notices' }
-  ],
-  vendor: [
-    { to: '/work', icon: FiTool, label: 'My jobs' },
-    { to: '/work/setup', icon: FiCalendar, label: 'My schedule' },
-    { to: '/complaints', icon: FiFileText, label: 'Complaints' },
-    { to: '/notices', icon: FiBell, label: 'Notices' }
-  ]
+  staff: [{ items: [I.home, I.complaints, I.notices] }],
+  vendor: [{ items: [I.jobs, I.schedule, I.complaints, I.notices] }]
+}
+
+// The bottom bar on phones: the four things each role does most, then everything else under "More".
+const TABS = {
+  resident: [I.home, I.visitors, I.services, I.community],
+  security: [I.home, I.gate, I.visitors, I.help],
+  society_admin: [I.home, I.people, I.visitors, I.complaints],
+  super_admin: [I.home, I.societies, I.people, I.complaints],
+  staff: [I.home, I.complaints, I.notices],
+  vendor: [I.jobs, I.schedule, I.notices]
+}
+
+// Notifications may carry a link to one record (/visitors/abc). Those pages are lists, so open the list.
+const LIST_PAGES = ['visitors', 'deliveries', 'vehicles', 'notices', 'complaints', 'payments', 'bookings']
+export const resolveActionUrl = (url) => {
+  if (!url || !url.startsWith('/')) return null
+  const [, first, second] = url.split('?')[0].split('/')
+  if (LIST_PAGES.includes(first) && second) return `/${first}`
+  return url
 }
 
 const ROLE_LABEL = {
@@ -118,6 +138,7 @@ const useTheme = () => {
 }
 
 const Notifications = () => {
+  const navigate = useNavigate()
   const { lastNotification } = useSocket()
   const [open, setOpen] = useState(false)
   const [items, setItems] = useState([])
@@ -160,6 +181,11 @@ const Notifications = () => {
   }
 
   const markOne = async (n) => {
+    const to = resolveActionUrl(n.actionUrl)
+    if (to) {
+      setOpen(false)
+      navigate(to)
+    }
     if (n.isRead) return
     try {
       await api.put(`/users/notifications/${n._id}/read`)
@@ -224,7 +250,9 @@ const Layout = () => {
 
   useEffect(() => setDrawer(false), [location.pathname])
 
-  const items = [...NAV.common, ...(NAV[user?.role] || [])]
+  const groups = NAV[user?.role] || [{ items: [I.home] }]
+  const tabs = TABS[user?.role] || [I.home]
+  const sos = user?.role === 'resident'
 
   const handleLogout = () => {
     logout()
@@ -237,25 +265,32 @@ const Layout = () => {
       <div className="px-5 pb-4 pt-5 text-white">
         <Logo />
       </div>
-      <nav className="flex-1 space-y-0.5 overflow-y-auto px-3" aria-label="Main">
-        {items.map(({ to, icon: Icon, label }) => (
-          <NavLink
-            key={to}
-            to={to}
-            className={({ isActive }) =>
-              `group relative flex items-center gap-3 rounded-md px-3 py-2.5 text-sm font-semibold transition-colors ${
-                isActive ? 'bg-white/10 text-white' : 'text-white/70 hover:bg-white/5 hover:text-white'
-              }`
-            }
-          >
-            {({ isActive }) => (
-              <>
-                {isActive && <span className="hazard absolute inset-y-1.5 left-0 w-1 rounded-full" aria-hidden="true" />}
-                <Icon size={18} className={isActive ? 'text-amber' : ''} />
-                {label}
-              </>
-            )}
-          </NavLink>
+      <nav className="flex-1 overflow-y-auto px-3 pb-3" aria-label="Main">
+        {groups.map((g, gi) => (
+          <div key={gi} className={gi ? 'mt-4' : ''}>
+            {g.title && <p className="px-3 pb-1 text-[11px] font-bold uppercase tracking-wider text-white/50">{g.title}</p>}
+            <div className="space-y-0.5">
+              {g.items.map(({ to, icon: Icon, label }) => (
+                <NavLink
+                  key={to}
+                  to={to}
+                  className={({ isActive }) =>
+                    `group relative flex items-center gap-3 rounded-md px-3 py-2.5 text-sm font-semibold transition-colors ${
+                      isActive ? 'bg-white/10 text-white' : 'text-white/70 hover:bg-white/5 hover:text-white'
+                    }`
+                  }
+                >
+                  {({ isActive }) => (
+                    <>
+                      {isActive && <span className="hazard absolute inset-y-1.5 left-0 w-1 rounded-full" aria-hidden="true" />}
+                      <Icon size={18} className={isActive ? 'text-amber' : ''} />
+                      {label}
+                    </>
+                  )}
+                </NavLink>
+              ))}
+            </div>
+          </div>
         ))}
       </nav>
       <div className="border-t border-white/10 p-3">
@@ -331,9 +366,40 @@ const Layout = () => {
         </div>
       </header>
 
-      <main id="main" className="mx-auto w-full max-w-6xl px-4 py-6 sm:px-6 sm:py-8">
+      <main id="main" className="mx-auto w-full max-w-6xl px-4 pb-[calc(5.5rem+env(safe-area-inset-bottom))] pt-6 sm:px-6 sm:pt-8 lg:pb-8">
         <Outlet />
       </main>
+
+      {/* Phone navigation: the main places for this role, always one thumb away. */}
+      <nav className="fixed inset-x-0 bottom-0 z-30 border-t border-line bg-surface/95 pb-[env(safe-area-inset-bottom)] backdrop-blur lg:hidden" aria-label="Quick navigation">
+        <ul className="mx-auto flex max-w-lg items-stretch justify-around">
+          {tabs.map(({ to, icon: Icon, label }) => (
+            <li key={to} className="flex-1">
+              <NavLink
+                to={to}
+                className={({ isActive }) => `flex min-h-[3.5rem] flex-col items-center justify-center gap-0.5 px-1 text-[11px] font-semibold ${isActive ? 'text-brand' : 'text-muted'}`}
+              >
+                <Icon size={20} aria-hidden="true" />
+                {label}
+              </NavLink>
+            </li>
+          ))}
+          {sos && (
+            <li className="flex-1">
+              <NavLink to="/emergency" className="flex min-h-[3.5rem] flex-col items-center justify-center gap-0.5 px-1 text-[11px] font-bold text-danger">
+                <FiAlertTriangle size={20} aria-hidden="true" />
+                SOS
+              </NavLink>
+            </li>
+          )}
+          <li className="flex-1">
+            <button type="button" onClick={() => setDrawer(true)} className="flex min-h-[3.5rem] w-full flex-col items-center justify-center gap-0.5 px-1 text-[11px] font-semibold text-muted" aria-label="More">
+              <FiMoreHorizontal size={20} aria-hidden="true" />
+              More
+            </button>
+          </li>
+        </ul>
+      </nav>
     </div>
   )
 }

@@ -1,0 +1,20 @@
+{
+  "name": "MyGate: society management",
+  "short_name": "MyGate",
+  "description": "Visitors, deliveries, home services, payments and notices for your society.",
+  "start_url": "/dashboard",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0F4C4A",
+  "theme_color": "#0F4C4A",
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Book a service", "url": "/services" },
+    { "name": "SOS", "url": "/emergency" },
+    { "name": "Visitors", "url": "/visitors" }
+  ]
+}

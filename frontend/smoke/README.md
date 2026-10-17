@@ -1,0 +1,16 @@
+# Browser smoke tests
+
+These open the built app in a real browser with the API faked (no database or backend needed), then check that every
+page renders, nothing throws, nothing scrolls sideways on a phone, and the main flows send the right requests:
+booking a service, booking an amenity, SOS, event RSVP, daily-help check-in and notification links.
+
+```bash
+cd frontend
+npm run build && npx vite preview --port 4173 &
+pip install playwright && playwright install chromium     # once
+python3 smoke/smoke.py     # every page for resident, vendor, admin and guard; prints PROBLEMS: none when clean
+python3 smoke/flows.py     # interactive flows; prints OK for each and the requests that were sent
+```
+
+Set `SMOKE_URL` for another address, `SMOKE_OUT` for where screenshots go, `CHROMIUM_PATH` to use a specific browser.
+They use fixtures defined at the top of `smoke.py`, so update those when an API response changes shape.

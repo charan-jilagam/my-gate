@@ -78,9 +78,9 @@ const ServiceProvider = () => {
         <FiArrowLeft size={15} /> All vendors
       </Link>
 
-      <div className="grid gap-6 lg:grid-cols-[2fr_3fr]">
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[2fr_3fr]">
         {/* Who they are */}
-        <div className="space-y-6">
+        <div className="min-w-0 space-y-6">
           <section className="panel p-5">
             <div className="flex gap-4">
               <Avatar name={provider.name} src={provider.photo} size={64} />
@@ -139,7 +139,7 @@ const ServiceProvider = () => {
         </div>
 
         {/* Book */}
-        <form onSubmit={submit} className="space-y-5 self-start">
+        <form onSubmit={submit} className="min-w-0 space-y-5 self-start">
           <section className="panel p-5">
             <h2 className="mb-1 text-base font-bold">1. Choose a time</h2>
             {!provider.acceptingJobs ? (

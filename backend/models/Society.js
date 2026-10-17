@@ -58,7 +58,14 @@ const societySchema = new mongoose.Schema({
     description: String,
     capacity: Number,
     bookingRequired: { type: Boolean, default: false },
-    hourlyRate: Number
+    hourlyRate: { type: Number, min: 0 },
+    isActive: { type: Boolean, default: true }, // false takes it off the booking screen
+    openTime: { type: String, match: /^([01]\d|2[0-3]):[0-5]\d$/, default: '06:00' },
+    closeTime: { type: String, match: /^([01]\d|2[0-3]):[0-5]\d$/, default: '22:00' },
+    slotMinutes: { type: Number, enum: [30, 60, 90, 120], default: 60 },
+    maxSlotsPerBooking: { type: Number, min: 1, max: 12, default: 3 },
+    requiresApproval: { type: Boolean, default: true }, // false confirms bookings instantly
+    maxAdvanceDays: { type: Number, min: 1, max: 90, default: 30 }
   }],
   isActive: {
     type: Boolean,

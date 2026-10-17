@@ -30,6 +30,11 @@ const ServiceRequestDetail = lazy(() => import('./pages/ServiceRequestDetail'))
 const WorkHome = lazy(() => import('./pages/WorkHome'))
 const WorkSetup = lazy(() => import('./pages/WorkSetup'))
 const AdminServices = lazy(() => import('./pages/AdminServices'))
+const Community = lazy(() => import('./pages/Community'))
+const CommunityPost = lazy(() => import('./pages/CommunityPost'))
+const Emergency = lazy(() => import('./pages/Emergency'))
+const DailyHelp = lazy(() => import('./pages/DailyHelp'))
+const Accounts = lazy(() => import('./pages/Accounts'))
 const NotFound = lazy(() => import('./pages/NotFound'))
 
 const ADMINS = ['society_admin', 'super_admin']
@@ -70,6 +75,15 @@ function App() {
                 <Route path="/work" element={<PrivateRoute roles={['vendor']}><WorkHome /></PrivateRoute>} />
                 <Route path="/work/setup" element={<PrivateRoute roles={['vendor']}><WorkSetup /></PrivateRoute>} />
                 <Route path="/admin/services" element={<PrivateRoute roles={ADMINS}><AdminServices /></PrivateRoute>} />
+                <Route path="/community" element={<PrivateRoute roles={['resident', ...ADMINS]}><Community /></PrivateRoute>} />
+                <Route path="/community/:id" element={<PrivateRoute roles={['resident', ...ADMINS]}><CommunityPost /></PrivateRoute>} />
+                <Route path="/emergency" element={<PrivateRoute roles={['resident', 'security', ...ADMINS]}><Emergency /></PrivateRoute>} />
+                <Route path="/daily-help" element={<PrivateRoute roles={['resident', 'security', ...ADMINS]}><DailyHelp /></PrivateRoute>} />
+                <Route path="/accounts" element={<PrivateRoute roles={['resident', ...ADMINS]}><Accounts /></PrivateRoute>} />
+                {/* Notification links point at one record; these pages are lists, so open the list. */}
+                {['visitors', 'deliveries', 'vehicles', 'notices', 'complaints', 'payments', 'bookings'].map((base) => (
+                  <Route key={base} path={`/${base}/:id`} element={<Navigate to={`/${base}`} replace />} />
+                ))}
                 <Route path="/profile" element={<Profile />} />
                 <Route path="/gate" element={<PrivateRoute roles={['security', ...ADMINS]}><GateConsole /></PrivateRoute>} />
                 <Route path="/admin/residents" element={<PrivateRoute roles={ADMINS}><AdminResidents /></PrivateRoute>} />

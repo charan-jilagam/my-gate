@@ -75,10 +75,18 @@ const AdminSocieties = () => {
     const cleaned = amenities
       .filter((a) => a.name.trim())
       .map((a) => ({
+        ...(a._id ? { _id: a._id } : {}), // keep the id so existing bookings still point at this amenity
         name: a.name.trim(),
         capacity: a.capacity === '' || a.capacity == null ? undefined : Number(a.capacity),
         hourlyRate: a.hourlyRate === '' || a.hourlyRate == null ? undefined : Number(a.hourlyRate),
-        bookingRequired: !!a.bookingRequired
+        bookingRequired: !!a.bookingRequired,
+        isActive: a.isActive !== false,
+        openTime: a.openTime || '06:00',
+        closeTime: a.closeTime || '22:00',
+        slotMinutes: Number(a.slotMinutes) || 60,
+        maxSlotsPerBooking: Number(a.maxSlotsPerBooking) || 3,
+        maxAdvanceDays: Number(a.maxAdvanceDays) || 30,
+        requiresApproval: a.requiresApproval !== false
       }))
     const ok = await run('amenities', () => api.put(`/societies/${amenityFor._id}`, { amenities: cleaned }), 'Amenities saved')
     if (ok) setAmenityFor(null)
@@ -226,21 +234,35 @@ const AdminSocieties = () => {
       >
         <div className="space-y-3">
           {amenities.length === 0 && <p className="text-sm text-muted">No amenities yet. Add the spaces residents can book, like a clubhouse or tennis court.</p>}
-          {amenities.map((a, i) => (
-            <div key={i} className="grid items-end gap-3 rounded-md border border-line p-3 sm:grid-cols-[1fr_100px_110px_auto_auto]">
-              <Field label="Name" htmlFor={`am-name-${i}`}><input id={`am-name-${i}`} className="input" value={a.name} onChange={(e) => setAmenities(amenities.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)))} /></Field>
-              <Field label="Capacity" htmlFor={`am-cap-${i}`}><input id={`am-cap-${i}`} type="number" min="1" className="input" value={a.capacity ?? ''} onChange={(e) => setAmenities(amenities.map((x, j) => (j === i ? { ...x, capacity: e.target.value } : x)))} /></Field>
-              <Field label="₹ per hour" htmlFor={`am-rate-${i}`}><input id={`am-rate-${i}`} type="number" min="0" className="input" value={a.hourlyRate ?? ''} onChange={(e) => setAmenities(amenities.map((x, j) => (j === i ? { ...x, hourlyRate: e.target.value } : x)))} /></Field>
-              <label className="flex min-h-[40px] items-center gap-2 text-sm">
-                <input type="checkbox" checked={!!a.bookingRequired} onChange={(e) => setAmenities(amenities.map((x, j) => (j === i ? { ...x, bookingRequired: e.target.checked } : x)))} />
-                Needs booking
-              </label>
-              <button className="btn-ghost btn-sm" onClick={() => setAmenities(amenities.filter((_, j) => j !== i))} aria-label={`Remove ${a.name || 'amenity'}`}>
-                <FiTrash2 size={15} />
-              </button>
-            </div>
-          ))}
-          <button className="btn-secondary btn-sm" onClick={() => setAmenities([...amenities, { name: '', capacity: '', hourlyRate: '', bookingRequired: true }])}>
+          {amenities.map((a, i) => {
+            const set = (patch) => setAmenities(amenities.map((x, j) => (j === i ? { ...x, ...patch } : x)))
+            return (
+              <div key={a._id || i} className="space-y-3 rounded-md border border-line p-3">
+                <div className="grid items-end gap-3 sm:grid-cols-[1fr_100px_110px_auto]">
+                  <Field label="Name" htmlFor={`am-name-${i}`}><input id={`am-name-${i}`} className="input" value={a.name} onChange={(e) => set({ name: e.target.value })} /></Field>
+                  <Field label="Capacity" htmlFor={`am-cap-${i}`}><input id={`am-cap-${i}`} type="number" min="1" className="input" value={a.capacity ?? ''} onChange={(e) => set({ capacity: e.target.value })} /></Field>
+                  <Field label="₹ per hour" htmlFor={`am-rate-${i}`}><input id={`am-rate-${i}`} type="number" min="0" className="input" value={a.hourlyRate ?? ''} onChange={(e) => set({ hourlyRate: e.target.value })} /></Field>
+                  <button className="btn-ghost btn-sm" onClick={() => setAmenities(amenities.filter((_, j) => j !== i))} aria-label={`Remove ${a.name || 'amenity'}`}><FiTrash2 size={15} /></button>
+                </div>
+                <div className="grid items-end gap-3 sm:grid-cols-5">
+                  <Field label="Opens" htmlFor={`am-open-${i}`}><input id={`am-open-${i}`} type="time" className="input" value={a.openTime || '06:00'} onChange={(e) => set({ openTime: e.target.value })} /></Field>
+                  <Field label="Closes" htmlFor={`am-close-${i}`}><input id={`am-close-${i}`} type="time" className="input" value={a.closeTime || '22:00'} onChange={(e) => set({ closeTime: e.target.value })} /></Field>
+                  <Field label="Slot length" htmlFor={`am-slot-${i}`}>
+                    <select id={`am-slot-${i}`} className="input" value={a.slotMinutes || 60} onChange={(e) => set({ slotMinutes: Number(e.target.value) })}>
+                      {[30, 60, 90, 120].map((n) => <option key={n} value={n}>{n} min</option>)}
+                    </select>
+                  </Field>
+                  <Field label="Max slots in a row" htmlFor={`am-max-${i}`}><input id={`am-max-${i}`} type="number" min="1" max="12" className="input" value={a.maxSlotsPerBooking || 3} onChange={(e) => set({ maxSlotsPerBooking: e.target.value })} /></Field>
+                  <Field label="Book ahead (days)" htmlFor={`am-adv-${i}`}><input id={`am-adv-${i}`} type="number" min="1" max="90" className="input" value={a.maxAdvanceDays || 30} onChange={(e) => set({ maxAdvanceDays: e.target.value })} /></Field>
+                </div>
+                <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm">
+                  <label className="flex items-center gap-2"><input type="checkbox" checked={a.requiresApproval !== false} onChange={(e) => set({ requiresApproval: e.target.checked })} /> Office approves each booking</label>
+                  <label className="flex items-center gap-2"><input type="checkbox" checked={a.isActive !== false} onChange={(e) => set({ isActive: e.target.checked })} /> Open for booking</label>
+                </div>
+              </div>
+            )
+          })}
+          <button className="btn-secondary btn-sm" onClick={() => setAmenities([...amenities, { name: '', capacity: '', hourlyRate: '', bookingRequired: true, isActive: true, openTime: '06:00', closeTime: '22:00', slotMinutes: 60, maxSlotsPerBooking: 3, maxAdvanceDays: 30, requiresApproval: true }])}>
             <FiPlus size={14} /> Add amenity
           </button>
         </div>

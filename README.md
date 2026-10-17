@@ -16,6 +16,15 @@ A comprehensive society management application built with the MERN stack, replic
 - **Amenity Booking**: Book society amenities with availability checking
 - **Real-time Notifications**: Socket.io powered real-time updates
 
+### New: services, community and safety
+
+- **Home services marketplace**: electricians, plumbers, carpenters and more; vendors publish free slots, residents book them
+- **Community**: neighbours' forum, buy and sell, lost and found
+- **SOS** with emergency numbers, **daily help** attendance at the gate, **event RSVP**, **society accounts**
+- Phone-first navigation with a bottom tab bar, quick actions and working notification links
+
+See [FEATURES.md](FEATURES.md) for how each works, the rules, the API and the tests.
+
 ### User Roles
 
 - **Super Admin**: Manage all societies and oversee system

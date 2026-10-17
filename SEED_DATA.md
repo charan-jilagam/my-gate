@@ -67,6 +67,11 @@ The seed script creates:
 - Some read, some unread
 - Linked to different users
 
+### 11. **Home services and community** (per society with approved residents)
+- 4 vendors (plumber, electrician and AC, carpenter and painter, cleaning and pest control) with schedules and ratings
+- 9 service bookings in every state: completed with reviews, confirmed, waiting for the vendor, cancelled, declined
+- 6 community posts, 6 emergency numbers, 3 daily helpers with about 3 weeks of attendance, 6 expenses, RSVPs on events
+
 ## Default Login Credentials
 
 After seeding, you can login with these credentials:
@@ -93,6 +98,13 @@ Password: resident123
 ```
 Email: security1@example.com
 Password: security123
+```
+
+### Vendor
+The seed prints the exact address. It looks like `vendor1.<4 characters>@example.com`; find them in the database or in the
+society admin's Home services screen.
+```
+Password: vendor123
 ```
 
 ### Staff
