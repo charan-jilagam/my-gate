@@ -116,7 +116,7 @@ const Payments = () => {
       const response = await openCheckout({
         keyId: order.keyId || config?.keyId,
         order,
-        name: 'MyGate',
+        name: 'Nivora',
         description: `${titleCase(payment.type)}${payment.month ? ` · ${payment.month}` : ''}`,
         prefill: { name: user?.name, email: user?.email, contact: user?.phone }
       })

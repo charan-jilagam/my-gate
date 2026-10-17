@@ -1,6 +1,6 @@
 {
-  "name": "MyGate: society management",
-  "short_name": "MyGate",
+  "name": "Nivora: Every Community. One Platform.",
+  "short_name": "Nivora",
   "description": "Visitors, deliveries, home services, payments and notices for your society.",
   "start_url": "/dashboard",
   "scope": "/",

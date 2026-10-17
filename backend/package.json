@@ -1,7 +1,7 @@
 {
-  "name": "mygate-backend",
+  "name": "nivora-backend",
   "version": "1.0.0",
-  "description": "MyGate clone backend API",
+  "description": "Nivora backend API",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
@@ -11,7 +11,7 @@
     "seed": "node scripts/seedData.js"
   },
   "keywords": [
-    "mygate",
+    "nivora",
     "society-management",
     "api"
   ],

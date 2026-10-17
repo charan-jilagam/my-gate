@@ -38,7 +38,7 @@ const Login = () => {
       subtitle="Use the email you registered with."
       footer={
         <>
-          New to your society on MyGate?{' '}
+          New to your society on Nivora?{' '}
           <Link to="/register" className="font-semibold text-brand hover:underline">
             Create an account
           </Link>

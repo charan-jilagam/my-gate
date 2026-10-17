@@ -70,7 +70,7 @@ const GateConsole = () => {
     } catch (e) {
       value = String(text).trim()
     }
-    if (!value) return setLookupError('That QR code is not a MyGate visitor pass.')
+    if (!value) return setLookupError('That QR code is not a Nivora visitor pass.')
     setCode(value.toUpperCase())
     findPass(null, value)
   }

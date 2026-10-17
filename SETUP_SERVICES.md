@@ -7,7 +7,7 @@ Both are optional. The app runs without them.
 Without these settings, "Forgot password" still works in development: the reset link is printed in the backend terminal. In production (`NODE_ENV=production`) users are told email is unavailable.
 
 1. Turn on 2-Step Verification for the Google account: https://myaccount.google.com/security
-2. Create an App Password: https://myaccount.google.com/apppasswords (name it "MyGate"). Copy the 16 characters, without spaces.
+2. Create an App Password: https://myaccount.google.com/apppasswords (name it "Nivora"). Copy the 16 characters, without spaces.
 3. In `backend/.env`:
    ```
    EMAIL_HOST=smtp.gmail.com

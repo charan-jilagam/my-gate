@@ -1,9 +1,9 @@
-# MyGate Clone - Design Document
+# Nivora - Design Document
 
 ## 1. System Overview
 
 ### 1.1 Purpose
-This document describes the architecture, design, and implementation of a comprehensive society management system that replicates core functionalities of the MyGate application.
+This document describes the architecture, design, and implementation of a comprehensive society management system that replicates core functionalities of the Nivora application.
 
 ### 1.2 Scope
 The system provides:

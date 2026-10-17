@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-MyGate-like web app manages apartment societies using MERN stack (MongoDB, Express.js, React.js, Node.js). It supports role-based access for admins, residents, security, and staff with core features like visitor management and payments. Designed as Cursor-friendly with modular components for easy AI-assisted development.[^1][^2][^3]
+Nivora web app manages apartment societies using MERN stack (MongoDB, Express.js, React.js, Node.js). It supports role-based access for admins, residents, security, and staff with core features like visitor management and payments. Designed as Cursor-friendly with modular components for easy AI-assisted development.[^1][^2][^3]
 
 ## Tech Stack
 

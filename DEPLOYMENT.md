@@ -1,6 +1,6 @@
 # Deployment Guide
 
-This guide covers deploying the MyGate clone application to production environments.
+This guide covers deploying the Nivora clone application to production environments.
 
 ## Prerequisites
 

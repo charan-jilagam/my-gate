@@ -1,6 +1,6 @@
 # Quick Start Guide
 
-Get the MyGate clone up and running in 5 minutes!
+Get the Nivora clone up and running in 5 minutes!
 
 ## Prerequisites Check
 

@@ -1,6 +1,6 @@
-# MyGate Clone - Society Management System
+# Nivora - Every Community. One Platform.
 
-A comprehensive society management application built with the MERN stack, replicating core functionalities of the MyGate app. This system enables secure management of apartment societies with features for visitor management, deliveries, vehicle tracking, payments, complaints, and community communication.
+A comprehensive society management application built with the MERN stack. This system enables secure management of apartment societies with features for visitor management, deliveries, vehicle tracking, payments, complaints, and community communication.
 
 ## 🚀 Features
 

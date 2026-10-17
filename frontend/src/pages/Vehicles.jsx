@@ -58,7 +58,7 @@ const Vehicles = () => {
       render: (v) => (
         <div className="md:text-left">
           <p className="font-mono font-bold tracking-wide">{v.vehicleNumber}</p>
-          <p className="text-xs text-muted">{[v.brand, v.model, v.color].filter(Boolean).join(' · ') || titleCase(v.vehicleType)}</p>
+          <p className="text-xs text-muted" {...(v.brand || v.model || v.color ? { 'data-no-translate': 'true' } : {})}>{[v.brand, v.model, v.color].filter(Boolean).join(' · ') || titleCase(v.vehicleType)}</p>
         </div>
       )
     },

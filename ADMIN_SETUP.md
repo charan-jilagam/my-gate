@@ -1,6 +1,6 @@
 # Admin Login Setup Guide
 
-This guide explains how to create and login as an admin user in the MyGate clone application.
+This guide explains how to create and login as an admin user in the Nivora clone application.
 
 ## Methods to Create Admin Users
 

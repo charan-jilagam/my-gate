@@ -151,7 +151,7 @@ app.use('/uploads', express.static(require('path').join(__dirname, 'uploads'), {
 
 // Health check
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'OK', message: 'MyGate API is running' });
+  res.json({ status: 'OK', message: 'Nivora API is running' });
 });
 
 // Error handling middleware

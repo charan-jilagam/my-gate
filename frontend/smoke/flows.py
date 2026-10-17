@@ -86,18 +86,18 @@ def gate_check(page):
 
 def language(page):
     page.goto(smoke.BASE + '/dashboard'); page.wait_for_selector('main')
-    bar = 'nav[aria-label="Quick navigation"]'
+    bar = lambda text: page.locator('nav:has(a[href="/visitors"])').last.get_by_text(text, exact=True).wait_for(state='visible')   # the nav's own label is translated too, so find it by its link
     page.locator('header select').select_option('hi')
-    page.wait_for_selector(f'{bar} >> text=आगंतुक')            # Visitors, in the quick-navigation bar
+    bar('आगंतुक')            # Visitors, in the quick-navigation bar
     body = page.inner_text('body')
     for want in ['होम', 'सेवाएँ', 'आपके ध्यान के लिए']:
         assert want in body, f'missing {want}'
     assert page.evaluate('document.documentElement.lang') == 'hi'
-    page.reload(); page.wait_for_selector(f'{bar} >> text=आगंतुक')        # remembered after a reload
+    page.reload(); bar('आगंतुक')        # remembered after a reload
     page.locator('header select').select_option('te')
-    page.wait_for_selector(f'{bar} >> text=సందర్శకులు')
+    bar('సందర్శకులు')
     page.locator('header select').select_option('en')
-    page.wait_for_selector(f'{bar} >> text=Visitors')
+    bar('Visitors')
 
 def help_isolation(page):
     page.goto(smoke.BASE + '/help'); page.wait_for_selector('text=Resident guide')
@@ -174,9 +174,21 @@ def clock_in(page):
     page.goto(smoke.BASE + '/my-shifts'); page.wait_for_selector('button:has-text("Clock in")')
     page.click('button:has-text("Clock in")'); page.wait_for_timeout(500)
 
+def translate_data(page):
+    # statuses, purposes, column headings and dates are translated too, names stay as typed, and English comes back
+    page.goto(smoke.BASE + '/visitors'); page.wait_for_selector('text=siri', state='attached')
+    page.locator('header select').select_option('te')
+    for want in ['వ్యక్తిగతం', 'చెక్-అవుట్ అయ్యారు', 'ఉద్దేశ్యం', 'అక్టోబర్']:
+        page.wait_for_selector(f'text={want}', state='attached')
+    assert page.locator('text=siri').count() >= 1                  # a name is data, not translated
+    page.locator('header select').select_option('en')
+    for want in ['Personal', 'Checked Out', 'Purpose', 'Oct']:
+        page.wait_for_selector(f'text={want}', state='attached')
+    assert 'వ్యక్తిగతం' not in page.inner_text('body')
+
 def main():
   for role, name, fn in [('resident', 'book service', book_service), ('resident', 'amenity booking', amenity), ('resident', 'SOS', sos), ('resident', 'RSVP', rsvp), ('resident', 'notification deep link', notif), ('security', 'gate check', gate_check),
-                         ('resident', 'language switch', language), ('resident', 'guide is role-only and searchable', help_isolation), ('society_admin', 'admin guide', help_admin),
+                         ('resident', 'language switch', language), ('resident', 'data and headings translate and restore', translate_data), ('resident', 'guide is role-only and searchable', help_isolation), ('society_admin', 'admin guide', help_admin),
                          ('resident', 'cast a vote', vote), ('staff', 'mark upkeep done', mark_done), ('society_admin', 'add shifts', add_shift),
                          ('society_admin', 'create a vote', new_vote), ('society_admin', 'add a document', add_document),
                          ('resident', 'pay a service bill online', pay_online), ('super_admin', 'roster as platform admin', super_roster), ('security', 'clock in', clock_in)]:

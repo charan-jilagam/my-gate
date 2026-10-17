@@ -56,7 +56,7 @@ const RequestActions = ({ request, onDone, size = 'md', className = '' }) => {
       const { data } = await api.post(`${base}/pay-online`)
       let response
       try {
-        response = await openCheckout({ keyId: data.keyId, order: data.order, name: 'MyGate', description: request.title, prefill: { name: user?.name, email: user?.email, contact: user?.phone } })
+        response = await openCheckout({ keyId: data.keyId, order: data.order, name: 'Nivora', description: request.title, prefill: { name: user?.name, email: user?.email, contact: user?.phone } })
       } catch (e) {
         if (e?.dismissed) return null // closed the window: nothing to report
         throw { response: { data: { message: e?.message || 'The payment did not go through. You have not been charged.' } } }

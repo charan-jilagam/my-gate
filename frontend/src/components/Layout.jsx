@@ -143,7 +143,7 @@ export const Logo = ({ className = '' }) => (
       <path d="M7 24V12l9-6 9 6v12" fill="none" stroke="#F5A800" strokeWidth="2.4" strokeLinejoin="round" />
       <path d="M12 24v-7h8v7" fill="none" className="stroke-brand-ink" strokeWidth="2.4" />
     </svg>
-    <span className="font-display text-xl font-extrabold tracking-tight">MyGate</span>
+    <span className="font-display text-xl font-extrabold tracking-tight">Nivora</span>
   </span>
 )
 
@@ -290,6 +290,7 @@ const Layout = () => {
       <div className="hazard h-1.5 shrink-0" aria-hidden="true" />
       <div className="px-5 pb-4 pt-5 text-white">
         <Logo />
+        <p className="mt-1 text-[11px] font-medium tracking-wide text-white/55">Every Community. One Platform.</p>
       </div>
       <nav className="flex-1 overflow-y-auto px-3 pb-3" aria-label="Main">
         {groups.map((g, gi) => (

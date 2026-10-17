@@ -51,7 +51,7 @@ const deliverExternally = async (userId, data, wantsSms) => {
   }
 
   if (wantsSms && prefs.sms !== false && user.phone) {
-    await sendSms(user.phone, `MyGate: ${data.title}. ${data.message}`);
+    await sendSms(user.phone, `Nivora: ${data.title}. ${data.message}`);
   }
 };
 

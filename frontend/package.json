@@ -1,7 +1,7 @@
 {
-  "name": "mygate-frontend",
+  "name": "nivora-frontend",
   "version": "1.0.0",
-  "description": "MyGate clone frontend",
+  "description": "Nivora frontend",
   "type": "module",
   "private": true,
   "dependencies": {
@@ -28,6 +28,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "check:i18n": "node scripts/check-i18n.mjs"
   }
 }

@@ -391,5 +391,19 @@ const te = {
   'Open console': 'కన్సోల్ తెరవండి'
 }
 
-export const DICTIONARIES = { en: {}, hi, te }
+import rows1 from './rows1'
+import rows2 from './rows2'
+import rows3 from './rows3'
+import rows4 from './rows4'
+
+// Rows are [English, Hindi, Telugu]. Anything already written above wins, so older wording is never silently changed.
+const fromRows = (index) => {
+  const out = {}
+  for (const row of [...rows1, ...rows2, ...rows3, ...rows4]) if (row[index] && !(row[0] in out)) out[row[0]] = row[index]
+  return out
+}
+export const DICTIONARIES = { en: {}, hi: { ...fromRows(1), ...hi }, te: { ...fromRows(2), ...te } }
+
+// Rows with {0} / {1} become pattern rules (see patterns.js); they are not looked up as plain text.
+export const TEMPLATES = [...rows1, ...rows2, ...rows3, ...rows4].filter((r) => /\{\d\}/.test(r[0]))
 export const DEFAULT_LANGUAGE = 'en'

@@ -12,7 +12,10 @@ const AuthShell = ({ title, subtitle, children, footer }) => (
   <div className="grid min-h-screen lg:grid-cols-[minmax(0,5fr)_minmax(0,6fr)]">
     <aside className="relative hidden flex-col justify-between overflow-hidden bg-side p-12 text-white lg:flex">
       <div className="hazard absolute inset-x-0 top-0 h-2" aria-hidden="true" />
-      <Logo />
+      <div>
+        <Logo />
+        <p className="mt-2 text-sm font-medium tracking-wide text-amber">Every Community. One Platform.</p>
+      </div>
       <div>
         <p className="font-display text-4xl font-extrabold leading-tight">
           Know who is at your gate before they ring the bell.
@@ -33,7 +36,10 @@ const AuthShell = ({ title, subtitle, children, footer }) => (
 
     <main className="flex items-center justify-center px-4 py-10 sm:px-8">
       <div className="w-full max-w-md">
-        <Logo className="mb-8 lg:hidden" />
+        <div className="mb-8 lg:hidden">
+          <Logo />
+          <p className="mt-1 text-xs font-medium text-muted">Every Community. One Platform.</p>
+        </div>
         <h1 className="text-3xl font-extrabold">{title}</h1>
         {subtitle && <p className="mt-2 text-sm text-muted">{subtitle}</p>}
         <div className="mt-8">{children}</div>

@@ -1,5 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
-import { DEFAULT_LANGUAGE, DICTIONARIES, LANGUAGES } from '../i18n/translations'
+import { DEFAULT_LANGUAGE, DICTIONARIES, LANGUAGES, TEMPLATES } from '../i18n/translations'
+import { makePatterns } from '../i18n/patterns'
+import { makeTranslator, startAutoTranslate } from '../i18n/autoTranslate'
 
 const KEY = 'lang'
 const known = (code) => LANGUAGES.some((l) => l.code === code)
@@ -21,6 +23,14 @@ export const LanguageProvider = ({ children }) => {
 
   useEffect(() => {
     document.documentElement.lang = lang
+  }, [lang])
+
+  // Everything that is not wrapped in t() (table headings, buttons, tags, dates) is translated after it is drawn.
+  useEffect(() => {
+    if (typeof document === 'undefined' || typeof MutationObserver === 'undefined') return undefined
+    const dict = DICTIONARIES[lang] || {}
+    const lookup = makeTranslator(dict, makePatterns(lang, TEMPLATES))
+    return startAutoTranslate(document.body, lookup, lang !== 'en')
   }, [lang])
 
   const setLang = useCallback((code) => {

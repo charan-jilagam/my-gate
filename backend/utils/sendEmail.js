@@ -14,7 +14,7 @@ const sendEmail = async (options) => {
   });
 
   const message = {
-    from: `${process.env.EMAIL_FROM_NAME || 'MyGate'} <${process.env.EMAIL_USER}>`,
+    from: `${process.env.EMAIL_FROM_NAME || 'Nivora'} <${process.env.EMAIL_USER}>`,
     to: options.email,
     subject: options.subject,
     text: options.message,

@@ -1,4 +1,4 @@
-# MyGate Clone – Full Flow Diagrams & Scenarios
+# Nivora – Full Flow Diagrams & Scenarios
 
 This document describes all user and system flows in the codebase using Mermaid diagrams. Use a [Mermaid-compatible viewer](https://mermaid.live/) or GitHub to render the diagrams.
 

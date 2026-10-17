@@ -4,10 +4,10 @@ self.addEventListener('push', (event) => {
   try {
     data = event.data ? event.data.json() : {}
   } catch (e) {
-    data = { title: 'MyGate', body: event.data ? event.data.text() : '' }
+    data = { title: 'Nivora', body: event.data ? event.data.text() : '' }
   }
   event.waitUntil(
-    self.registration.showNotification(data.title || 'MyGate', {
+    self.registration.showNotification(data.title || 'Nivora', {
       body: data.body || '',
       data: { url: data.url || '/' }
     })
