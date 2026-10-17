@@ -71,10 +71,38 @@ Rules worth knowing:
 | Events | `POST /notices/:id/rsvp` |
 | Amenities | `GET /bookings/amenities`, `GET /bookings/availability?amenity=&date=`, `POST /bookings` (`amenity`, `date`, `startTime`, `endTime`) |
 
+## Round 3: documents, votes, upkeep, shift roster, online bill payment, languages and the in-app guide
+
+**User guide (`Guide`, question-mark icon in the header)**: each role gets its own manual covering every menu screen. The server
+sends the manual for the signed-in account's role only (`GET /api/manual`); there is no way to ask for another role's guide.
+It has search, a topic list, a print / save-as-PDF button and "Open this screen" links. Text lives in `backend/content/manual/`;
+a test fails if a menu screen has no section or a link points to a screen that does not exist.
+
+| Feature | Residents | Office (society admin) | Guards and staff |
+|---|---|---|---|
+| **Documents** | read and download bye-laws, minutes, circulars, forms | upload PDF (10 MB, checked) or add a link, choose who can see it, edit, delete | read |
+| **Votes** | vote once (per flat or per person); see the result after voting closes | create a vote or election with 2 to 12 options, edit before it opens, cancel; sees turnout only | n/a |
+| **Upkeep** | see when tanks, lifts, fire gear etc. were last done and are next due | add recurring jobs, contractor, notes; record work done with cost | record that a job was done (no cost) |
+| **Shift roster** | n/a | plan shifts for guards and staff (up to 31 days at once, overnight allowed), remove unstarted shifts | `My shifts`: see own shifts, clock in (from 30 min early) and out |
+| **Pay service bills online** | pay a completed booking by Razorpay; amount is set by the server and the payment is signature-checked | sees payments as "online" | n/a |
+| **Languages** | English, Hindi, Telugu from the header; the choice is remembered | same | same |
+
+Rules worth knowing:
+
+- Votes are secret: the database stores only a one-way hash that stops double voting, not who chose what. Results stay hidden until voting closes.
+- Upkeep marked done twice for the same day is ignored (conditional update); dates in the future or older than 60 days are refused.
+- A guard cannot be given two shifts that start together (unique index); removing a shift is refused once the person has clocked in.
+- Online payment needs `RAZORPAY_KEY_ID` and `RAZORPAY_KEY_SECRET`; without them the Pay online button is not offered.
+- Translations cover the menu, buttons and common labels. Text typed by users and the guide itself stay in English. Missing words fall back to English.
+
+New endpoints: `/documents`, `/elections` (+ `/:id/vote`, `/:id/cancel`), `/facility` (+ `/:id/complete`), `/roster` (`/people`, `/mine`, `/clock-in`, `/clock-out`),
+`/manual`, `POST /uploads/document`, `POST /service-requests/:id/pay-online` and `/pay-verify`.
+
+
 ## Tests
 
 ```bash
-cd backend && npm test          # 251 tests: slot engine, lifecycle, permissions, privacy, community, SOS, daily help, accounts, amenity booking, seed data
+cd backend && npm test          # 390 tests: slot engine, lifecycle, permissions, privacy, community, SOS, daily help, accounts, amenity booking, documents, votes, upkeep, roster, payments, guide, seed data
 cd frontend && npm run build    # compile check
 cd frontend && python3 smoke/smoke.py && python3 smoke/flows.py   # browser smoke tests, see smoke/README.md
 ```
@@ -99,4 +127,6 @@ before going live.
 ## Known limits
 
 - Poll notices still send voter ids to residents (existing behaviour, used by the poll screen to show your own vote). Hide them before running anonymous polls.
-- The tests mock the database, see "What that cannot prove" above.
+- The tests mock the database, see "What that cannot prove" above. Also unproven without MongoDB: vote double-ballot and duplicate-shift unique indexes, and the vote tally aggregation.
+- Votes count flats or people as entered by the office; there is no proof-of-ownership check.
+- Payment checkout was tested against a stub, not the live Razorpay window.

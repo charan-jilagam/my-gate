@@ -1,5 +1,5 @@
 import os
-import json, re, sys, datetime
+import json, re, sys, datetime, subprocess
 from playwright.sync_api import sync_playwright
 
 BASE = os.environ.get('SMOKE_URL', 'http://localhost:4173')
@@ -9,12 +9,19 @@ d = lambda n: (today + datetime.timedelta(days=n)).isoformat()
 NOW = datetime.datetime.utcnow().isoformat() + 'Z'
 
 SOC = 's1'
+HERE = os.path.dirname(os.path.abspath(__file__))
+# The real guides, straight from the backend, so the browser checks what people will actually read.
+MANUALS = json.loads(subprocess.check_output(['node', '-e', "console.log(JSON.stringify(require('../../backend/content/manual').manuals))"], cwd=HERE))
 USERS = {
   'resident': dict(_id='u1', name='Asha Rao', role='resident', flatNo='101', block='A', societyId=dict(_id=SOC, name='Green Heights'), isApproved=True, email='a@x.com'),
   'vendor': dict(_id='u2', name='Ravi Kumar', role='vendor', societyId=dict(_id=SOC, name='Green Heights'), isApproved=True, email='r@x.com'),
   'society_admin': dict(_id='u3', name='Office Admin', role='society_admin', societyId=dict(_id=SOC, name='Green Heights'), isApproved=True, email='o@x.com'),
   'security': dict(_id='u4', name='Gate Guard', role='security', societyId=dict(_id=SOC, name='Green Heights'), isApproved=True, email='g@x.com'),
+  'staff': dict(_id='u5', name='Sunil Staff', role='staff', societyId=dict(_id=SOC, name='Green Heights'), isApproved=True, email='s@x.com'),
+  'super_admin': dict(_id='u6', name='Platform Owner', role='super_admin', isApproved=True, email='p@x.com'),
 }
+OFFICE = ('society_admin', 'super_admin')
+STAFFY = ('security', 'staff')
 def person(name, phone=None): return dict(name=name, phone=phone, photo=None)
 REQ = dict(_id='r1', category='plumber', categoryLabel='Plumber', title='Leaking kitchen tap', description='Drips all night', urgency='normal', status='confirmed',
            date=d(2), startTime='10:00', endTime='11:00', flat='A-101', viewerRole='resident', startOtp='4821', visitCharge=250,
@@ -43,10 +50,28 @@ def api(role, method, path, q):
     if p == '/services/admin/providers': return dict(success=True, providers=[dict(PROVIDER, isActive=True, phone='9123456780', accountApproved=True, openJobs=2)])
     if p == '/services/me': return dict(success=True, today=d(0), timezone='Asia/Kolkata', profile=dict(PROVIDER, weeklySchedule=WEEK, breakTime=dict(enabled=False, start='13:00', end='14:00'), timeOff=[], minNoticeMinutes=60, maxAdvanceDays=14, isActive=True), stats=dict(today=1, awaiting=1, upcoming=3, monthJobs=5, monthEarnings=4200))
     if p == '/service-requests/r1': return dict(success=True, request=REQ)
+    if p == '/service-requests/r9': return dict(success=True, request=dict(REQ, _id='r9', status='completed', finalAmount=450, paymentStatus='unpaid', workSummary='Replaced washer', startOtp=None, actions=dict(payOnline=True, review=True)))
     if p == '/service-requests':
         r = dict(REQ, viewerRole='provider' if role == 'vendor' else ('admin' if role == 'society_admin' else 'resident'))
         pend = dict(r, _id='r2', status='requested', date=d(0), title='No power in bedroom', actions=dict(accept=True, decline=True))
         return dict(success=True, requests=[r, pend] if role == 'vendor' else [r])
+
+    if p == '/manual': return dict(success=True, manual=MANUALS[role])
+    if p == '/documents': return dict(success=True, documents=[dict(_id='d1', title='Society bylaws 2026', category='bylaws', description='Rules everyone follows', url='/uploads/a.pdf', fileName='bylaws.pdf', visibility='all', createdAt=NOW)] + ([dict(_id='d2', title='Audit draft', category='financial', url='https://example.com/audit', visibility='admins', createdAt=NOW)] if role in OFFICE else []))
+    if p == '/elections':
+        return dict(success=True, elections=[
+            dict(_id='e1', title='Install solar panels?', kind='resolution', voting='per_flat', phase='open', voted=False, opensAt=NOW, closesAt=(datetime.datetime.utcnow() + datetime.timedelta(days=3)).isoformat() + 'Z', options=[dict(_id='o1', label='Yes'), dict(_id='o2', label='No')], canManage=role in OFFICE),
+            dict(_id='e2', title='Elect the treasurer', kind='election', voting='per_flat', phase='closed', voted=True, opensAt=NOW, closesAt=NOW, options=[dict(_id='o3', label='Meera'), dict(_id='o4', label='Kabir')], canManage=role in OFFICE)])
+    if p == '/elections/e1': return dict(success=True, election=dict(_id='e1', title='Install solar panels?', description='Cost 4 lakh, saves 30 percent of power bills.', kind='resolution', voting='per_flat', phase='open', voted=False, opensAt=NOW, closesAt=(datetime.datetime.utcnow() + datetime.timedelta(days=3)).isoformat() + 'Z', options=[dict(_id='o1', label='Yes', detail='Install this year'), dict(_id='o2', label='No')], canManage=role in OFFICE, **(dict(turnout=dict(votes=12, eligible=40)) if role in OFFICE else {})))
+    if p == '/elections/e2': return dict(success=True, election=dict(_id='e2', title='Elect the treasurer', kind='election', voting='per_flat', phase='closed', voted=True, opensAt=NOW, closesAt=NOW, resultsVisible=True, tied=False, turnout=dict(votes=20, eligible=40), options=[dict(_id='o3', label='Meera', votes=14, percent=70, leading=True), dict(_id='o4', label='Kabir', votes=6, percent=30, leading=False)]))
+    if p == '/facility':
+        t = [dict(_id='f1', name='Clean overhead water tanks', category='water_tank', location='Block B terrace', intervalDays=90, nextDue=d(-4), lastDone=d(-94), active=True, status='overdue', daysLeft=-4, history=[dict(_id='hh1', doneOn=d(-94), byName='Sunil', note='Cleaned')], canComplete=role in OFFICE + STAFFY, canManage=role in OFFICE, contractor='Aqua Clean', contractorPhone='9000000001'),
+             dict(_id='f2', name='Service the lifts', category='lift', intervalDays=30, nextDue=d(5), lastDone=d(-25), active=True, status='due_soon', daysLeft=5, history=[], canComplete=role in OFFICE + STAFFY, canManage=role in OFFICE),
+             dict(_id='f3', name='Fire extinguisher check', category='fire_safety', intervalDays=180, nextDue=d(100), active=True, status='ok', daysLeft=100, history=[], canComplete=role in OFFICE + STAFFY, canManage=role in OFFICE)]
+        return dict(success=True, today=d(0), tasks=t, counts=dict(overdue=1, due_soon=1, ok=1))
+    if p == '/roster/people': return dict(success=True, people=[dict(_id='u4', name='Gate Guard', role='security'), dict(_id='u5', name='Sunil Staff', role='staff')])
+    if p == '/roster/mine': return dict(success=True, today=d(0), shifts=[dict(_id='s1', userId='u4', date=d(0), startTime='08:00', endTime='16:00', overnight=False, post='main_gate', note='', phase='scheduled', canClockIn=True, canClockOut=False), dict(_id='s2', userId='u4', date=d(1), startTime='22:00', endTime='06:00', overnight=True, post='patrol', note='', phase='scheduled', canClockIn=False, canClockOut=False)])
+    if p == '/roster': return dict(success=True, from_=d(0), today=d(0), shifts=[dict(_id='s1', userId='u4', person=dict(name='Gate Guard', role='security'), date=d(0), startTime='08:00', endTime='16:00', overnight=False, post='main_gate', phase='on_duty', clockInAt=NOW), dict(_id='s3', userId='u5', person=dict(name='Sunil Staff', role='staff'), date=d(1), startTime='22:00', endTime='06:00', overnight=True, post='housekeeping', phase='scheduled')])
     if p == '/community/posts': return dict(success=True, posts=[POST])
     if p.startswith('/community/posts/'): return dict(success=True, post=dict(POST, comments=[dict(_id='c1', text='Is it still available?', createdAt=NOW, author=dict(id='u1', name='Asha Rao', flat='A-101'), canDelete=False)]))
     if p == '/emergency/contacts': return dict(success=True, contacts=[dict(_id='e1', name='City Police', phone='100', kind='police', note='24x7')])
@@ -104,14 +129,16 @@ def run(role, pages, mobile=True):
 if __name__ == '__main__':
     allerr = []
     plans = {
-      'resident': [('/dashboard', ['Pre-approve a visitor', 'Your home services', 'Leaking kitchen tap']), ('/services', ['Home services', 'Ravi Kumar', 'Next free']),
+      'resident': [('/documents', ['Society bylaws 2026', 'Bylaws and rules']), ('/votes', ['Install solar panels?', 'Open now']), ('/upkeep', ['Clean overhead water tanks', 'Overdue']), ('/help', ['Resident guide', 'How to use this guide', 'Getting started']), ('/dashboard', ['Pre-approve a visitor', 'Your home services', 'Leaking kitchen tap']), ('/services', ['Home services', 'Ravi Kumar', 'Next free']),
                    ('/services/providers/p1', ['Choose a time', 'Fifteen years', 'Verified']), ('/services/requests', ['My bookings', 'Leaking kitchen tap']),
                    ('/services/requests/r1', ['4821', 'Progress', 'Cancel']), ('/community', ['Study table', 'Pinned']), ('/community/po1', ['Is it still available?']),
                    ('/emergency', ['SOS', 'City Police']), ('/daily-help', ['Lakshmi', '482913', 'Inside since']), ('/accounts', ['Collected', 'Where the money went', 'Security']),
                    ('/bookings', ['Clubhouse']), ('/notices', ['Diwali night', 'people coming', 'Going']), ('/visitors/abc123', [])],
-      'vendor': [('/dashboard', ['Need your reply', 'Waiting for your reply']), ('/work', ['Waiting for your reply', 'No power in bedroom', 'Accept']), ('/work/setup', ['Working hours', 'Days off', 'Slot length']), ('/services/requests/r1', ['Progress'])],
-      'society_admin': [('/dashboard', ['Approve people']), ('/admin/services', ['Ravi Kumar', 'Verified']), ('/accounts', ['Add expense', 'Lift service']), ('/emergency', ['Medical emergency', 'I am responding']), ('/admin/societies', [])],
-      'security': [('/dashboard', ['Gate console']), ('/daily-help', ['Gate check']), ('/emergency', ['Medical emergency'])],
+      'vendor': [('/help', ['Service provider guide', 'My schedule']), ('/dashboard', ['Need your reply', 'Waiting for your reply']), ('/work', ['Waiting for your reply', 'No power in bedroom', 'Accept']), ('/work/setup', ['Working hours', 'Days off', 'Slot length']), ('/services/requests/r1', ['Progress'])],
+      'society_admin': [('/help', ['Society admin guide', 'Duty roster']), ('/documents', ['Add document', 'Audit draft', 'Office only']), ('/votes', ['New vote', 'Install solar panels?']), ('/upkeep', ['Add job', 'Clean overhead water tanks']), ('/roster', ['Add shifts', 'Gate Guard', 'overnight']), ('/dashboard', ['Approve people', 'Duty roster']), ('/admin/services', ['Ravi Kumar', 'Verified']), ('/accounts', ['Add expense', 'Lift service']), ('/emergency', ['Medical emergency', 'I am responding']), ('/admin/societies', [])],
+      'security': [('/help', ['Security guard guide', 'Gate console']), ('/my-shifts', ['My shifts', 'Clock in', 'overnight']), ('/upkeep', ['Mark done']), ('/documents', ['Society bylaws 2026']), ('/dashboard', ['Gate console', 'My shifts']), ('/daily-help', ['Gate check']), ('/emergency', ['Medical emergency'])],
+      'staff': [('/dashboard', ['My shifts', 'Upkeep']), ('/my-shifts', ['Clock in']), ('/upkeep', ['Mark done']), ('/help', ['Staff guide']), ('/documents', ['Society bylaws 2026'])],
+      'super_admin': [('/help', ['Platform admin guide', 'Societies']), ('/roster', ['Society', 'Green Heights', 'Add shifts']), ('/votes', ['Green Heights', 'New vote']), ('/documents', ['Green Heights', 'Add document']), ('/upkeep', ['Green Heights', 'Add job'])],
     }
     for role, pages in plans.items():
         e, r = run(role, pages)

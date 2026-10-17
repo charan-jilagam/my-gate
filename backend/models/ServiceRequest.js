@@ -51,8 +51,10 @@ const serviceRequestSchema = new mongoose.Schema(
     startedAt: Date,
     completedAt: Date,
     paymentStatus: { type: String, enum: ['unpaid', 'paid'], default: 'unpaid' },
-    paymentMethod: { type: String, enum: ['cash', 'upi', 'other'] },
+    paymentMethod: { type: String, enum: ['cash', 'upi', 'other', 'online'] },
     paidAt: Date,
+    razorpayOrderId: { type: String, select: false },
+    razorpayPaymentId: { type: String, select: false },
 
     declineReason: { type: String, trim: true, maxlength: 200 },
     cancelledBy: { type: String, enum: ['resident', 'provider', 'admin'] },

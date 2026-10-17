@@ -14,12 +14,13 @@ const flatLabel = (r) => `${r.block ? `${r.block}-` : ''}${r.flatNo || ''}`;
 const WITH_CONTACT = ['confirmed', 'on_the_way', 'in_progress', 'completed'];
 
 // What the viewer can do with this request right now.
-const requestActions = ({ viewerRole, status, paymentStatus, rated }) => {
+const requestActions = ({ viewerRole, status, paymentStatus, rated, finalAmount }) => {
   const a = {};
   if (viewerRole === 'resident') {
     a.cancel = ['requested', 'confirmed', 'on_the_way'].includes(status);
     a.reschedule = ['requested', 'confirmed'].includes(status);
     a.review = status === 'completed' && !rated;
+    a.payOnline = status === 'completed' && paymentStatus !== 'paid' && Number(finalAmount) >= 1;
   } else if (viewerRole === 'provider') {
     a.accept = status === 'requested';
     a.decline = status === 'requested';
@@ -95,7 +96,7 @@ const presentRequest = (doc, viewer) => {
     reviewedAt: r.reviewedAt,
     statusHistory: r.statusHistory || [],
     viewerRole,
-    actions: requestActions({ viewerRole, status: r.status, paymentStatus: r.paymentStatus, rated: !!r.rating }),
+    actions: requestActions({ viewerRole, status: r.status, paymentStatus: r.paymentStatus, rated: !!r.rating, finalAmount: r.finalAmount }),
     createdAt: r.createdAt
   };
 

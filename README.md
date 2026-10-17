@@ -25,6 +25,10 @@ A comprehensive society management application built with the MERN stack, replic
 
 See [FEATURES.md](FEATURES.md) for how each works, the rules, the API and the tests.
 
+### New: documents, votes, upkeep, shift roster, guide, languages
+Documents library, secret-ballot votes, facility upkeep schedule, guard and staff shift roster with clock in/out, online payment of
+service bills, English / Hindi / Telugu, and a role-based user guide (each role sees only its own manual). See `FEATURES.md`.
+
 ### User Roles
 
 - **Super Admin**: Manage all societies and oversee system
@@ -255,7 +259,7 @@ mygate/
 ## 🧪 Testing
 
 ```bash
-# Backend tests
+# Backend tests (390 tests)
 cd backend
 npm test
 

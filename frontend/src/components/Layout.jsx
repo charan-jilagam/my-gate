@@ -4,11 +4,15 @@ import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import {
   FiAlertTriangle,
   FiBell,
+  FiBookOpen,
   FiCalendar,
   FiCheckCircle,
+  FiClipboard,
   FiClock,
   FiCreditCard,
   FiFileText,
+  FiFolder,
+  FiGlobe,
   FiGrid,
   FiHome,
   FiLogOut,
@@ -19,6 +23,7 @@ import {
   FiPackage,
   FiPieChart,
   FiShield,
+  FiThumbsUp,
   FiSun,
   FiTool,
   FiTruck,
@@ -30,6 +35,8 @@ import { useAuth } from '../contexts/AuthContext'
 import { useSocket } from '../contexts/SocketContext'
 import api from '../services/api'
 import { formatDate } from './ui'
+import { useT } from '../contexts/LanguageContext'
+import { LANGUAGES } from '../i18n/translations'
 
 const I = {
   home: { to: '/dashboard', icon: FiGrid, label: 'Home' },
@@ -50,7 +57,13 @@ const I = {
   adminServices: { to: '/admin/services', icon: FiTool, label: 'Home services' },
   societies: { to: '/admin/societies', icon: FiHome, label: 'Society' },
   jobs: { to: '/work', icon: FiTool, label: 'My jobs' },
-  schedule: { to: '/work/setup', icon: FiCalendar, label: 'My schedule' }
+  schedule: { to: '/work/setup', icon: FiCalendar, label: 'My schedule' },
+  documents: { to: '/documents', icon: FiFolder, label: 'Documents' },
+  votes: { to: '/votes', icon: FiThumbsUp, label: 'Votes' },
+  upkeep: { to: '/upkeep', icon: FiTool, label: 'Upkeep' },
+  roster: { to: '/roster', icon: FiClipboard, label: 'Duty roster' },
+  shifts: { to: '/my-shifts', icon: FiClock, label: 'My shifts' },
+  guide: { to: '/help', icon: FiBookOpen, label: 'User guide' }
 }
 
 // Sidebar and "More" menu: grouped so a long list stays scannable.
@@ -58,43 +71,55 @@ const NAV = {
   resident: [
     { items: [I.home] },
     { title: 'At the gate', items: [I.visitors, I.deliveries, I.vehicles, I.help] },
-    { title: 'Home and community', items: [I.services, I.bookings, I.community, I.notices] },
-    { title: 'Money and help', items: [I.payments, I.accounts, I.complaints, I.emergency] }
+    { title: 'Home and community', items: [I.services, I.bookings, I.community, I.notices, I.votes, I.documents] },
+    { title: 'Money and help', items: [I.payments, I.accounts, I.complaints, I.upkeep, I.emergency] },
+    { items: [I.guide] }
   ],
   security: [
-    { items: [I.home, I.gate] },
+    { items: [I.home, I.gate, I.shifts] },
     { title: 'Gate', items: [I.visitors, I.deliveries, I.vehicles, I.help] },
-    { title: 'Society', items: [I.notices, I.emergency] }
+    { title: 'Society', items: [I.notices, I.emergency, I.upkeep, I.documents] },
+    { items: [I.guide] }
   ],
   society_admin: [
     { items: [I.home, I.people] },
     { title: 'Gate', items: [I.gate, I.visitors, I.deliveries, I.vehicles, I.help] },
-    { title: 'Society', items: [I.notices, I.complaints, I.community, I.bookings, I.adminServices, I.emergency] },
+    { title: 'Society', items: [I.notices, I.votes, I.complaints, I.community, I.bookings, I.adminServices, I.emergency] },
+    { title: 'Operations', items: [I.roster, I.upkeep, I.documents] },
     { title: 'Money', items: [I.payments, I.accounts] },
-    { title: 'Setup', items: [I.societies] }
+    { title: 'Setup', items: [I.societies] },
+    { items: [I.guide] }
   ],
   super_admin: [
     { items: [I.home, I.societies, I.people] },
     { title: 'Gate', items: [I.visitors, I.deliveries, I.vehicles, I.help] },
-    { title: 'Society', items: [I.notices, I.complaints, I.community, I.bookings, I.adminServices, I.emergency] },
-    { title: 'Money', items: [I.payments, I.accounts] }
+    { title: 'Society', items: [I.notices, I.votes, I.complaints, I.community, I.bookings, I.adminServices, I.emergency] },
+    { title: 'Operations', items: [I.roster, I.upkeep, I.documents] },
+    { title: 'Money', items: [I.payments, I.accounts] },
+    { items: [I.guide] }
   ],
-  staff: [{ items: [I.home, I.complaints, I.notices] }],
-  vendor: [{ items: [I.jobs, I.schedule, I.complaints, I.notices] }]
+  staff: [
+    { items: [I.home, I.shifts, I.upkeep, I.complaints, I.notices, I.documents] },
+    { items: [I.guide] }
+  ],
+  vendor: [
+    { items: [I.jobs, I.schedule, I.complaints, I.notices] },
+    { items: [I.guide] }
+  ]
 }
 
 // The bottom bar on phones: the four things each role does most, then everything else under "More".
 const TABS = {
   resident: [I.home, I.visitors, I.services, I.community],
-  security: [I.home, I.gate, I.visitors, I.help],
+  security: [I.home, I.gate, I.visitors, I.shifts],
   society_admin: [I.home, I.people, I.visitors, I.complaints],
   super_admin: [I.home, I.societies, I.people, I.complaints],
-  staff: [I.home, I.complaints, I.notices],
+  staff: [I.home, I.shifts, I.upkeep, I.complaints],
   vendor: [I.jobs, I.schedule, I.notices]
 }
 
 // Notifications may carry a link to one record (/visitors/abc). Those pages are lists, so open the list.
-const LIST_PAGES = ['visitors', 'deliveries', 'vehicles', 'notices', 'complaints', 'payments', 'bookings']
+const LIST_PAGES = ['visitors', 'deliveries', 'vehicles', 'notices', 'complaints', 'payments', 'bookings', 'documents']
 export const resolveActionUrl = (url) => {
   if (!url || !url.startsWith('/')) return null
   const [, first, second] = url.split('?')[0].split('/')
@@ -247,6 +272,7 @@ const Layout = () => {
   const location = useLocation()
   const [drawer, setDrawer] = useState(false)
   const [dark, toggleTheme] = useTheme()
+  const { t, lang, setLang } = useT()
 
   useEffect(() => setDrawer(false), [location.pathname])
 
@@ -268,7 +294,7 @@ const Layout = () => {
       <nav className="flex-1 overflow-y-auto px-3 pb-3" aria-label="Main">
         {groups.map((g, gi) => (
           <div key={gi} className={gi ? 'mt-4' : ''}>
-            {g.title && <p className="px-3 pb-1 text-[11px] font-bold uppercase tracking-wider text-white/50">{g.title}</p>}
+            {g.title && <p className="px-3 pb-1 text-[11px] font-bold uppercase tracking-wider text-white/50">{t(g.title)}</p>}
             <div className="space-y-0.5">
               {g.items.map(({ to, icon: Icon, label }) => (
                 <NavLink
@@ -284,7 +310,7 @@ const Layout = () => {
                     <>
                       {isActive && <span className="hazard absolute inset-y-1.5 left-0 w-1 rounded-full" aria-hidden="true" />}
                       <Icon size={18} className={isActive ? 'text-amber' : ''} />
-                      {label}
+                      {t(label)}
                     </>
                   )}
                 </NavLink>
@@ -304,7 +330,7 @@ const Layout = () => {
           <span className="min-w-0">
             <span className="block truncate text-sm font-semibold">{user?.name}</span>
             <span className="block truncate text-xs text-white/65">
-              {ROLE_LABEL[user?.role]}
+              {t(ROLE_LABEL[user?.role])}
               {user?.flatNo ? ` · ${user.block ? `${user.block}-` : ''}${user.flatNo}` : ''}
             </span>
           </span>
@@ -313,7 +339,7 @@ const Layout = () => {
           onClick={handleLogout}
           className="mt-1 flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm font-semibold text-white/70 hover:bg-white/5 hover:text-white"
         >
-          <FiLogOut size={18} /> Sign out
+          <FiLogOut size={18} /> {t('Sign out')}
         </button>
       </div>
     </div>
@@ -352,6 +378,24 @@ const Layout = () => {
         </button>
         <Logo className="lg:hidden" />
         <div className="ml-auto flex items-center gap-1">
+          <label className="relative flex items-center">
+            <span className="sr-only">{t('Language')}</span>
+            <FiGlobe size={17} className="pointer-events-none absolute left-2 text-muted" aria-hidden="true" />
+            <select
+              value={lang}
+              onChange={(e) => setLang(e.target.value)}
+              className="h-9 w-[5.5rem] cursor-pointer appearance-none truncate rounded-md bg-transparent py-0 pl-7 pr-1 text-xs font-semibold text-muted hover:text-ink focus:text-ink sm:w-auto sm:pr-2 sm:text-sm"
+            >
+              {LANGUAGES.map((l) => (
+                <option key={l.code} value={l.code}>
+                  {l.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <NavLink to="/help" className="btn-ghost hidden min-h-0 p-2 sm:inline-flex" aria-label={t('User guide')} title={t('User guide')}>
+            <FiBookOpen size={19} />
+          </NavLink>
           <button
             className="btn-ghost min-h-0 p-2"
             onClick={toggleTheme}
@@ -380,7 +424,7 @@ const Layout = () => {
                 className={({ isActive }) => `flex min-h-[3.5rem] flex-col items-center justify-center gap-0.5 px-1 text-[11px] font-semibold ${isActive ? 'text-brand' : 'text-muted'}`}
               >
                 <Icon size={20} aria-hidden="true" />
-                {label}
+                {t(label)}
               </NavLink>
             </li>
           ))}
@@ -388,14 +432,14 @@ const Layout = () => {
             <li className="flex-1">
               <NavLink to="/emergency" className="flex min-h-[3.5rem] flex-col items-center justify-center gap-0.5 px-1 text-[11px] font-bold text-danger">
                 <FiAlertTriangle size={20} aria-hidden="true" />
-                SOS
+                {t('SOS')}
               </NavLink>
             </li>
           )}
           <li className="flex-1">
             <button type="button" onClick={() => setDrawer(true)} className="flex min-h-[3.5rem] w-full flex-col items-center justify-center gap-0.5 px-1 text-[11px] font-semibold text-muted" aria-label="More">
               <FiMoreHorizontal size={20} aria-hidden="true" />
-              More
+              {t('More')}
             </button>
           </li>
         </ul>

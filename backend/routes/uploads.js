@@ -3,7 +3,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const multer = require('multer');
-const { protect } = require('../middleware/auth');
+const { protect, authorize } = require('../middleware/auth');
 
 const router = express.Router();
 
@@ -71,6 +71,53 @@ router.post('/', protect, (req, res) => {
     } catch (e) {
       console.error('Upload error:', e.message);
       res.status(500).json({ success: false, message: 'Could not save the image.' });
+    }
+  });
+});
+
+// @route   POST /api/uploads/document
+// @desc    Upload one PDF (field name "file") to the society's document library. Office only.
+// @access  Private (admins)
+const MAX_DOC_BYTES = 10 * 1024 * 1024;
+const uploadDoc = multer({ storage: multer.memoryStorage(), limits: { fileSize: MAX_DOC_BYTES, files: 1 } });
+
+const toCloudinaryRaw = (buffer, folder, publicId) =>
+  new Promise((resolve, reject) => {
+    const cloudinary = require('cloudinary').v2;
+    cloudinary.config({
+      cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+      api_key: process.env.CLOUDINARY_API_KEY,
+      api_secret: process.env.CLOUDINARY_API_SECRET,
+      secure: true
+    });
+    cloudinary.uploader.upload_stream({ folder, resource_type: 'raw', public_id: publicId }, (err, result) => (err ? reject(err) : resolve(result))).end(buffer);
+  });
+
+router.post('/document', protect, authorize('society_admin', 'super_admin'), (req, res) => {
+  uploadDoc.single('file')(req, res, async (err) => {
+    if (err) {
+      const message = err.code === 'LIMIT_FILE_SIZE' ? 'That file is larger than 10 MB.' : 'The upload failed. Try again.';
+      return res.status(400).json({ success: false, message });
+    }
+    try {
+      if (!req.file) return res.status(400).json({ success: false, message: 'Choose a PDF to upload.' });
+      // Real PDFs start with "%PDF-". The name and the type the browser reports are not trusted.
+      if (req.file.buffer.length < 8 || req.file.buffer.slice(0, 5).toString('ascii') !== '%PDF-') {
+        return res.status(400).json({ success: false, message: 'Only PDF files can be added to the library.' });
+      }
+      const name = String(req.file.originalname || 'document.pdf').replace(/[^\w.\- ]/g, '').slice(0, 100) || 'document.pdf';
+      const id = crypto.randomBytes(16).toString('hex');
+
+      if (cloudinaryReady()) {
+        const result = await toCloudinaryRaw(req.file.buffer, `mygate/${req.user.societyId || 'platform'}/documents`, `${id}.pdf`);
+        return res.status(201).json({ success: true, url: result.secure_url, name });
+      }
+      fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+      fs.writeFileSync(path.join(UPLOAD_DIR, `${id}.pdf`), req.file.buffer);
+      res.status(201).json({ success: true, url: `/uploads/${id}.pdf`, name });
+    } catch (e) {
+      console.error('Document upload error:', e.message);
+      res.status(500).json({ success: false, message: 'Could not save the document.' });
     }
   });
 });

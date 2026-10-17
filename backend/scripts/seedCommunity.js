@@ -9,6 +9,10 @@ const EmergencyContact = require('../models/EmergencyContact');
 const DailyHelp = require('../models/DailyHelp');
 const HelpAttendance = require('../models/HelpAttendance');
 const Expense = require('../models/Expense');
+const SocietyDocument = require('../models/SocietyDocument');
+const Election = require('../models/Election');
+const FacilityTask = require('../models/FacilityTask');
+const Shift = require('../models/Shift');
 const { generateStartOtp } = require('../utils/serviceFlow');
 const { DEFAULT_TZ, todayIn, addDays, zonedToUtc } = require('./../utils/timezone');
 const { labelOf } = require('../utils/serviceCatalog');
@@ -50,10 +54,10 @@ const at = (date, hm, tz) => zonedToUtc(date, hm, tz);
  * @param {Array}  ctx.guards
  * @param {Array}  ctx.notices         saved notices of this society (events get RSVPs)
  */
-const buildCommunitySeed = ({ society, vendorUsers, residents, admin, now = new Date() }) => {
+const buildCommunitySeed = ({ society, vendorUsers, residents, admin, crew = [], now = new Date() }) => {
   const tz = society.timezone || DEFAULT_TZ;
   const today = todayIn(tz, now);
-  const out = { providers: [], requests: [], posts: [], contacts: [], helpers: [], attendance: [], expenses: [], rsvps: [] };
+  const out = { providers: [], requests: [], posts: [], contacts: [], helpers: [], attendance: [], expenses: [], rsvps: [], documents: [], elections: [], tasks: [], shifts: [] };
   if (!residents.length) return out;
 
   // ---- Vendors and their schedules
@@ -232,6 +236,64 @@ const buildCommunitySeed = ({ society, vendorUsers, residents, admin, now = new 
     ['Plumbing repairs, Block A', 'repairs', 6400, 'Ravi Kumar']
   ].forEach(([title, category, amount, vendor], i) => {
     out.expenses.push(new Expense({ _id: oid(), societyId: society._id, title, category, amount, vendor, date: `${thisMonth}-${String(1 + i * 2).padStart(2, '0')}`, createdBy: admin._id }));
+  });
+
+  // ---- Documents library (links only, so no files are needed)
+  [
+    ['Society bye-laws', 'bylaws', 'The rules every resident agrees to.', 'all'],
+    ['Last AGM minutes', 'minutes', 'Decisions taken at the annual general meeting.', 'all'],
+    ['Fire safety circular', 'circular', 'What to do in a fire and where to gather.', 'all'],
+    ['Audited accounts', 'financial', 'Last year audited statement.', 'all'],
+    ['Building insurance policy', 'insurance', 'Cover details for the office.', 'admins']
+  ].forEach(([title, category, description, visibility]) =>
+    out.documents.push(new SocietyDocument({ _id: oid(), societyId: society._id, title, category, description, visibility, url: 'https://example.com/sample-document.pdf', fileName: `${category}.pdf`, uploadedBy: admin._id }))
+  );
+
+  // ---- One vote that is open and one that has closed
+  const day = 24 * 3600 * 1000;
+  out.elections.push(
+    new Election({
+      _id: oid(), societyId: society._id, title: 'Install solar panels on the terrace?', kind: 'resolution', voting: 'per_flat',
+      description: 'Estimated saving on common electricity is about 30 percent.',
+      options: [{ label: 'Yes' }, { label: 'No' }, { label: 'Need more details' }],
+      opensAt: new Date(now.getTime() - day), closesAt: new Date(now.getTime() + 5 * day), createdBy: admin._id
+    }),
+    new Election({
+      _id: oid(), societyId: society._id, title: 'Pick the clubhouse colour', kind: 'resolution', voting: 'per_resident',
+      options: [{ label: 'Sand' }, { label: 'Sky blue' }],
+      opensAt: new Date(now.getTime() - 12 * day), closesAt: new Date(now.getTime() - 5 * day), createdBy: admin._id
+    })
+  );
+
+  // ---- Upkeep jobs: one overdue, one due soon, one fine
+  [
+    ['Water tank cleaning', 'water_tank', 'Terrace', 90, -5, -95, 'Aqua Clean', '9000011111'],
+    ['Fire extinguisher check', 'fire_safety', 'All blocks', 180, 4, -176, 'SafeGuard', '9000022222'],
+    ['Lift servicing', 'lift', 'All lifts', 30, 20, -10, 'OTIS', '9000033333'],
+    ['Generator test run', 'generator', 'Basement', 14, 9, -5, '', '']
+  ].forEach(([name, category, location, intervalDays, dueIn, doneAgo, contractor, contractorPhone]) =>
+    out.tasks.push(new FacilityTask({
+      _id: oid(), societyId: society._id, name, category, location, intervalDays, contractor, contractorPhone,
+      nextDue: addDays(today, dueIn), lastDone: addDays(today, doneAgo), createdBy: admin._id,
+      history: [{ doneOn: addDays(today, doneAgo), byName: 'Office', note: 'Routine job done' }]
+    }))
+  );
+
+  // ---- Shifts for the next three days for the guards and staff
+  crew.forEach((person, i) => {
+    const isGuard = person.role === 'security';
+    for (let d = 0; d < 3; d++) {
+      const date = addDays(today, d);
+      const night = isGuard && (i + d) % 2 === 1;
+      const startTime = night ? '20:00' : '08:00';
+      const endTime = night ? '08:00' : isGuard ? '20:00' : '17:00';
+      const endDate = night ? addDays(date, 1) : date;
+      out.shifts.push(new Shift({
+        _id: oid(), societyId: society._id, userId: person._id, date, startTime, endTime,
+        startAt: zonedToUtc(date, startTime, tz), endAt: zonedToUtc(endDate, endTime, tz),
+        post: isGuard ? (i % 2 ? 'patrol' : 'main_gate') : 'maintenance', createdBy: admin._id
+      }));
+    }
   });
 
   // ---- RSVPs for event notices

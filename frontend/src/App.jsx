@@ -3,6 +3,7 @@ import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-d
 import { Toaster } from 'react-hot-toast'
 import { AuthProvider, useAuth } from './contexts/AuthContext'
 import { SocketProvider } from './contexts/SocketContext'
+import { LanguageProvider } from './contexts/LanguageContext'
 import PrivateRoute, { FullPageSpinner } from './components/PrivateRoute'
 import Layout from './components/Layout'
 import './App.css'
@@ -35,6 +36,12 @@ const CommunityPost = lazy(() => import('./pages/CommunityPost'))
 const Emergency = lazy(() => import('./pages/Emergency'))
 const DailyHelp = lazy(() => import('./pages/DailyHelp'))
 const Accounts = lazy(() => import('./pages/Accounts'))
+const Documents = lazy(() => import('./pages/Documents'))
+const Votes = lazy(() => import('./pages/Votes'))
+const Upkeep = lazy(() => import('./pages/Upkeep'))
+const Roster = lazy(() => import('./pages/Roster'))
+const MyShifts = lazy(() => import('./pages/MyShifts'))
+const Help = lazy(() => import('./pages/Help'))
 const NotFound = lazy(() => import('./pages/NotFound'))
 
 const ADMINS = ['society_admin', 'super_admin']
@@ -49,6 +56,7 @@ const GuestOnly = ({ children }) => {
 
 function App() {
   return (
+    <LanguageProvider>
     <AuthProvider>
       <SocketProvider>
         <Router>
@@ -80,8 +88,14 @@ function App() {
                 <Route path="/emergency" element={<PrivateRoute roles={['resident', 'security', ...ADMINS]}><Emergency /></PrivateRoute>} />
                 <Route path="/daily-help" element={<PrivateRoute roles={['resident', 'security', ...ADMINS]}><DailyHelp /></PrivateRoute>} />
                 <Route path="/accounts" element={<PrivateRoute roles={['resident', ...ADMINS]}><Accounts /></PrivateRoute>} />
+                <Route path="/documents" element={<PrivateRoute roles={['resident', 'security', 'staff', ...ADMINS]}><Documents /></PrivateRoute>} />
+                <Route path="/votes" element={<PrivateRoute roles={['resident', ...ADMINS]}><Votes /></PrivateRoute>} />
+                <Route path="/upkeep" element={<PrivateRoute roles={['resident', 'security', 'staff', ...ADMINS]}><Upkeep /></PrivateRoute>} />
+                <Route path="/roster" element={<PrivateRoute roles={ADMINS}><Roster /></PrivateRoute>} />
+                <Route path="/my-shifts" element={<PrivateRoute roles={['security', 'staff']}><MyShifts /></PrivateRoute>} />
+                <Route path="/help" element={<Help />} />
                 {/* Notification links point at one record; these pages are lists, so open the list. */}
-                {['visitors', 'deliveries', 'vehicles', 'notices', 'complaints', 'payments', 'bookings'].map((base) => (
+                {['visitors', 'deliveries', 'vehicles', 'notices', 'complaints', 'payments', 'bookings', 'documents'].map((base) => (
                   <Route key={base} path={`/${base}/:id`} element={<Navigate to={`/${base}`} replace />} />
                 ))}
                 <Route path="/profile" element={<Profile />} />
@@ -108,6 +122,7 @@ function App() {
         </Router>
       </SocketProvider>
     </AuthProvider>
+    </LanguageProvider>
   )
 }
 

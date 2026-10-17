@@ -180,3 +180,10 @@ This will clear existing data and create fresh dummy data.
 ## Production Warning
 
 ⚠️ **Never run seed scripts in production!** This script is only for development and testing purposes.
+
+## Added in round 3 (per society that has approved residents)
+
+- 5 library documents (one visible to admins only), 2 votes (one open, one closed), 4 upkeep jobs (one overdue, one due soon),
+  and three days of shifts for every guard and staff member (alternating day and night for guards).
+- The seed clears these collections too: documents, votes, ballots, upkeep, shifts.
+- Document links point to a placeholder, replace them before demos that open files.

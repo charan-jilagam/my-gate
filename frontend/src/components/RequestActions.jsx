@@ -1,8 +1,11 @@
 import { useState } from 'react'
-import { FiCheck, FiNavigation, FiPlay, FiRepeat, FiStar, FiX, FiCheckCircle, FiDollarSign } from 'react-icons/fi'
+import { FiCheck, FiCreditCard, FiNavigation, FiPlay, FiRepeat, FiStar, FiX, FiCheckCircle, FiDollarSign } from 'react-icons/fi'
 import api from '../services/api'
 import useAction from '../hooks/useAction'
+import toast from 'react-hot-toast'
 import { Field, Modal, Spinner, StarInput } from './ui'
+import { openCheckout } from '../utils/razorpay'
+import { useAuth } from '../contexts/AuthContext'
 import SlotPicker from './SlotPicker'
 import { dayLabel, timeLabel } from '../utils/services'
 
@@ -15,6 +18,7 @@ const EMPTY_COMPLETE = { finalAmount: '', workSummary: '', paid: true, method: '
 const RequestActions = ({ request, onDone, size = 'md', className = '' }) => {
   const a = request.actions || {}
   const { busy, run } = useAction(onDone)
+  const { user } = useAuth()
   const [dialog, setDialog] = useState(null)
   const [text, setText] = useState('')
   const [complete, setComplete] = useState(EMPTY_COMPLETE)
@@ -45,6 +49,22 @@ const RequestActions = ({ request, onDone, size = 'md', className = '' }) => {
     if (ok) close()
     return ok
   }
+
+  // Opens Razorpay for a completed job. The server marks it paid only after it checks Razorpay's signature.
+  const payOnline = () =>
+    run('online', async () => {
+      const { data } = await api.post(`${base}/pay-online`)
+      let response
+      try {
+        response = await openCheckout({ keyId: data.keyId, order: data.order, name: 'MyGate', description: request.title, prefill: { name: user?.name, email: user?.email, contact: user?.phone } })
+      } catch (e) {
+        if (e?.dismissed) return null // closed the window: nothing to report
+        throw { response: { data: { message: e?.message || 'The payment did not go through. You have not been charged.' } } }
+      }
+      await api.post(`${base}/pay-verify`, response)
+      toast.success('Payment received. Thank you!')
+      return true
+    })
 
   const anything = Object.values(a).some(Boolean)
   if (!anything) return null
@@ -80,6 +100,11 @@ const RequestActions = ({ request, onDone, size = 'md', className = '' }) => {
         {a.markPaid && (
           <button className={`btn-secondary${sm}`} disabled={!!busy} onClick={() => open('pay')}>
             <FiDollarSign size={15} /> Mark as paid
+          </button>
+        )}
+        {a.payOnline && (
+          <button className={`btn-primary${sm}`} disabled={!!busy} onClick={payOnline}>
+            {busy === 'online' ? <Spinner className="h-4 w-4" /> : <FiCreditCard size={15} />} Pay online
           </button>
         )}
         {a.review && (

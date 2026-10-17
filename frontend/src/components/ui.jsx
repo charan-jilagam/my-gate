@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { FiX, FiAlertCircle, FiInbox } from 'react-icons/fi'
 import { FaRegStar, FaStar } from 'react-icons/fa'
 import { imgSrc } from '../utils/media'
+import { useT } from '../contexts/LanguageContext'
 
 /* ---------- Formatting helpers ---------- */
 
@@ -33,15 +34,18 @@ export const errorMessage = (error, fallback = 'Something went wrong. Try again.
 
 /* ---------- Page structure ---------- */
 
-export const PageHeader = ({ title, subtitle, action }) => (
-  <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
-    <div className="min-w-0">
-      <h1 className="text-2xl font-bold sm:text-3xl">{title}</h1>
-      {subtitle && <p className="mt-1 max-w-prose text-sm text-muted">{subtitle}</p>}
+export const PageHeader = ({ title, subtitle, action }) => {
+  const { t } = useT()
+  return (
+    <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
+      <div className="min-w-0">
+        <h1 className="text-2xl font-bold sm:text-3xl">{t(title)}</h1>
+        {subtitle && <p className="mt-1 max-w-prose text-sm text-muted">{t(subtitle)}</p>}
+      </div>
+      {action && <div className="flex shrink-0 items-center gap-2">{action}</div>}
     </div>
-    {action && <div className="flex shrink-0 items-center gap-2">{action}</div>}
-  </div>
-)
+  )
+}
 
 export const Spinner = ({ className = 'h-5 w-5' }) => (
   <span
@@ -51,31 +55,37 @@ export const Spinner = ({ className = 'h-5 w-5' }) => (
   />
 )
 
-export const EmptyState = ({ icon: Icon = FiInbox, title, text, action }) => (
-  <div className="flex flex-col items-center px-6 py-14 text-center">
-    <span className="mb-3 grid h-12 w-12 place-items-center rounded-full bg-sunken text-muted">
-      <Icon size={22} />
-    </span>
-    <p className="font-display text-lg font-bold">{title}</p>
-    {text && <p className="mt-1 max-w-sm text-sm text-muted">{text}</p>}
-    {action && <div className="mt-4">{action}</div>}
-  </div>
-)
+export const EmptyState = ({ icon: Icon = FiInbox, title, text, action }) => {
+  const { t } = useT()
+  return (
+    <div className="flex flex-col items-center px-6 py-14 text-center">
+      <span className="mb-3 grid h-12 w-12 place-items-center rounded-full bg-sunken text-muted">
+        <Icon size={22} />
+      </span>
+      <p className="font-display text-lg font-bold">{t(title)}</p>
+      {text && <p className="mt-1 max-w-sm text-sm text-muted">{t(text)}</p>}
+      {action && <div className="mt-4">{action}</div>}
+    </div>
+  )
+}
 
-export const ErrorState = ({ message, onRetry }) => (
-  <div className="flex flex-col items-center px-6 py-14 text-center">
-    <span className="mb-3 grid h-12 w-12 place-items-center rounded-full bg-danger-soft text-danger">
-      <FiAlertCircle size={22} />
-    </span>
-    <p className="font-display text-lg font-bold">Could not load this page</p>
-    <p className="mt-1 max-w-sm text-sm text-muted">{message || 'Check your connection and try again.'}</p>
-    {onRetry && (
-      <button className="btn-secondary mt-4" onClick={onRetry}>
-        Try again
-      </button>
-    )}
-  </div>
-)
+export const ErrorState = ({ message, onRetry }) => {
+  const { t } = useT()
+  return (
+    <div className="flex flex-col items-center px-6 py-14 text-center">
+      <span className="mb-3 grid h-12 w-12 place-items-center rounded-full bg-danger-soft text-danger">
+        <FiAlertCircle size={22} />
+      </span>
+      <p className="font-display text-lg font-bold">{t('Could not load this page')}</p>
+      <p className="mt-1 max-w-sm text-sm text-muted">{message || t('Check your connection and try again.')}</p>
+      {onRetry && (
+        <button className="btn-secondary mt-4" onClick={onRetry}>
+          {t('Try again')}
+        </button>
+      )}
+    </div>
+  )
+}
 
 export const ListSkeleton = ({ rows = 5 }) => (
   <div className="divide-y divide-line" aria-hidden="true">
@@ -128,28 +138,34 @@ const STATUS_TONE = {
 }
 
 export const StatusTag = ({ status, label }) => {
+  const { t } = useT()
   const tone = STATUS_TONE[status] || 'neutral'
-  return <span className={`tag-${tone}`}>{label || titleCase(status)}</span>
+  return <span className={`tag-${tone}`}>{t(label || titleCase(status))}</span>
 }
 
 /* ---------- Forms ---------- */
 
-export const Field = ({ label, hint, error, children, htmlFor, className = '' }) => (
-  <div className={className}>
-    {label && (
-      <label className="label" htmlFor={htmlFor}>
-        {label}
-      </label>
-    )}
-    {children}
-    {hint && !error && <p className="mt-1 text-xs text-muted">{hint}</p>}
-    {error && <p className="mt-1 text-xs font-medium text-danger">{error}</p>}
-  </div>
-)
+export const Field = ({ label, hint, error, children, htmlFor, className = '' }) => {
+  const { t } = useT()
+  return (
+    <div className={className}>
+      {label && (
+        <label className="label" htmlFor={htmlFor}>
+          {t(label)}
+        </label>
+      )}
+      {children}
+      {hint && !error && <p className="mt-1 text-xs text-muted">{t(hint)}</p>}
+      {error && <p className="mt-1 text-xs font-medium text-danger">{error}</p>}
+    </div>
+  )
+}
 
 /* ---------- Modal ---------- */
 
-export const Modal = ({ open, onClose, title, children, footer, size = 'md' }) => {
+export const Modal = ({ open, onClose, title: rawTitle, children, footer, size = 'md' }) => {
+  const { t } = useT()
+  const title = t(rawTitle)
   const panelRef = useRef(null)
   const onCloseRef = useRef(onClose)
   onCloseRef.current = onClose
@@ -336,31 +352,37 @@ export const StarInput = ({ value, onChange, size = 30 }) => (
 )
 
 /** Pill tabs. items: [{ key, label, count? }] */
-export const Tabs = ({ items, value, onChange, label = 'Sections' }) => (
-  <div className="mb-4 flex flex-wrap gap-2" role="tablist" aria-label={label}>
-    {items.map((t) => (
-      <button
-        key={t.key}
-        role="tab"
-        aria-selected={value === t.key}
-        onClick={() => onChange(t.key)}
-        className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-semibold transition-colors ${
-          value === t.key ? 'bg-brand text-brand-ink' : 'bg-surface text-muted ring-1 ring-line hover:text-ink'
-        }`}
-      >
-        {t.label}
-        {t.count > 0 && (
-          <span className={`grid h-5 min-w-[20px] place-items-center rounded-full px-1 text-[11px] font-bold ${value === t.key ? 'bg-white/20' : 'bg-amber text-[#1b1400]'}`}>{t.count}</span>
-        )}
-      </button>
-    ))}
-  </div>
-)
+export const Tabs = ({ items, value, onChange, label = 'Sections' }) => {
+  const { t } = useT()
+  return (
+    <div className="mb-4 flex flex-wrap gap-2" role="tablist" aria-label={t(label)}>
+      {items.map((item) => (
+        <button
+          key={item.key}
+          role="tab"
+          aria-selected={value === item.key}
+          onClick={() => onChange(item.key)}
+          className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-semibold transition-colors ${
+            value === item.key ? 'bg-brand text-brand-ink' : 'bg-surface text-muted ring-1 ring-line hover:text-ink'
+          }`}
+        >
+          {t(item.label)}
+          {item.count > 0 && (
+            <span className={`grid h-5 min-w-[20px] place-items-center rounded-full px-1 text-[11px] font-bold ${value === item.key ? 'bg-white/20' : 'bg-amber text-[#1b1400]'}`}>{item.count}</span>
+          )}
+        </button>
+      ))}
+    </div>
+  )
+}
 
-export const Stat = ({ label, value, hint, tone }) => (
-  <div className="panel px-4 py-3.5">
-    <p className={`font-display text-2xl font-extrabold ${tone === 'warn' ? 'text-danger' : ''}`}>{value}</p>
-    <p className="text-xs font-semibold text-ink">{label}</p>
-    {hint && <p className="text-xs text-muted">{hint}</p>}
-  </div>
-)
+export const Stat = ({ label, value, hint, tone }) => {
+  const { t } = useT()
+  return (
+    <div className="panel px-4 py-3.5">
+      <p className={`font-display text-2xl font-extrabold ${tone === 'warn' ? 'text-danger' : ''}`}>{value}</p>
+      <p className="text-xs font-semibold text-ink">{t(label)}</p>
+      {hint && <p className="text-xs text-muted">{t(hint)}</p>}
+    </div>
+  )
+}

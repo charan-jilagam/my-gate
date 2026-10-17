@@ -13,6 +13,7 @@ const { presentRequest, firstName, flatLabel, humanDate, humanTime } = require('
 const { createServicePass, withdrawServicePass, moveServicePass } = require('../utils/servicePass');
 const { cleanImages } = require('../utils/imageUrl');
 const { safeNotify } = require('../utils/safeNotify');
+const gateway = require('../utils/gateway');
 
 router.param('id', scopeToSociety(ServiceRequest));
 
@@ -530,6 +531,72 @@ router.put(
       return undefined;
     } catch (error) {
       return serverError(res, error, 'Mark service request paid');
+    }
+  }
+);
+
+// @route   POST /api/service-requests/:id/pay-online
+// @desc    Resident starts an online payment for a completed job. Returns a Razorpay order to open checkout with.
+router.post('/:id/pay-online', protect, authorize('resident'), async (req, res) => {
+  try {
+    const razorpay = gateway.client();
+    if (!razorpay) return fail(res, 503, 'Online payment is not set up for this society. Pay the vendor directly.');
+    const request = await loadRequest(req.params.id);
+    if (!request) return fail(res, 404, 'Request not found');
+    if (idOf(request.residentId) !== String(req.user.id)) return fail(res, 403, 'This is not your booking.');
+    if (request.status !== 'completed') return fail(res, 409, 'You can pay once the vendor completes the job.');
+    if (request.paymentStatus === 'paid') return fail(res, 409, 'This job is already paid.');
+    if (!(Number(request.finalAmount) >= 1)) return fail(res, 409, 'There is no amount to pay.');
+
+    const order = await razorpay.orders.create({
+      amount: Math.round(request.finalAmount * 100),
+      currency: 'INR',
+      receipt: `svc_${request._id}`,
+      notes: { serviceRequestId: String(request._id), residentId: String(req.user.id) }
+    });
+    // Remember which order belongs to this job, so a signature for some other order cannot mark it paid.
+    await ServiceRequest.updateOne({ _id: request._id, paymentStatus: { $ne: 'paid' } }, { $set: { razorpayOrderId: order.id } });
+    res.json({ success: true, order: { id: order.id, amount: order.amount, currency: order.currency }, keyId: process.env.RAZORPAY_KEY_ID });
+    return undefined;
+  } catch (error) {
+    return serverError(res, error, 'Start service payment');
+  }
+});
+
+// @route   POST /api/service-requests/:id/pay-verify
+// @desc    Resident confirms the payment. The signature proves Razorpay (not the browser) says it was paid.
+router.post(
+  '/:id/pay-verify',
+  protect,
+  authorize('resident'),
+  [body('razorpay_order_id').isString().notEmpty(), body('razorpay_payment_id').isString().notEmpty(), body('razorpay_signature').isString().notEmpty()],
+  async (req, res) => {
+    try {
+      if (invalid(req, res)) return undefined;
+      if (!gateway.enabled()) return fail(res, 503, 'Online payment is not set up for this society.');
+      const request = await ServiceRequest.findById(req.params.id).select('+razorpayOrderId');
+      if (!request) return fail(res, 404, 'Request not found');
+      if (idOf(request.residentId) !== String(req.user.id)) return fail(res, 403, 'This is not your booking.');
+      if (request.paymentStatus === 'paid') return fail(res, 409, 'This job is already paid.');
+
+      const { razorpay_order_id: orderId, razorpay_payment_id: paymentId, razorpay_signature: signature } = req.body;
+      if (!request.razorpayOrderId || request.razorpayOrderId !== orderId || !gateway.signatureOk(orderId, paymentId, signature)) {
+        return fail(res, 400, 'We could not verify that payment. If money left your account, contact the society office with the payment id.');
+      }
+
+      const paid = await ServiceRequest.findOneAndUpdate(
+        { _id: request._id, paymentStatus: { $ne: 'paid' } },
+        { $set: { paymentStatus: 'paid', paymentMethod: 'online', paidAt: new Date(), razorpayPaymentId: paymentId } },
+        { new: true }
+      );
+      if (!paid) return fail(res, 409, 'This job is already paid.');
+
+      const fresh = await loadRequest(request._id);
+      await tell(req, fresh.providerUserId, fresh, { title: 'Paid online', message: `${fresh.residentId.name} paid ₹${fresh.finalAmount || 0} online for ${fresh.title}.` });
+      respond(res, req, fresh, 'Payment received. Thank you!');
+      return undefined;
+    } catch (error) {
+      return serverError(res, error, 'Verify service payment');
     }
   }
 );

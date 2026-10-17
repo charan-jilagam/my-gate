@@ -10,16 +10,31 @@ const society = { _id: oid(), timezone: 'Asia/Kolkata', contactNumber: '98765432
 const user = (over) => new User({ _id: oid(), name: 'Resident', email: `${oid()}@x.com`, phone: '9000000000', password: 'pw12345678', societyId: society._id, isApproved: true, ...over });
 
 const build = (now = new Date('2026-10-17T09:00:00Z')) => {
+  const crew = [user({ name: 'Guard 1', role: 'security' }), user({ name: 'Guard 2', role: 'security' }), user({ name: 'Cleaner', role: 'staff' })];
   const residents = [0, 1, 2, 3, 4].map((i) => user({ name: `Resident ${i}`, role: 'resident', flatNo: `10${i}`, block: 'A Block' }));
   const admin = user({ name: 'Admin', role: 'society_admin' });
   const vendorUsers = VENDORS.map((_, i) => new User({ _id: oid(), ...vendorUserData(society, i) }));
-  return { vendorUsers, residents, ...buildCommunitySeed({ society, vendorUsers, residents, admin, now }) };
+  return { vendorUsers, residents, ...buildCommunitySeed({ society, vendorUsers, residents, admin, crew, now }) };
 };
+
+describe('seed data for the newer modules', () => {
+  test('one open vote, one closed vote, upkeep in every state, no duplicate shifts', () => {
+    const s = build();
+    expect(s.elections.map((e) => e.phase(new Date('2026-10-17T09:00:00Z'))).sort()).toEqual(['closed', 'open']);
+    const today = '2026-10-17';
+    expect(s.tasks.some((t) => t.nextDue < today)).toBe(true);
+    expect(s.tasks.some((t) => t.nextDue > today)).toBe(true);
+    expect(s.documents.some((d) => d.visibility === 'admins')).toBe(true);
+    const keys = s.shifts.map((x) => `${x.userId}|${x.date}|${x.startTime}`);
+    expect(new Set(keys).size).toBe(keys.length);
+    s.shifts.forEach((x) => expect(x.endAt > x.startAt).toBe(true));
+  });
+});
 
 describe('seed data for services and community', () => {
   test('every document passes its schema', async () => {
     const s = build();
-    const docs = [...s.providers, ...s.requests, ...s.posts, ...s.contacts, ...s.helpers, ...s.attendance, ...s.expenses, ...s.vendorUsers];
+    const docs = [...s.providers, ...s.requests, ...s.posts, ...s.contacts, ...s.helpers, ...s.attendance, ...s.expenses, ...s.vendorUsers, ...s.documents, ...s.elections, ...s.tasks, ...s.shifts];
     expect(docs.length).toBeGreaterThan(60);
     for (const doc of docs) {
       await expect(doc.validate()).resolves.toBeUndefined();

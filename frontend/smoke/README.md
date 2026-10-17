@@ -2,13 +2,13 @@
 
 These open the built app in a real browser with the API faked (no database or backend needed), then check that every
 page renders, nothing throws, nothing scrolls sideways on a phone, and the main flows send the right requests:
-booking a service, booking an amenity, SOS, event RSVP, daily-help check-in and notification links.
+booking a service, booking an amenity, SOS, event RSVP, daily-help check-in, notification links, language switch, guide isolation per role, voting, upkeep, documents, shift roster and clock-in, and paying a bill online (Razorpay is stubbed).
 
 ```bash
 cd frontend
 npm run build && npx vite preview --port 4173 &
 pip install playwright && playwright install chromium     # once
-python3 smoke/smoke.py     # every page for resident, vendor, admin and guard; prints PROBLEMS: none when clean
+python3 smoke/smoke.py     # every page for resident, vendor, admin, guard, staff and super admin; prints PROBLEMS: none when clean
 python3 smoke/flows.py     # interactive flows; prints OK for each and the requests that were sent
 ```
 

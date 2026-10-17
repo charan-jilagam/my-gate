@@ -17,6 +17,11 @@ const EmergencyContact = require('../models/EmergencyContact');
 const DailyHelp = require('../models/DailyHelp');
 const HelpAttendance = require('../models/HelpAttendance');
 const Expense = require('../models/Expense');
+const SocietyDocument = require('../models/SocietyDocument');
+const Election = require('../models/Election');
+const Ballot = require('../models/Ballot');
+const FacilityTask = require('../models/FacilityTask');
+const Shift = require('../models/Shift');
 const { VENDORS, vendorUserData, buildCommunitySeed } = require('./seedCommunity');
 require('dotenv').config();
 
@@ -43,7 +48,7 @@ const seedData = async () => {
     await Payment.deleteMany({});
     await Booking.deleteMany({});
     await Notification.deleteMany({});
-    for (const Model of [ServiceProvider, ServiceRequest, Post, EmergencyAlert, EmergencyContact, DailyHelp, HelpAttendance, Expense]) {
+    for (const Model of [ServiceProvider, ServiceRequest, Post, EmergencyAlert, EmergencyContact, DailyHelp, HelpAttendance, Expense, SocietyDocument, Election, Ballot, FacilityTask, Shift]) {
       await Model.deleteMany({});
     }
 
@@ -485,7 +490,10 @@ const seedData = async () => {
       }
       const here = residents.filter((r) => r.isApproved && String(r.societyId) === String(society._id));
       const admin = societyAdmins.find((a) => String(a.societyId) === String(society._id));
-      const built = buildCommunitySeed({ society, vendorUsers, residents: here, admin });
+      const built = buildCommunitySeed({
+        society, vendorUsers, residents: here, admin,
+        crew: [...securityGuards, ...staff].filter((p) => String(p.societyId) === String(society._id))
+      });
       if (!here.length) continue;
       await ServiceProvider.insertMany(built.providers);
       await ServiceRequest.insertMany(built.requests);
@@ -494,6 +502,10 @@ const seedData = async () => {
       await DailyHelp.insertMany(built.helpers);
       await HelpAttendance.insertMany(built.attendance);
       await Expense.insertMany(built.expenses);
+      await SocietyDocument.insertMany(built.documents);
+      await Election.insertMany(built.elections);
+      await FacilityTask.insertMany(built.tasks);
+      await Shift.insertMany(built.shifts);
       // Event notices get a few replies
       await Notice.updateMany({ societyId: society._id, type: 'event' }, { $set: { rsvps: built.rsvps } });
       counts.vendors += vendorUsers.length;
