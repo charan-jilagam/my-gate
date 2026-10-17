@@ -16,8 +16,13 @@ const Help = () => {
   const sections = manual?.sections || []
   const q = query.trim().toLowerCase()
   const shown = useMemo(
-    () => (q ? sections.filter((s) => [s.title, s.summary, ...(s.steps || []), ...(s.tips || [])].join(' ').toLowerCase().includes(q)) : sections),
-    [sections, q]
+    () => {
+      if (!q) return sections
+      // Search what the reader sees (the translated sentence) as well as the English it came from.
+      const words = (s) => [s.title, s.summary, ...(s.steps || []), ...(s.tips || [])]
+      return sections.filter((s) => words(s).flatMap((w) => [w, t(w)]).join(' ').toLowerCase().includes(q))
+    },
+    [sections, q, t]
   )
   const current = shown.find((s) => s.id === active) || shown[0]
 

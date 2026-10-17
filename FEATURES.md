@@ -85,7 +85,7 @@ a test fails if a menu screen has no section or a link points to a screen that d
 | **Upkeep** | see when tanks, lifts, fire gear etc. were last done and are next due | add recurring jobs, contractor, notes; record work done with cost | record that a job was done (no cost) |
 | **Shift roster** | n/a | plan shifts for guards and staff (up to 31 days at once, overnight allowed), remove unstarted shifts | `My shifts`: see own shifts, clock in (from 30 min early) and out |
 | **Pay service bills online** | pay a completed booking by Razorpay; amount is set by the server and the payment is signature-checked | sees payments as "online" | n/a |
-| **Languages** | English, Hindi, Telugu from the header; the choice is remembered | same | same |
+| **Languages** | English, Hindi, Telugu from the header; the choice is remembered. Menus, headings, table headers, statuses, dates and the whole guide are translated on screen; names, notes and other text people typed stay as entered | same | same |
 
 Rules worth knowing:
 
@@ -130,3 +130,10 @@ before going live.
 - The tests mock the database, see "What that cannot prove" above. Also unproven without MongoDB: vote double-ballot and duplicate-shift unique indexes, and the vote tally aggregation.
 - Votes count flats or people as entered by the office; there is no proof-of-ownership check.
 - Payment checkout was tested against a stub, not the live Razorpay window.
+
+
+## Nivora (app name) and translation notes
+
+- The app is called **Nivora** ("Every Community. One Platform."). Technical identifiers were deliberately kept: database name `mygate`, seed emails `@mygate.com`, Cloudinary folder `mygate/`, repo URLs.
+- Translation works by a runtime dictionary (`frontend/src/i18n/rows*.js`, rows of `[English, Hindi, Telugu]`) plus rules for dates, numbers and `{0}` templates. `npm run check:i18n` checks the tables; `python3 smoke/i18n_audit.py <lang> <role>` lists English still on screen.
+- Known limits: the Hindi/Telugu wording should be reviewed by a native speaker; push/e-mail text built on the server stays English; user-entered data is not translated.

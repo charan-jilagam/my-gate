@@ -84,3 +84,20 @@ describe('manual covers every screen in the menu', () => {
     });
   });
 });
+
+describe('guide translations', () => {
+  // The guide text is translated on screen from frontend/src/i18n/rows5.js; a new or reworded sentence without a row would silently stay English.
+  const rows = require('fs').readFileSync(require('path').join(__dirname, '../../frontend/src/i18n/rows5.js'), 'utf8');
+  const strings = new Set();
+  const walk = (o) => {
+    if (typeof o === 'string') strings.add(o.trim());
+    else if (Array.isArray(o)) o.forEach(walk);
+    else if (o && typeof o === 'object') Object.entries(o).forEach(([k, v]) => !['id', 'path', 'covers', 'role'].includes(k) && walk(v));
+  };
+  Object.values(manuals).forEach(walk);
+
+  test('every sentence of every guide has a Hindi and Telugu row', () => {
+    const missing = [...strings].filter((s) => !rows.includes(JSON.stringify(s)));
+    expect(missing).toEqual([]);
+  });
+});

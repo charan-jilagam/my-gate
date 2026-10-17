@@ -259,7 +259,7 @@ mygate/
 ## 🧪 Testing
 
 ```bash
-# Backend tests (390 tests)
+# Backend tests (391 tests)
 cd backend
 npm test
 

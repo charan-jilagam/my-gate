@@ -14,3 +14,6 @@ python3 smoke/flows.py     # interactive flows; prints OK for each and the reque
 
 Set `SMOKE_URL` for another address, `SMOKE_OUT` for where screenshots go, `CHROMIUM_PATH` to use a specific browser.
 They use fixtures defined at the top of `smoke.py`, so update those when an API response changes shape.
+
+python3 smoke/i18n_audit.py te resident   # lists English text still shown in a language (people-entered data and brand names are expected)
+npm run check:i18n                         # translation tables are consistent

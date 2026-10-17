@@ -21,7 +21,7 @@ const aboutGuide = {
     'Tap Open this screen on a topic to jump straight to it. You can come back to the guide any time with the book icon at the top of every page.',
     'You only see the guide for your own role. Other roles have different screens, so their guides are separate.'
   ],
-  tips: ['Change the language with the globe menu at the top. The menus and screen titles change; this guide stays in English.']
+  tips: ['Change the language with the globe menu at the top. The menus, screen titles and this guide all change.']
 };
 
 const manuals = Object.fromEntries(Object.entries(raw).map(([role, m]) => [role, { ...m, sections: [aboutGuide, ...m.sections] }]));

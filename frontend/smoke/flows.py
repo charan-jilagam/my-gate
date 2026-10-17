@@ -186,9 +186,19 @@ def translate_data(page):
         page.wait_for_selector(f'text={want}', state='attached')
     assert 'వ్యక్తిగతం' not in page.inner_text('body')
 
+def guide_in_telugu(page):
+    page.goto(smoke.BASE + '/help'); page.wait_for_selector('main')
+    page.locator('header select').select_option('te')
+    page.wait_for_selector('text=నివాసి గైడ్', state='attached')          # the guide itself is translated
+    page.fill('input[type=search], input[placeholder]', 'చెల్లింపు')       # and can be searched in Telugu
+    page.wait_for_timeout(600)
+    body = page.inner_text('body')
+    assert 'డౌన్‌లోడ్' in body or 'చెల్లింపు' in body
+    assert page.locator('main li button').count() < 6, 'search should narrow the topic list'
+
 def main():
   for role, name, fn in [('resident', 'book service', book_service), ('resident', 'amenity booking', amenity), ('resident', 'SOS', sos), ('resident', 'RSVP', rsvp), ('resident', 'notification deep link', notif), ('security', 'gate check', gate_check),
-                         ('resident', 'language switch', language), ('resident', 'data and headings translate and restore', translate_data), ('resident', 'guide is role-only and searchable', help_isolation), ('society_admin', 'admin guide', help_admin),
+                         ('resident', 'language switch', language), ('resident', 'data and headings translate and restore', translate_data), ('resident', 'guide is role-only and searchable', help_isolation), ('resident', 'guide is translated and searchable in Telugu', guide_in_telugu), ('society_admin', 'admin guide', help_admin),
                          ('resident', 'cast a vote', vote), ('staff', 'mark upkeep done', mark_done), ('society_admin', 'add shifts', add_shift),
                          ('society_admin', 'create a vote', new_vote), ('society_admin', 'add a document', add_document),
                          ('resident', 'pay a service bill online', pay_online), ('super_admin', 'roster as platform admin', super_roster), ('security', 'clock in', clock_in)]:

@@ -5,7 +5,7 @@ module.exports = {
   sections: [
     {
       id: 'start',
-      title: 'Signing in',
+      title: 'How to sign in',
       covers: ['/login', '/forgot-password', '/register'],
       summary: 'Sign in at the start of your shift.',
       steps: ['Sign in with your email and password. If you just signed up, the society office must approve you first.', 'Forgot your password? Use Forgot password and follow the email link.', 'Keep the app open on the gate phone or tablet; new alerts appear live.'],

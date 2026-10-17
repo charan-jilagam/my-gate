@@ -5,7 +5,7 @@ module.exports = {
   sections: [
     {
       id: 'start',
-      title: 'Signing in',
+      title: 'How to sign in',
       covers: ['/login', '/forgot-password', '/register'],
       summary: 'Sign in and find your way around.',
       steps: ['Sign in with your email and password. A new account must be approved by the society office first.', 'Use Forgot password if you cannot remember it.', 'The menu shows only what you can use: Home, My shifts, Upkeep, Complaints, Notices and Documents.'],
