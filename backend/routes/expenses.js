@@ -7,7 +7,7 @@ const Society = require('../models/Society');
 const mongoose = require('mongoose');
 const { protect, authorize, scopeToSociety } = require('../middleware/auth');
 const { DEFAULT_TZ, isValidDate, todayIn, zonedToUtc, addDays } = require('../utils/timezone');
-const { fail, invalid, serverError, societyFor } = require('../utils/routeKit');
+const { fail, invalid, serverError, societyFor, isSafeUrl } = require('../utils/routeKit');
 
 router.param('id', scopeToSociety(Expense));
 
@@ -20,7 +20,8 @@ const rules = [
   body('date').custom(isValidDate).withMessage('Pick a valid date'),
   body('category').optional().isIn(Expense.CATEGORIES).withMessage('Unknown category'),
   body('vendor').optional().isString().isLength({ max: 80 }),
-  body('note').optional().isString().isLength({ max: 300 })
+  body('note').optional().isString().isLength({ max: 300 }),
+  body('receipt').optional({ checkFalsy: true }).custom(isSafeUrl).withMessage('The receipt link is not valid')
 ];
 
 const nextMonth = (m) => {

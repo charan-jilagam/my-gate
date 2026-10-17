@@ -64,14 +64,21 @@ describe('SOS', () => {
 
   test('a guard acknowledges once; the resident is told; a second guard gets a conflict', async () => {
     const alert = openAlert();
+    const acknowledged = openAlert({ _id: alert._id, status: 'acknowledged', acknowledgedBy: guard._id });
     mockingoose(EmergencyAlert).toReturn(alert, 'findOne');
+    mockingoose(EmergencyAlert).toReturn(acknowledged, 'findOneAndUpdate');
     const ok = await h.api().put(`/api/emergency/alerts/${alert._id}/acknowledge`).set(h.auth(guard));
     expect(ok.status).toBe(200);
     expect(h.savedDocs(Notification).map((n) => String(n.userId))).toEqual([String(resident._id)]);
+    // The claim is one conditional update: it only applies while the alert is still active.
+    const [claim] = h.callsTo(EmergencyAlert, 'findOneAndUpdate');
+    expect(claim.filter.status).toEqual({ $in: ['active'] });
+    expect(claim.update.$set).toMatchObject({ status: 'acknowledged', acknowledgedBy: String(guard._id) });
 
-    const taken = openAlert({ status: 'acknowledged' });
-    mockingoose(EmergencyAlert).toReturn(taken, 'findOne');
-    expect((await h.api().put(`/api/emergency/alerts/${taken._id}/acknowledge`).set(h.auth(admin))).status).toBe(409);
+    // A second guard arrives a moment later: the conditional update matches nothing.
+    mockingoose(EmergencyAlert).toReturn(acknowledged, 'findOne');
+    mockingoose(EmergencyAlert).toReturn(null, 'findOneAndUpdate');
+    expect((await h.api().put(`/api/emergency/alerts/${alert._id}/acknowledge`).set(h.auth(admin))).status).toBe(409);
   });
 
   test('residents cannot respond to alerts; resolved alerts cannot be reopened', async () => {
@@ -81,6 +88,19 @@ describe('SOS', () => {
     const done = openAlert({ status: 'resolved' });
     mockingoose(EmergencyAlert).toReturn(done, 'findOne');
     expect((await h.api().put(`/api/emergency/alerts/${done._id}/resolve`).set(h.auth(guard))).status).toBe(409);
+  });
+
+  test('open alerts are fetched separately so a long history cannot push one out of the list', async () => {
+    const queries = [];
+    mockingoose(EmergencyAlert).toReturn((q) => {
+      queries.push({ filter: q.getQuery(), limit: q.getOptions().limit });
+      return [];
+    }, 'find');
+    await h.api().get('/api/emergency/alerts?limit=5').set(h.auth(guard));
+    const open = queries.find((x) => x.filter.status && x.filter.status.$ne === 'resolved');
+    const done = queries.find((x) => x.filter.status === 'resolved');
+    expect(open.limit).toBe(100);
+    expect(done.limit).toBe(5);
   });
 
   test('responders list the society open alerts first; residents only their own', async () => {
@@ -171,14 +191,60 @@ describe('daily help', () => {
     expect(h.savedDocs(Notification)[0].title).toBe('Lakshmi has arrived');
   });
 
-  test('the next check closes the open attendance', async () => {
+  test('the next check closes the open attendance in one conditional update', async () => {
     const help = makeHelp();
-    const open = new HelpAttendance({ _id: h.oid(), societyId: h.SOCIETY_ID, helpId: help._id, date: '2026-10-19', checkIn: new Date(Date.now() - 3600e3) });
+    const closed = new HelpAttendance({ _id: h.oid(), societyId: h.SOCIETY_ID, helpId: help._id, date: '2026-10-19', checkIn: new Date(Date.now() - 3600e3), checkOut: new Date(), open: false });
     mockingoose(DailyHelp).toReturn(help, 'findOne');
-    mockingoose(HelpAttendance).toReturn(open, 'findOne');
+    mockingoose(HelpAttendance).toReturn(closed, 'findOneAndUpdate');
     const res = await h.api().post('/api/daily-help/check').set(h.auth(guard)).send({ code: '482913' });
     expect(res.body.action).toBe('out');
-    expect(h.savedDocs(HelpAttendance)[0].checkOut).toBeInstanceOf(Date);
+    const [close] = h.callsTo(HelpAttendance, 'findOneAndUpdate');
+    expect(close.filter).toMatchObject({ open: true });
+    expect(close.update.$set.open).toBe(false);
+    expect(h.savedDocs(HelpAttendance)).toHaveLength(0); // nothing new was created
+  });
+
+  test('forgotten visits older than a day are closed so they do not block today', async () => {
+    mockingoose(DailyHelp).toReturn(makeHelp(), 'findOne');
+    await h.api().post('/api/daily-help/check').set(h.auth(guard)).send({ code: '482913' });
+    const [stale] = h.callsTo(HelpAttendance, 'updateMany');
+    expect(stale.filter.open).toBe(true);
+    expect(stale.filter.checkIn.$lt).toBeInstanceOf(Date);
+    expect(stale.update.$set).toEqual({ open: false });
+  });
+
+  test('a double tap that loses the race for the open visit gets a clear conflict', async () => {
+    mockingoose(DailyHelp).toReturn(makeHelp(), 'findOne');
+    const real = HelpAttendance.create;
+    HelpAttendance.create = jest.fn().mockRejectedValue(Object.assign(new Error('dup'), { code: 11000 }));
+    try {
+      const res = await h.api().post('/api/daily-help/check').set(h.auth(guard)).send({ code: '482913' });
+      expect(res.status).toBe(409);
+    } finally {
+      HelpAttendance.create = real;
+    }
+  });
+
+  test('linking tells the households that already use the helper', async () => {
+    const neighbour = h.makeUser({ name: 'Bina Shah', flatNo: '202' });
+    h.knowUsers(resident, neighbour);
+    mockingoose(DailyHelp).toReturn(makeHelp(), 'findOne');
+    await h.api().post('/api/daily-help/link').set(h.auth(neighbour)).send({ code: '482913' });
+    const notes = h.savedDocs(Notification);
+    expect(notes.map((n) => String(n.userId))).toEqual([String(resident._id)]);
+    expect(notes[0].message).toContain('Bina Shah');
+  });
+
+  test('a person who keeps entering wrong codes is slowed down', async () => {
+    const thief = h.makeUser({ flatNo: '909' });
+    h.knowUsers(resident, thief);
+    mockingoose(DailyHelp).toReturn(null, 'findOne');
+    const statuses = [];
+    for (let i = 0; i < 10; i++) statuses.push((await h.api().post('/api/daily-help/link').set(h.auth(thief)).send({ code: String(100000 + i) })).status);
+    expect(statuses.slice(0, 8).every((x) => x === 404)).toBe(true);
+    expect(statuses.slice(8)).toEqual([429, 429]);
+    // someone else is not affected
+    expect((await h.api().post('/api/daily-help/link').set(h.auth(resident)).send({ code: '123456' })).status).toBe(404);
   });
 
   test('an unknown code is refused, and only gate staff can check', async () => {

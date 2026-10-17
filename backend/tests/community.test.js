@@ -88,6 +88,7 @@ describe('likes, comments and moderation', () => {
     mockingoose(Post).toReturn(post, 'findOne');
     const res = await h.api().post(`/api/community/posts/${post._id}/like`).set(h.auth(neighbour));
     expect(res.body).toMatchObject({ liked: false, likeCount: 0 });
+    expect(h.updatesTo(Post)[0].update).toEqual({ $pull: { likes: String(neighbour._id) } });
   });
 
   test('a comment notifies the author but not the commenter', async () => {
@@ -147,11 +148,40 @@ describe('likes, comments and moderation', () => {
     const others = [h.makeUser(), h.makeUser()];
     const post = makePost({ reports: others.map((u) => ({ userId: u._id })) });
     mockingoose(Post).toReturn(post, 'findOne');
+    mockingoose(Post).toReturn({ modifiedCount: 1 }, 'updateOne');
     mockingoose(User).toReturn([admin], 'find');
     const res = await h.api().post(`/api/community/posts/${post._id}/report`).set(h.auth(neighbour)).send({ reason: 'Rude' });
     expect(res.status).toBe(200);
-    expect(h.savedDocs(Post)[0].isHidden).toBe(true);
+    const updates = h.updatesTo(Post).map((u) => u.update);
+    expect(updates[0].$push.reports.userId).toBe(String(neighbour._id));
+    expect(updates[1]).toEqual({ $set: { isHidden: true } });
     expect(h.savedDocs(h.models.Notification).map((n) => String(n.userId))).toContain(String(admin._id));
+  });
+
+  test('a report that arrives twice at once counts once and does not hide the post', async () => {
+    const post = makePost();
+    mockingoose(Post).toReturn(post, 'findOne');
+    mockingoose(Post).toReturn({ modifiedCount: 0 }, 'updateOne'); // the conditional push found the reply already there
+    const res = await h.api().post(`/api/community/posts/${post._id}/report`).set(h.auth(neighbour));
+    expect(res.body.message).toMatch(/already reported/);
+    expect(h.updatesTo(Post)).toHaveLength(1); // only the push was attempted; no hide
+  });
+
+  test('likes use atomic add and remove, so two quick taps cannot duplicate or lose one', async () => {
+    const post = makePost();
+    mockingoose(Post).toReturn(post, 'findOne');
+    const res = await h.api().post(`/api/community/posts/${post._id}/like`).set(h.auth(neighbour));
+    expect(res.body).toMatchObject({ liked: true, likeCount: 1 });
+    expect(h.updatesTo(Post)[0].update).toEqual({ $addToSet: { likes: String(neighbour._id) } });
+  });
+
+  test('refuses photo links that are not uploads or https', async () => {
+    for (const url of ['javascript:alert(1)', 'data:image/png;base64,AAAA', 'http://insecure.example/x.jpg']) {
+      const res = await h.api().post('/api/community/posts').set(h.auth(resident)).send({ title: 'With photo', images: [{ url }] });
+      expect(res.status).toBe(400);
+    }
+    const ok = await h.api().post('/api/community/posts').set(h.auth(resident)).send({ title: 'With photo', images: [{ url: '/uploads/abc-1.jpg' }] });
+    expect(ok.status).toBe(201);
   });
 
   test('a hidden post is gone for residents but still open to admins', async () => {
@@ -173,19 +203,50 @@ describe('event RSVP', () => {
   const makeEvent = (over = {}) =>
     new Notice({ _id: h.oid(), societyId: h.SOCIETY_ID, title: 'Diwali night', content: 'Join us', type: 'event', isPublished: true, isActive: true, createdBy: admin._id, eventDate: new Date(Date.now() + 5 * 864e5), ...over });
 
+  // The route reads the event (access check, then the reply), updates it, and reads it again for the counts.
+  const eventThen = (before, after) => {
+    let n = 0;
+    mockingoose(Notice).toReturn(() => (n++ < 2 ? before : after), 'findOne');
+  };
+
   test('records a reply and counts guests as people', async () => {
-    const event = makeEvent({ rsvps: [{ userId: neighbour._id, status: 'going', guests: 2 }] });
-    mockingoose(Notice).toReturn(event, 'findOne');
-    const res = await h.api().post(`/api/notices/${event._id}/rsvp`).set(h.auth(resident)).send({ status: 'going', guests: 1 });
+    const before = makeEvent({ rsvps: [{ userId: neighbour._id, status: 'going', guests: 2 }] });
+    const after = makeEvent({ _id: before._id, rsvps: [{ userId: neighbour._id, status: 'going', guests: 2 }, { userId: resident._id, status: 'going', guests: 1 }] });
+    eventThen(before, after);
+    mockingoose(Notice).toReturn({ matchedCount: 0 }, 'updateOne'); // no earlier reply, so it is added
+    const res = await h.api().post(`/api/notices/${before._id}/rsvp`).set(h.auth(resident)).send({ status: 'going', guests: 1 });
     expect(res.status).toBe(200);
     expect(res.body.rsvp).toMatchObject({ going: 2, people: 5, mine: { status: 'going', guests: 1 } });
+    const [change, add] = h.updatesTo(Notice);
+    expect(change.update.$set['rsvps.$.guests']).toBe(1);
+    expect(add.filter['rsvps.userId']).toEqual({ $ne: String(resident._id) }); // the add only applies if there is no reply yet
+    expect(add.update.$push.rsvps).toMatchObject({ status: 'going', guests: 1 });
   });
 
-  test('changing a reply replaces it instead of adding another', async () => {
-    const event = makeEvent({ rsvps: [{ userId: resident._id, status: 'going', guests: 3 }] });
-    mockingoose(Notice).toReturn(event, 'findOne');
-    const res = await h.api().post(`/api/notices/${event._id}/rsvp`).set(h.auth(resident)).send({ status: 'no', guests: 4 });
+  test('changing a reply updates it in place instead of adding another', async () => {
+    const before = makeEvent({ rsvps: [{ userId: resident._id, status: 'going', guests: 3 }] });
+    const after = makeEvent({ _id: before._id, rsvps: [{ userId: resident._id, status: 'no', guests: 0 }] });
+    eventThen(before, after);
+    mockingoose(Notice).toReturn({ matchedCount: 1 }, 'updateOne');
+    const res = await h.api().post(`/api/notices/${before._id}/rsvp`).set(h.auth(resident)).send({ status: 'no', guests: 4 });
     expect(res.body.rsvp).toMatchObject({ going: 0, no: 1, mine: { status: 'no', guests: 0 } });
+    expect(h.updatesTo(Notice)).toHaveLength(1); // matched, so no second "add" step
+    expect(h.updatesTo(Notice)[0].update.$set).toEqual({ 'rsvps.$.status': 'no', 'rsvps.$.guests': 0 });
+  });
+
+  test('a resident cannot open or reply to an event meant for another block, a draft or a deleted one', async () => {
+    for (const over of [{ targetAudience: 'specific_blocks', targetBlocks: ['B'] }, { targetAudience: 'specific_flats', targetFlats: ['B-9'] }, { isPublished: false }, { isActive: false }]) {
+      const event = makeEvent(over);
+      mockingoose(Notice).toReturn(event, 'findOne');
+      expect((await h.api().get(`/api/notices/${event._id}`).set(h.auth(resident))).status).toBe(404);
+      expect((await h.api().post(`/api/notices/${event._id}/rsvp`).set(h.auth(resident)).send({ status: 'going' })).status).toBe(404);
+    }
+    const mine = makeEvent({ targetAudience: 'specific_blocks', targetBlocks: ['a'] });
+    mockingoose(Notice).toReturn(mine, 'findOne');
+    expect((await h.api().get(`/api/notices/${mine._id}`).set(h.auth(resident))).status).toBe(200);
+    const draft = makeEvent({ isPublished: false });
+    mockingoose(Notice).toReturn(draft, 'findOne');
+    expect((await h.api().get(`/api/notices/${draft._id}`).set(h.auth(admin))).status).toBe(200); // the office can still see drafts
   });
 
   test('refuses RSVPs for non-events, past events and bad answers', async () => {
@@ -199,6 +260,7 @@ describe('event RSVP', () => {
 
     const ok = makeEvent();
     mockingoose(Notice).toReturn(ok, 'findOne');
+    mockingoose(Notice).toReturn({ matchedCount: 1 }, 'updateOne');
     expect((await h.api().post(`/api/notices/${ok._id}/rsvp`).set(h.auth(resident)).send({ status: 'definitely' })).status).toBe(400);
   });
 

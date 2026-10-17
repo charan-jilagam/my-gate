@@ -116,11 +116,17 @@ const updatesTo = (Model) => {
   return calls.map((args, i) => ({ model: contexts[i].model.modelName, filter: args[0], update: args[1] })).filter((u) => u.model === Model.modelName);
 };
 
+// Every call of a Query operation (findOneAndUpdate, updateMany...) made against a model: [{ filter, update }].
+const callsTo = (Model, op) => {
+  const { calls, contexts } = mongoose.Query.prototype[op].mock;
+  return calls.map((args, i) => ({ model: contexts[i].model.modelName, filter: args[0], update: args[1] })).filter((c) => c.model === Model.modelName);
+};
+
 const reset = () => {
   mockingoose.resetAll();
   mongoose.Model.prototype.save.mockClear();
   mongoose.Model.prototype.$save.mockClear();
-  mongoose.Query.prototype.updateOne.mockClear();
+  ['updateOne', 'findOneAndUpdate', 'updateMany'].forEach((op) => mongoose.Query.prototype[op].mockClear());
   jest.spyOn(console, 'log').mockImplementation(() => {});
   jest.spyOn(console, 'error').mockImplementation(() => {});
 };
@@ -143,6 +149,7 @@ module.exports = {
   knowSociety,
   savedDocs,
   updatesTo,
+  callsTo,
   futureDate,
   models: { User, Society, ServiceProvider, ServiceRequest, Visitor, Notification }
 };

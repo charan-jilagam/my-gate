@@ -8,7 +8,7 @@ const { protect, authorize, scopeToSociety } = require('../middleware/auth');
 const { safeNotify, safeNotifyMany } = require('../utils/safeNotify');
 const { DEFAULT_TZ, isValidDate, isValidTime, zonedToUtc, todayIn, addDays, toMinutes } = require('../utils/timezone');
 const { buildDaySlots } = require('../utils/slots');
-const { fail, invalid, serverError, isAdminRole } = require('../utils/routeKit');
+const { fail, invalid, serverError, isAdminRole, paging } = require('../utils/routeKit');
 
 router.param('id', scopeToSociety(Booking));
 
@@ -159,29 +159,34 @@ router.post(
       const amount = Math.round(hours * (amenity.hourlyRate || 0) * 100) / 100;
       const auto = amenity.requiresApproval === false;
 
-      const booking = await Booking.create({
-        residentId: req.user.id,
-        societyId: req.user.societyId,
-        amenity: amenity.name,
-        amenityId: amenity._id,
-        dateStr: date,
-        slotDate: zonedToUtc(date, '00:00', tz),
-        startTime: startAt,
-        endTime: endAt,
-        numberOfGuests: guests,
-        amount,
-        notes,
-        flatNo: req.user.flatNo,
-        block: req.user.block,
-        status: auto ? 'approved' : 'pending',
-        approvedAt: auto ? now : undefined
-      });
+      // One key per slot. The unique index on slotKeys makes the database refuse a second booking for any of them,
+      // even when two requests pass the check above at the same moment.
+      const slotKeys = [];
+      for (let t = from; t < to; t += step) slotKeys.push(`${req.user.societyId}|${amenity.name}|${date}|${String(Math.floor(t / 60)).padStart(2, '0')}:${String(t % 60).padStart(2, '0')}`);
 
-      // Two people can pass the check above at the same moment. The earlier booking keeps the slot.
-      const earlier = await Booking.findOne({ ...overlapping(amenity.name, req.user.societyId, startAt, endAt), _id: { $lt: booking._id } });
-      if (earlier) {
-        await Booking.deleteOne({ _id: booking._id });
-        return fail(res, 409, 'Someone just booked that time. Please pick another slot.');
+      let booking;
+      try {
+        booking = await Booking.create({
+          residentId: req.user.id,
+          societyId: req.user.societyId,
+          amenity: amenity.name,
+          amenityId: amenity._id,
+          dateStr: date,
+          slotDate: zonedToUtc(date, '00:00', tz),
+          startTime: startAt,
+          endTime: endAt,
+          numberOfGuests: guests,
+          amount,
+          notes,
+          flatNo: req.user.flatNo,
+          block: req.user.block,
+          status: auto ? 'approved' : 'pending',
+          approvedAt: auto ? now : undefined,
+          slotKeys
+        });
+      } catch (e) {
+        if (e.code === 11000) return fail(res, 409, 'Someone just booked that time. Please pick another slot.');
+        throw e;
       }
 
       const admins = await User.find({ societyId: req.user.societyId, role: 'society_admin', isActive: true }).select('_id');
@@ -225,8 +230,8 @@ router.get('/', protect, authorize(...MEMBERS, 'security'), async (req, res) => 
       .populate('residentId', 'name flatNo block')
       .populate('approvedBy', 'name')
       .sort({ slotDate: -1, startTime: -1 })
-      .limit(Math.min(parseInt(req.query.limit, 10) || 200, 500))
-      .skip(parseInt(req.query.skip, 10) || 0);
+      .limit(paging(req, { max: 500, fallback: 200 }).limit)
+      .skip(paging(req).skip);
 
     res.json({ success: true, count: bookings.length, bookings });
   } catch (error) {
@@ -243,22 +248,30 @@ const tell = (req, booking, data) =>
     ...data
   });
 
+// Each decision is one conditional update: it only applies if the booking is still in the state we expect,
+// so an approval and a cancellation arriving together cannot both win.
+const decide = (id, from, change) => Booking.findOneAndUpdate({ _id: id, status: { $in: from } }, { $set: change }, { new: true });
+
+const notFoundOrDecided = async (res, id) => {
+  const exists = await Booking.findById(id).select('status');
+  if (!exists) return fail(res, 404, 'Booking not found');
+  return fail(res, 409, `This booking is already ${exists.status}.`);
+};
+
 // @route   PUT /api/bookings/:id/approve
 router.put('/:id/approve', protect, authorize('society_admin', 'super_admin'), async (req, res) => {
   try {
-    const booking = await Booking.findById(req.params.id);
-    if (!booking) return fail(res, 404, 'Booking not found');
-    if (booking.status !== 'pending') return fail(res, 409, `This booking is already ${booking.status}.`);
-    if (booking.endTime <= new Date()) return fail(res, 400, 'This slot has already passed.');
+    const current = await Booking.findById(req.params.id);
+    if (!current) return fail(res, 404, 'Booking not found');
+    if (current.status !== 'pending') return fail(res, 409, `This booking is already ${current.status}.`);
+    if (current.endTime <= new Date()) return fail(res, 400, 'This slot has already passed.');
 
     // Do not confirm two bookings for the same time.
-    const clash = await Booking.findOne({ ...overlapping(booking.amenity, booking.societyId, booking.startTime, booking.endTime, booking._id), status: 'approved' });
+    const clash = await Booking.findOne({ ...overlapping(current.amenity, current.societyId, current.startTime, current.endTime, current._id), status: 'approved' });
     if (clash) return fail(res, 409, 'Another booking is already approved for this time. Reject this one instead.');
 
-    booking.status = 'approved';
-    booking.approvedBy = req.user.id;
-    booking.approvedAt = new Date();
-    await booking.save();
+    const booking = await decide(current._id, ['pending'], { status: 'approved', approvedBy: req.user.id, approvedAt: new Date() });
+    if (!booking) return notFoundOrDecided(res, current._id);
 
     await tell(req, booking, { type: 'booking_approved', title: 'Booking approved', message: `Your ${booking.amenity} booking is confirmed.` });
     res.json({ success: true, booking, message: 'Booking approved' });
@@ -271,15 +284,11 @@ router.put('/:id/approve', protect, authorize('society_admin', 'super_admin'), a
 router.put('/:id/reject', protect, authorize('society_admin', 'super_admin'), [body('reason').optional().isString().isLength({ max: 200 })], async (req, res) => {
   try {
     if (invalid(req, res)) return undefined;
-    const booking = await Booking.findById(req.params.id);
-    if (!booking) return fail(res, 404, 'Booking not found');
-    if (!ACTIVE.includes(booking.status)) return fail(res, 409, `This booking is already ${booking.status}.`);
+    const reason = (req.body.reason || '').trim() || 'No reason given';
+    const booking = await decide(req.params.id, ACTIVE, { status: 'rejected', rejectedReason: reason, slotKeys: [] });
+    if (!booking) return notFoundOrDecided(res, req.params.id);
 
-    booking.status = 'rejected';
-    booking.rejectedReason = (req.body.reason || '').trim() || 'No reason given';
-    await booking.save();
-
-    await tell(req, booking, { type: 'booking_rejected', title: 'Booking not approved', message: `Your ${booking.amenity} booking was not approved: ${booking.rejectedReason}`, priority: 'high' });
+    await tell(req, booking, { type: 'booking_rejected', title: 'Booking not approved', message: `Your ${booking.amenity} booking was not approved: ${reason}`, priority: 'high' });
     res.json({ success: true, booking, message: 'Booking rejected' });
   } catch (error) {
     serverError(res, error, 'Reject booking');
@@ -290,21 +299,20 @@ router.put('/:id/reject', protect, authorize('society_admin', 'super_admin'), [b
 router.put('/:id/cancel', protect, authorize('resident', 'society_admin', 'super_admin'), [body('reason').optional().isString().isLength({ max: 200 })], async (req, res) => {
   try {
     if (invalid(req, res)) return undefined;
-    const booking = await Booking.findById(req.params.id);
-    if (!booking) return fail(res, 404, 'Booking not found');
+    const current = await Booking.findById(req.params.id);
+    if (!current) return fail(res, 404, 'Booking not found');
 
     const byAdmin = isAdminRole(req.user);
-    if (!byAdmin && String(booking.residentId) !== String(req.user.id)) return fail(res, 403, 'You can only cancel your own bookings.');
-    if (!ACTIVE.includes(booking.status)) return fail(res, 400, 'This booking cannot be cancelled.');
-    if (booking.startTime <= new Date()) return fail(res, 400, 'This booking has already started.');
+    if (!byAdmin && String(current.residentId) !== String(req.user.id)) return fail(res, 403, 'You can only cancel your own bookings.');
+    if (!ACTIVE.includes(current.status)) return fail(res, 400, 'This booking cannot be cancelled.');
+    if (current.startTime <= new Date()) return fail(res, 400, 'This booking has already started.');
 
-    booking.status = 'cancelled';
-    booking.cancellationReason = (req.body.reason || '').trim() || (byAdmin ? 'Cancelled by the society office' : 'Cancelled by resident');
-    booking.cancelledAt = new Date();
-    await booking.save();
+    const reason = (req.body.reason || '').trim() || (byAdmin ? 'Cancelled by the society office' : 'Cancelled by resident');
+    const booking = await decide(current._id, ACTIVE, { status: 'cancelled', cancellationReason: reason, cancelledAt: new Date(), slotKeys: [] });
+    if (!booking) return notFoundOrDecided(res, current._id);
 
     if (byAdmin) {
-      await tell(req, booking, { type: 'booking_rejected', title: 'Booking cancelled', message: `Your ${booking.amenity} booking was cancelled: ${booking.cancellationReason}`, priority: 'high' });
+      await tell(req, booking, { type: 'booking_rejected', title: 'Booking cancelled', message: `Your ${booking.amenity} booking was cancelled: ${reason}`, priority: 'high' });
     } else {
       const admins = await User.find({ societyId: booking.societyId, role: 'society_admin', isActive: true }).select('_id');
       await safeNotifyMany(req.app.get('io'), admins.map((a) => a._id), {

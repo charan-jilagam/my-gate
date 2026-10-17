@@ -116,14 +116,31 @@ describe('booking an amenity', () => {
     expect(asked.endTime.$gt.toISOString()).toBe(`${day()}T12:30:00.000Z`);
   });
 
-  test('backs out when a simultaneous booking with an earlier id got the slot', async () => {
-    let calls = 0;
-    mockingoose(Booking).toReturn(() => {
-      calls += 1;
-      return calls === 1 ? null : { _id: h.oid() };
-    }, 'findOne');
-    const res = await book({});
-    expect(res.status).toBe(409);
+  test('holds one key per slot, which the unique index uses to stop double booking', async () => {
+    await book({ startTime: '18:00', endTime: '20:00' });
+    const [saved] = h.savedDocs(Booking);
+    expect(saved.slotKeys).toEqual([`${h.SOCIETY_ID}|Clubhouse|${day()}|18:00`, `${h.SOCIETY_ID}|Clubhouse|${day()}|19:00`]);
+  });
+
+  test('two people booking the same slot at once: the database refuses the second and they are told', async () => {
+    const real = Booking.create;
+    Booking.create = jest.fn().mockRejectedValue(Object.assign(new Error('E11000 duplicate key'), { code: 11000 }));
+    try {
+      const res = await book({});
+      expect(res.status).toBe(409);
+      expect(res.body.message).toMatch(/just booked/);
+    } finally {
+      Booking.create = real;
+    }
+  });
+
+  test('a booking that is no longer active gives its slots back', async () => {
+    const b = new Booking({ residentId: resident._id, societyId: h.SOCIETY_ID, amenity: 'Clubhouse', slotDate: new Date(), startTime: new Date(), endTime: new Date(), flatNo: '101', status: 'cancelled', slotKeys: ['a|b|c|d'] });
+    await b.validate();
+    expect(b.slotKeys).toEqual([]);
+    const live = new Booking({ residentId: resident._id, societyId: h.SOCIETY_ID, amenity: 'Clubhouse', slotDate: new Date(), startTime: new Date(), endTime: new Date(), flatNo: '101', status: 'approved', slotKeys: ['a|b|c|d'] });
+    await live.validate();
+    expect(live.slotKeys).toEqual(['a|b|c|d']);
   });
 
   test('only residents can book', async () => {
@@ -172,46 +189,71 @@ describe('approving, rejecting and cancelling', () => {
   const makeBooking = (over = {}) =>
     new Booking({ _id: h.oid(), residentId: resident._id, societyId: h.SOCIETY_ID, amenity: 'Clubhouse', dateStr: day(), slotDate: new Date(), startTime: new Date(Date.now() + 2 * 864e5), endTime: new Date(Date.now() + 2 * 864e5 + 36e5), flatNo: '101', status: 'pending', ...over });
 
-  test('approval tells the resident with a working link', async () => {
-    const b = makeBooking();
+  // findOne is asked three times by approve: the access check, the booking, then "is there a clash".
+  const knowBooking = (b, clash = null) => {
     let n = 0;
-    mockingoose(Booking).toReturn(() => (n++ < 2 ? b : null), 'findOne'); // scope check, the booking, then no clash
+    mockingoose(Booking).toReturn(() => (n++ < 2 ? b : clash), 'findOne');
+  };
+
+  test('approval is one conditional update and tells the resident with a working link', async () => {
+    const b = makeBooking();
+    knowBooking(b);
+    mockingoose(Booking).toReturn(makeBooking({ _id: b._id, status: 'approved' }), 'findOneAndUpdate');
     const res = await h.api().put(`/api/bookings/${b._id}/approve`).set(h.auth(admin));
     expect(res.status).toBe(200);
-    expect(h.savedDocs(Booking)[0]).toMatchObject({ status: 'approved' });
+    const [decision] = h.callsTo(Booking, 'findOneAndUpdate');
+    expect(decision.filter.status).toEqual({ $in: ['pending'] });
+    expect(decision.update.$set).toMatchObject({ status: 'approved' });
     expect(h.savedDocs(Notification)[0]).toMatchObject({ type: 'booking_approved', actionUrl: '/bookings' });
+  });
+
+  test('if the resident cancelled a moment earlier the approval does not win', async () => {
+    const b = makeBooking();
+    let n = 0;
+    mockingoose(Booking).toReturn(() => (n++ < 2 ? b : n === 3 ? null : makeBooking({ _id: b._id, status: 'cancelled' })), 'findOne');
+    mockingoose(Booking).toReturn(null, 'findOneAndUpdate'); // the status is no longer pending
+    const res = await h.api().put(`/api/bookings/${b._id}/approve`).set(h.auth(admin));
+    expect(res.status).toBe(409);
+    expect(res.body.message).toMatch(/already cancelled/);
+    expect(h.savedDocs(Notification)).toHaveLength(0);
   });
 
   test('a booking that clashes with an approved one cannot be approved', async () => {
     const b = makeBooking();
-    let n = 0;
-    mockingoose(Booking).toReturn(() => (n++ < 2 ? b : { _id: h.oid() }), 'findOne'); // scope check, the booking, then a clash
-    const res = await h.api().put(`/api/bookings/${b._id}/approve`).set(h.auth(admin));
-    expect(res.status).toBe(409);
+    knowBooking(b, { _id: h.oid() });
+    expect((await h.api().put(`/api/bookings/${b._id}/approve`).set(h.auth(admin))).status).toBe(409);
+    expect(h.callsTo(Booking, 'findOneAndUpdate')).toHaveLength(0);
   });
 
   test('cannot approve something already decided', async () => {
     const b = makeBooking({ status: 'rejected' });
-    mockingoose(Booking).toReturn(b, 'findOne');
+    knowBooking(b);
     expect((await h.api().put(`/api/bookings/${b._id}/approve`).set(h.auth(admin))).status).toBe(409);
   });
 
-  test('rejection carries the reason to the resident', async () => {
+  test('rejection releases the slots and carries the reason to the resident', async () => {
     const b = makeBooking();
     mockingoose(Booking).toReturn(b, 'findOne');
+    mockingoose(Booking).toReturn(makeBooking({ _id: b._id, status: 'rejected' }), 'findOneAndUpdate');
     await h.api().put(`/api/bookings/${b._id}/reject`).set(h.auth(admin)).send({ reason: 'Society event' });
+    const [decision] = h.callsTo(Booking, 'findOneAndUpdate');
+    expect(decision.update.$set).toMatchObject({ status: 'rejected', rejectedReason: 'Society event', slotKeys: [] });
     expect(h.savedDocs(Notification)[0].message).toContain('Society event');
   });
 
-  test('a resident cancels their own future booking but not someone else\'s', async () => {
+  test('a resident cancels their own future booking (and the slot is freed) but not someone else\'s', async () => {
     const b = makeBooking();
     mockingoose(Booking).toReturn(b, 'findOne');
+    mockingoose(Booking).toReturn(makeBooking({ _id: b._id, status: 'cancelled' }), 'findOneAndUpdate');
     expect((await h.api().put(`/api/bookings/${b._id}/cancel`).set(h.auth(resident))).status).toBe(200);
+    expect(h.callsTo(Booking, 'findOneAndUpdate')[0].update.$set).toMatchObject({ status: 'cancelled', slotKeys: [] });
+
     const neighbour = h.makeUser({ flatNo: '202' });
     h.knowUsers(resident, neighbour, admin);
     const other = makeBooking();
     mockingoose(Booking).toReturn(other, 'findOne');
     expect((await h.api().put(`/api/bookings/${other._id}/cancel`).set(h.auth(neighbour))).status).toBe(403);
+    expect(h.callsTo(Booking, 'findOneAndUpdate')).toHaveLength(1);
   });
 
   test('a booking that has started cannot be cancelled', async () => {
@@ -223,6 +265,7 @@ describe('approving, rejecting and cancelling', () => {
   test('an admin can cancel a resident\'s booking and the resident is told', async () => {
     const b = makeBooking({ status: 'approved' });
     mockingoose(Booking).toReturn(b, 'findOne');
+    mockingoose(Booking).toReturn(makeBooking({ _id: b._id, status: 'cancelled' }), 'findOneAndUpdate');
     const res = await h.api().put(`/api/bookings/${b._id}/cancel`).set(h.auth(admin)).send({ reason: 'Maintenance' });
     expect(res.status).toBe(200);
     expect(String(h.savedDocs(Notification)[0].userId)).toBe(String(resident._id));

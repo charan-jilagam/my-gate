@@ -15,6 +15,17 @@ const matchesFlat = (user, flats) => {
 };
 
 
+// Whether a resident is meant to see a notice: published, not deleted, and addressed to everyone or to their block or flat.
+const visibleTo = (notice, user) => {
+  if (user.role !== 'resident') return true; // admins, guards and staff can open any notice of their society
+  if (!notice.isPublished || !notice.isActive) return false;
+  const block = String(user.block || '').toUpperCase();
+  const flat = String(user.flatNo || '').toUpperCase();
+  if (notice.targetAudience === 'specific_blocks') return (notice.targetBlocks || []).some((b) => String(b).toUpperCase() === block);
+  if (notice.targetAudience === 'specific_flats') return (notice.targetFlats || []).some((f) => [flat, `${block}-${flat}`].includes(String(f).toUpperCase()));
+  return true;
+};
+
 // Counts people (a "going" reply with 2 guests is 3 people), plus the viewer's own answer.
 const summarizeRsvps = (notice, user) => {
   const mine = (notice.rsvps || []).find((r) => String(r.userId) === String(user.id));
@@ -218,7 +229,7 @@ router.get('/:id', protect, async (req, res) => {
     const notice = await Notice.findById(req.params.id)
       .populate('createdBy', 'name');
 
-    if (!notice) {
+    if (!notice || !visibleTo(notice, req.user)) {
       return res.status(404).json({
         success: false,
         message: 'Notice not found'
@@ -339,7 +350,7 @@ router.post('/:id/rsvp', protect, authorize('resident'), [
       return res.status(400).json({ success: false, message: errors.array()[0].msg, errors: errors.array() });
     }
     const notice = await Notice.findById(req.params.id);
-    if (!notice || !notice.isActive || !notice.isPublished) {
+    if (!notice || !visibleTo(notice, req.user)) {
       return res.status(404).json({ success: false, message: 'Event not found' });
     }
     if (notice.type !== 'event') {
@@ -350,16 +361,15 @@ router.post('/:id/rsvp', protect, authorize('resident'), [
     }
 
     const guests = req.body.status === 'no' ? 0 : Number(req.body.guests) || 0;
-    const existing = notice.rsvps.find((r) => String(r.userId) === String(req.user.id));
-    if (existing) {
-      existing.status = req.body.status;
-      existing.guests = guests;
-    } else {
-      notice.rsvps.push({ userId: req.user.id, status: req.body.status, guests });
+    // Update the reply if there is one, otherwise add it. Both steps are conditional, so a double tap
+    // cannot leave two replies from the same person.
+    const changed = await Notice.updateOne({ _id: notice._id, 'rsvps.userId': req.user.id }, { $set: { 'rsvps.$.status': req.body.status, 'rsvps.$.guests': guests } });
+    if (!changed.matchedCount) {
+      await Notice.updateOne({ _id: notice._id, 'rsvps.userId': { $ne: req.user.id } }, { $push: { rsvps: { userId: req.user.id, status: req.body.status, guests } } });
     }
-    await notice.save();
+    const fresh = await Notice.findById(notice._id);
 
-    res.json({ success: true, rsvp: summarizeRsvps(notice, req.user), message: req.body.status === 'going' ? 'See you there!' : 'Your reply is saved' });
+    res.json({ success: true, rsvp: summarizeRsvps(fresh || notice, req.user), message: req.body.status === 'going' ? 'See you there!' : 'Your reply is saved' });
   } catch (error) {
     console.error('RSVP error:', error);
     res.status(500).json({ success: false, message: 'Server error' });

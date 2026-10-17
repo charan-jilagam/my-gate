@@ -74,7 +74,7 @@ Rules worth knowing:
 ## Tests
 
 ```bash
-cd backend && npm test          # 236 tests: slot engine, lifecycle, permissions, privacy, community, SOS, daily help, accounts, amenity booking, seed data
+cd backend && npm test          # 251 tests: slot engine, lifecycle, permissions, privacy, community, SOS, daily help, accounts, amenity booking, seed data
 cd frontend && npm run build    # compile check
 cd frontend && python3 smoke/smoke.py && python3 smoke/flows.py   # browser smoke tests, see smoke/README.md
 ```
@@ -95,3 +95,8 @@ before going live.
   `date` (YYYY-MM-DD), `startTime` and `endTime` (HH:mm). The bundled frontend already does.
 - Vendors sign up with role `Vendor` and wait for the office's approval like residents do.
 - Text messages for SOS and urgent bookings use the existing SMS setup; without one they are skipped (push and in-app still work).
+
+## Known limits
+
+- Poll notices still send voter ids to residents (existing behaviour, used by the poll screen to show your own vote). Hide them before running anonymous polls.
+- The tests mock the database, see "What that cannot prove" above.

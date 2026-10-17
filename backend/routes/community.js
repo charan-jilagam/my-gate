@@ -6,7 +6,7 @@ const User = require('../models/User');
 const { CATEGORIES } = Post;
 const { protect, authorize, scopeToSociety } = require('../middleware/auth');
 const { safeNotify, safeNotifyMany } = require('../utils/safeNotify');
-const { fail, invalid, serverError, isAdminRole, flatLabel } = require('../utils/routeKit');
+const { fail, invalid, serverError, isAdminRole, flatLabel, paging, isSafeUrl } = require('../utils/routeKit');
 
 router.param('id', scopeToSociety(Post));
 
@@ -78,8 +78,8 @@ router.get(
       const posts = await Post.find(filter)
         .populate('authorId', 'name flatNo block role')
         .sort({ isPinned: -1, createdAt: -1 })
-        .limit(Math.min(parseInt(req.query.limit, 10) || 50, 100))
-        .skip(parseInt(req.query.skip, 10) || 0);
+        .limit(paging(req).limit)
+        .skip(paging(req).skip);
       res.json({ success: true, count: posts.length, posts: posts.map((p) => present(p, req.user)) });
     } catch (error) {
       serverError(res, error, 'List posts');
@@ -97,7 +97,8 @@ router.post(
     body('body').optional().isString().isLength({ max: 2000 }).withMessage('Keep the text under 2000 characters'),
     body('category').optional().isIn(CATEGORIES).withMessage('Unknown category'),
     body('price').optional({ nullable: true }).isFloat({ min: 0, max: 10000000 }).withMessage('Enter a valid price'),
-    body('images').optional().isArray({ max: 4 }).withMessage('Add at most 4 photos')
+    body('images').optional().isArray({ max: 4 }).withMessage('Add at most 4 photos'),
+    body('images.*.url').optional().custom(isSafeUrl).withMessage('A photo link is not valid')
   ],
   async (req, res) => {
     try {
@@ -144,9 +145,10 @@ router.post('/posts/:id/like', protect, authorize(...MEMBERS), async (req, res) 
     const post = await Post.findById(req.params.id);
     if (!post || post.isHidden) return fail(res, 404, 'This post is no longer available.');
     const has = post.likes.some((l) => String(l) === String(req.user.id));
-    post.likes = has ? post.likes.filter((l) => String(l) !== String(req.user.id)) : [...post.likes, req.user.id];
-    await post.save();
-    res.json({ success: true, liked: !has, likeCount: post.likes.length });
+    // $addToSet and $pull are idempotent, so two quick taps cannot lose or duplicate a like.
+    await Post.updateOne({ _id: post._id }, has ? { $pull: { likes: req.user.id } } : { $addToSet: { likes: req.user.id } });
+    const likeCount = Math.max(0, post.likes.length + (has ? -1 : 1));
+    res.json({ success: true, liked: !has, likeCount });
   } catch (error) {
     serverError(res, error, 'Like post');
   }
@@ -253,12 +255,14 @@ router.post('/posts/:id/report', protect, authorize(...MEMBERS), [body('reason')
     if (idOf(post.authorId) === String(req.user.id)) return fail(res, 400, 'You cannot report your own post.');
     if (post.reports.some((r) => String(r.userId) === String(req.user.id))) return res.json({ success: true, message: 'You already reported this post.' });
 
-    post.reports.push({ userId: req.user.id, reason: (req.body.reason || '').slice(0, 200) });
-    const hidden = post.reports.length >= REPORTS_TO_HIDE;
-    if (hidden) post.isHidden = true;
-    await post.save();
+    // The filter makes the push conditional, so a double tap counts once.
+    const pushed = await Post.updateOne({ _id: post._id, 'reports.userId': { $ne: req.user.id } }, { $push: { reports: { userId: req.user.id, reason: (req.body.reason || '').slice(0, 200) } } });
+    if (pushed.modifiedCount === 0) return res.json({ success: true, message: 'You already reported this post.' });
+    const total = post.reports.length + 1;
+    const hidden = total >= REPORTS_TO_HIDE;
+    if (hidden) await Post.updateOne({ _id: post._id }, { $set: { isHidden: true } });
 
-    if (post.reports.length === 1 || hidden) {
+    if (total === 1 || hidden) {
       const admins = await User.find({ societyId: post.societyId, role: 'society_admin' }).select('_id');
       await safeNotifyMany(req.app.get('io'), admins.map((a) => a._id), {
         societyId: post.societyId,

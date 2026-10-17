@@ -8,9 +8,22 @@ const Society = require('../models/Society');
 const { protect, authorize, scopeToSociety } = require('../middleware/auth');
 const { safeNotifyMany } = require('../utils/safeNotify');
 const { DEFAULT_TZ, todayIn, isValidDate } = require('../utils/timezone');
-const { fail, invalid, serverError, isAdminRole, societyFor, flatLabel } = require('../utils/routeKit');
+const rateLimit = require('express-rate-limit');
+const { fail, invalid, serverError, isAdminRole, societyFor, flatLabel, isSafeUrl } = require('../utils/routeKit');
 
 router.param('id', scopeToSociety(DailyHelp));
+
+// Gate codes are only six digits, so guessing them must be slow: a few wrong tries per person, then a wait.
+const guessLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 8,
+  skipSuccessfulRequests: true,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => String(req.user ? req.user.id : req.ip),
+  validate: false,
+  message: { success: false, message: 'Too many wrong codes. Please wait 15 minutes and try again.' }
+});
 
 const STALE_HOURS = 20; // a check-in older than this with no check-out is treated as forgotten
 
@@ -78,7 +91,8 @@ router.get('/', protect, authorize('resident', 'society_admin', 'super_admin', '
 const helpRules = [
   body('name').trim().isLength({ min: 2, max: 80 }).withMessage('Enter their name'),
   body('phone').optional({ checkFalsy: true }).matches(/^[0-9+\-() ]{6,20}$/).withMessage('Enter a valid phone number'),
-  body('kind').optional().isIn(DailyHelp.KINDS).withMessage('Unknown type of help')
+  body('kind').optional().isIn(DailyHelp.KINDS).withMessage('Unknown type of help'),
+  body('photo').optional({ checkFalsy: true }).custom(isSafeUrl).withMessage('The photo link is not valid')
 ];
 
 // @route   POST /api/daily-help
@@ -117,14 +131,26 @@ router.post('/', protect, authorize('resident'), helpRules, async (req, res) => 
 
 // @route   POST /api/daily-help/link
 // @desc    Add a helper who already works in the society (say, a maid who serves two flats) by their code.
-router.post('/link', protect, authorize('resident'), [body('code').trim().matches(/^\d{6}$/).withMessage('The code is 6 digits')], async (req, res) => {
+router.post('/link', protect, authorize('resident'), guessLimiter, [body('code').trim().matches(/^\d{6}$/).withMessage('The code is 6 digits')], async (req, res) => {
   try {
     if (invalid(req, res)) return undefined;
     const help = await DailyHelp.findOne({ societyId: req.user.societyId, code: req.body.code, isActive: true });
     if (!help) return fail(res, 404, 'No helper found with that code.');
     if (linked(help, req.user.id)) return fail(res, 409, 'This helper is already on your list.');
+    const existing = help.residents.map((r) => r.userId);
     help.residents.push({ userId: req.user.id, flat: flatLabel(req.user) });
     await help.save();
+    // Households already using this helper are told, so a guessed code does not go unnoticed.
+    await safeNotifyMany(req.app.get('io'), existing, {
+      societyId: help.societyId,
+      type: 'daily_help',
+      title: `${help.name} was added by another home`,
+      message: `${req.user.name} (${flatLabel(req.user)}) added ${help.name} using their gate code.`,
+      relatedId: help._id,
+      relatedModel: 'DailyHelp',
+      actionUrl: '/daily-help',
+      priority: 'medium'
+    });
     res.json({ success: true, helper: present(help, { viewer: req.user }), message: `${help.name} added to your list.` });
   } catch (error) {
     serverError(res, error, 'Link daily help');
@@ -177,7 +203,7 @@ router.get('/:id/attendance', protect, authorize('resident', 'society_admin', 's
 
 // @route   POST /api/daily-help/check
 // @desc    The guard types the code the helper shows. First time of the day checks them in, the next checks them out.
-router.post('/check', protect, authorize('security', 'society_admin', 'super_admin'), [body('code').trim().matches(/^\d{6}$/).withMessage('The code is 6 digits')], async (req, res) => {
+router.post('/check', protect, authorize('security', 'society_admin', 'super_admin'), guessLimiter, [body('code').trim().matches(/^\d{6}$/).withMessage('The code is 6 digits')], async (req, res) => {
   try {
     if (invalid(req, res)) return undefined;
     const societyId = societyFor(req);
@@ -186,25 +212,31 @@ router.post('/check', protect, authorize('security', 'society_admin', 'super_adm
     if (!help) return fail(res, 404, 'This code is not valid. Ask the resident to check it.');
 
     const now = new Date();
-    const open = await HelpAttendance.findOne({ helpId: help._id, checkOut: null, checkIn: { $gte: new Date(now.getTime() - STALE_HOURS * 3600 * 1000) } }).sort({ checkIn: -1 });
+    const tz = await societyTz(societyId);
+    const fresh = new Date(now.getTime() - STALE_HOURS * 3600 * 1000);
+    // A visit left open for too long was forgotten at the gate: close it so today's check-in is not blocked.
+    await HelpAttendance.updateMany({ helpId: help._id, open: true, checkIn: { $lt: fresh } }, { $set: { open: false } });
+
     let action;
-    let record;
-    if (open) {
-      open.checkOut = now;
-      await open.save();
-      record = open;
+    // Check-out is a single conditional update, so a double tap cannot close it twice.
+    const closed = await HelpAttendance.findOneAndUpdate({ helpId: help._id, open: true }, { $set: { checkOut: now, open: false } }, { new: true });
+    if (closed) {
       action = 'out';
     } else {
-      const tz = await societyTz(societyId);
-      record = await HelpAttendance.create({ societyId, helpId: help._id, date: todayIn(tz, now), checkIn: now, markedBy: req.user.id });
-      action = 'in';
+      try {
+        await HelpAttendance.create({ societyId, helpId: help._id, date: todayIn(tz, now), checkIn: now, open: true, markedBy: req.user.id });
+        action = 'in';
+      } catch (e) {
+        if (e.code === 11000) return fail(res, 409, 'This helper was just checked in by someone else.');
+        throw e;
+      }
     }
 
     await safeNotifyMany(req.app.get('io'), help.residents.map((r) => r.userId), {
       societyId,
       type: 'daily_help',
       title: action === 'in' ? `${help.name} has arrived` : `${help.name} has left`,
-      message: `Checked ${action} at the gate at ${now.toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit', timeZone: 'Asia/Kolkata' })}.`,
+      message: `Checked ${action} at the gate at ${now.toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit', timeZone: tz })}.`,
       relatedId: help._id,
       relatedModel: 'DailyHelp',
       actionUrl: '/daily-help',

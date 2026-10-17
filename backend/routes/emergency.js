@@ -6,7 +6,7 @@ const EmergencyContact = require('../models/EmergencyContact');
 const User = require('../models/User');
 const { protect, authorize, scopeToSociety } = require('../middleware/auth');
 const { safeNotify, safeNotifyMany } = require('../utils/safeNotify');
-const { fail, invalid, serverError, isAdminRole, societyFor, flatLabel } = require('../utils/routeKit');
+const { fail, invalid, serverError, societyFor, flatLabel, paging } = require('../utils/routeKit');
 
 router.param('alertId', scopeToSociety(EmergencyAlert));
 router.param('contactId', scopeToSociety(EmergencyContact));
@@ -120,7 +120,7 @@ router.post(
         block: req.user.block
       });
 
-      const responders = await User.find({ societyId: req.user.societyId, role: { $in: ['security', 'society_admin'] }, isActive: true }).select('_id');
+      const responders = await User.find({ societyId: req.user.societyId, role: { $in: ['security', 'society_admin'] }, isActive: true, isApproved: true }).select('_id');
       const flat = flatLabel(req.user);
       await safeNotifyMany(req.app.get('io'), responders.map((r) => r._id), {
         societyId: req.user.societyId,
@@ -163,14 +163,11 @@ router.get('/alerts', protect, async (req, res) => {
     } else {
       return res.json({ success: true, alerts: [] });
     }
-    const alerts = await EmergencyAlert.find(filter)
-      .populate('userId', 'name phone')
-      .populate('acknowledgedBy', 'name')
-      .sort({ createdAt: -1 })
-      .limit(Math.min(parseInt(req.query.limit, 10) || 50, 200));
-    // Open ones first, then newest.
-    const rank = { active: 0, acknowledged: 1, resolved: 2 };
-    alerts.sort((a, b) => rank[a.status] - rank[b.status] || b.createdAt - a.createdAt);
+    // Open alerts are fetched on their own so a long history can never push one out of the list.
+    const { limit } = paging(req, { max: 200, fallback: 50 });
+    const load = (extra, n) => EmergencyAlert.find({ ...filter, ...extra }).populate('userId', 'name phone').populate('acknowledgedBy', 'name').sort({ createdAt: -1 }).limit(n);
+    const [open, closed] = await Promise.all([load({ status: { $ne: 'resolved' } }, 100), req.query.status === 'open' ? [] : load({ status: 'resolved' }, limit)]);
+    const alerts = [...open, ...closed];
     res.json({ success: true, alerts: alerts.map(presentAlert) });
   } catch (error) {
     serverError(res, error, 'List alerts');
@@ -179,21 +176,19 @@ router.get('/alerts', protect, async (req, res) => {
 
 const respond = (nextStatus) => async (req, res) => {
   try {
-    const alert = await EmergencyAlert.findById(req.params.alertId);
-    if (!alert) return fail(res, 404, 'Alert not found');
-    if (alert.status === 'resolved') return fail(res, 409, 'This alert is already resolved.');
-    if (nextStatus === 'acknowledged' && alert.status !== 'active') return fail(res, 409, 'Someone has already responded to this alert.');
-
-    alert.status = nextStatus;
-    if (nextStatus === 'acknowledged') {
-      alert.acknowledgedBy = req.user.id;
-      alert.acknowledgedAt = new Date();
-    } else {
-      alert.resolvedBy = req.user.id;
-      alert.resolvedAt = new Date();
-      alert.resolutionNote = (req.body.note || '').toString().slice(0, 300);
+    const now = new Date();
+    // The status in the filter makes this one atomic step, so two guards cannot both claim the same alert.
+    const from = nextStatus === 'acknowledged' ? ['active'] : ['active', 'acknowledged'];
+    const change =
+      nextStatus === 'acknowledged'
+        ? { status: 'acknowledged', acknowledgedBy: req.user.id, acknowledgedAt: now }
+        : { status: 'resolved', resolvedBy: req.user.id, resolvedAt: now, resolutionNote: (req.body.note || '').toString().slice(0, 300) };
+    const alert = await EmergencyAlert.findOneAndUpdate({ _id: req.params.alertId, status: { $in: from } }, { $set: change }, { new: true });
+    if (!alert) {
+      const exists = await EmergencyAlert.findById(req.params.alertId).select('status');
+      if (!exists) return fail(res, 404, 'Alert not found');
+      return fail(res, 409, exists.status === 'resolved' ? 'This alert is already resolved.' : 'Someone has already responded to this alert.');
     }
-    await alert.save();
 
     await safeNotify(req.app.get('io'), alert.userId, {
       societyId: alert.societyId,

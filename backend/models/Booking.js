@@ -75,6 +75,12 @@ const bookingSchema = new mongoose.Schema({
   },
   cancelledAt: {
     type: Date
+  },
+  // One key per slot while the booking is pending or approved, e.g. "<society>|Clubhouse|2026-10-20|18:00".
+  // A unique index on these keys is what stops two people holding the same slot.
+  slotKeys: {
+    type: [String],
+    default: []
   }
 }, {
   timestamps: true
@@ -90,5 +96,13 @@ bookingSchema.index({ startTime: 1, endTime: 1 });
 
 // Prevent double booking
 bookingSchema.index({ amenity: 1, startTime: 1, endTime: 1 });
+
+bookingSchema.index({ slotKeys: 1 }, { unique: true, partialFilterExpression: { 'slotKeys.0': { $exists: true } } });
+
+// A booking that is no longer pending or approved gives its slots back.
+bookingSchema.pre('validate', function releaseSlots(next) {
+  if (!['pending', 'approved'].includes(this.status)) this.slotKeys = [];
+  next();
+});
 
 module.exports = mongoose.model('Booking', bookingSchema);
