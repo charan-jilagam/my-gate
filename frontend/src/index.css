@@ -55,6 +55,12 @@
   html.dark {
     color-scheme: dark;
   }
+  /* Native dropdown lists ignore the page colours on some systems (white text on white). Pin them. */
+  select option,
+  select optgroup {
+    background-color: rgb(var(--surface, var(--bg)));
+    color: rgb(var(--ink));
+  }
   body {
     @apply bg-bg font-sans text-ink antialiased;
     margin: 0;

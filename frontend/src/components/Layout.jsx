@@ -385,7 +385,7 @@ const Layout = () => {
             <select
               value={lang}
               onChange={(e) => setLang(e.target.value)}
-              className="h-9 w-[5.5rem] cursor-pointer appearance-none truncate rounded-md bg-transparent py-0 pl-7 pr-1 text-xs font-semibold text-muted hover:text-ink focus:text-ink sm:w-auto sm:pr-2 sm:text-sm"
+              className="h-9 w-[5.5rem] cursor-pointer appearance-none truncate rounded-md border border-line bg-surface py-0 pl-7 pr-2 text-xs font-semibold text-ink hover:border-brand focus:border-brand sm:w-auto sm:pr-2 sm:text-sm"
             >
               {LANGUAGES.map((l) => (
                 <option key={l.code} value={l.code}>
