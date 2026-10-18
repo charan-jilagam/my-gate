@@ -85,7 +85,7 @@ const ServiceRequestDetail = () => {
                   {r.images.map((img) => (
                     <li key={img.url}>
                       <a href={imgSrc(img.url)} target="_blank" rel="noreferrer">
-                        <img src={imgSrc(img.url)} alt={img.name || 'Photo of the problem'} className="h-24 w-24 rounded-md object-cover ring-1 ring-line" />
+                        <img src={imgSrc(img.url)} alt={img.name || 'Photo of the problem'} className="h-24 w-24 rounded-md object-cover ring-1 ring-edge" />
                       </a>
                     </li>
                   ))}

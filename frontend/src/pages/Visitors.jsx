@@ -89,7 +89,7 @@ const GatePass = ({ visitor, host }) => {
         </div>
         <div className="ticket-notch relative border-t-2 border-dashed border-brand-ink/30" aria-hidden="true" />
         <div className="bg-surface px-5 pb-5 pt-5 text-center text-ink">
-          <div className="mx-auto inline-block rounded-xl bg-white p-2.5 ring-1 ring-line">
+          <div className="mx-auto inline-block rounded-xl bg-white p-2.5 ring-1 ring-edge">
             <QRCodeSVG value={visitor.qrCode} size={168} />
           </div>
           <p className="mt-3 text-xs font-semibold text-muted">Pass code for the guard</p>
@@ -354,7 +354,7 @@ const Visitors = () => {
             aria-selected={filter === f.key}
             onClick={() => setFilter(f.key)}
             className={`rounded-md px-3 py-1.5 text-sm font-semibold transition-colors ${
-              filter === f.key ? 'bg-brand text-brand-ink' : 'bg-surface text-muted ring-1 ring-line hover:text-ink'
+              filter === f.key ? 'bg-brand text-brand-ink' : 'bg-surface text-muted ring-1 ring-edge hover:text-ink'
             }`}
           >
             {f.label}

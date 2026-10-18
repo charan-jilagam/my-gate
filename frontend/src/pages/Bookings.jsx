@@ -234,7 +234,7 @@ const Bookings = () => {
       <div className="mb-4 flex flex-wrap gap-2" role="tablist" aria-label="Filter bookings">
         {FILTERS.map((f) => (
           <button key={f.key} role="tab" aria-selected={filter === f.key} onClick={() => setFilter(f.key)}
-            className={`rounded-md px-3 py-1.5 text-sm font-semibold transition-colors ${filter === f.key ? 'bg-brand text-brand-ink' : 'bg-surface text-muted ring-1 ring-line hover:text-ink'}`}>
+            className={`rounded-md px-3 py-1.5 text-sm font-semibold transition-colors ${filter === f.key ? 'bg-brand text-brand-ink' : 'bg-surface text-muted ring-1 ring-edge hover:text-ink'}`}>
             {f.label}
           </button>
         ))}

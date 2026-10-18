@@ -237,7 +237,7 @@ const AdminSocieties = () => {
           {amenities.map((a, i) => {
             const set = (patch) => setAmenities(amenities.map((x, j) => (j === i ? { ...x, ...patch } : x)))
             return (
-              <div key={a._id || i} className="space-y-3 rounded-md border border-line p-3">
+              <div key={a._id || i} className="space-y-3 rounded-md border border-edge p-3">
                 <div className="grid items-end gap-3 sm:grid-cols-[1fr_100px_110px_auto]">
                   <Field label="Name" htmlFor={`am-name-${i}`}><input id={`am-name-${i}`} className="input" value={a.name} onChange={(e) => set({ name: e.target.value })} /></Field>
                   <Field label="Capacity" htmlFor={`am-cap-${i}`}><input id={`am-cap-${i}`} type="number" min="1" className="input" value={a.capacity ?? ''} onChange={(e) => set({ capacity: e.target.value })} /></Field>

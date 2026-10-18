@@ -24,7 +24,7 @@ const VoterList = ({ electionId, eligible }) => {
   const pct = total ? Math.min(100, Math.round((data.votes / total) * 100)) : 0
 
   return (
-    <section className="rounded-xl border border-line" aria-label="Who has voted">
+    <section className="rounded-xl border border-edge" aria-label="Who has voted">
       <div className="px-4 pb-3 pt-4">
         <div className="flex items-end justify-between gap-3">
           <p className="font-display text-2xl font-extrabold leading-none">{pct}%<span className="ml-2 text-sm font-semibold text-muted">turnout</span></p>

@@ -111,7 +111,7 @@ const Complaints = () => {
             role="tab"
             aria-selected={filter === f.key}
             onClick={() => setFilter(f.key)}
-            className={`rounded-md px-3 py-1.5 text-sm font-semibold transition-colors ${filter === f.key ? 'bg-brand text-brand-ink' : 'bg-surface text-muted ring-1 ring-line hover:text-ink'}`}
+            className={`rounded-md px-3 py-1.5 text-sm font-semibold transition-colors ${filter === f.key ? 'bg-brand text-brand-ink' : 'bg-surface text-muted ring-1 ring-edge hover:text-ink'}`}
           >
             {f.label}
           </button>
@@ -200,7 +200,7 @@ const Complaints = () => {
                 <div className="mt-3 flex flex-wrap gap-2">
                   {detail.images.map((img) => (
                     <a key={img.url} href={imgSrc(img.url)} target="_blank" rel="noreferrer" aria-label="Open photo">
-                      <img src={imgSrc(img.url)} alt={img.name || 'Complaint photo'} className="h-24 w-24 rounded-md object-cover ring-1 ring-line" loading="lazy" />
+                      <img src={imgSrc(img.url)} alt={img.name || 'Complaint photo'} className="h-24 w-24 rounded-md object-cover ring-1 ring-edge" loading="lazy" />
                     </a>
                   ))}
                 </div>
@@ -213,7 +213,7 @@ const Complaints = () => {
                 <strong>Rated {detail.rating}/5</strong>{detail.feedback ? ` · ${detail.feedback}` : ''}
               </p>
             ) : isResident && ['resolved', 'closed'].includes(detail.status) ? (
-              <div className="rounded-md border border-line p-3">
+              <div className="rounded-md border border-edge p-3">
                 <p className="mb-2 text-sm font-semibold">How was this handled?</p>
                 <div className="mb-3 flex gap-1" role="radiogroup" aria-label="Rating">
                   {[1, 2, 3, 4, 5].map((n) => (
@@ -262,7 +262,7 @@ const Complaints = () => {
             )}
 
             {canManage && (
-              <div className="rounded-md border border-line p-3">
+              <div className="rounded-md border border-edge p-3">
                 <p className="mb-2 text-sm font-semibold">Update status</p>
                 <div className="grid gap-3 sm:grid-cols-[180px_1fr_auto]">
                   <select aria-label="Status" className="input" value={statusForm.status} onChange={(e) => setStatusForm({ ...statusForm, status: e.target.value })}>

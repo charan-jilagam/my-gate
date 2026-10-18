@@ -155,7 +155,7 @@ const Documents = () => {
               <legend className="label">File</legend>
               <div className="mb-2 flex gap-2">
                 {[['upload', 'Upload a PDF', FiUpload], ['link', 'Paste a link', FiLink]].map(([k, l, Icon]) => (
-                  <button key={k} type="button" onClick={() => { setMode(k); setForm({ ...form, url: '', fileName: '' }) }} className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-semibold ${mode === k ? 'bg-brand text-brand-ink' : 'bg-surface text-muted ring-1 ring-line'}`}>
+                  <button key={k} type="button" onClick={() => { setMode(k); setForm({ ...form, url: '', fileName: '' }) }} className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-semibold ${mode === k ? 'bg-brand text-brand-ink' : 'bg-surface text-muted ring-1 ring-edge'}`}>
                     <Icon size={14} /> {l}
                   </button>
                 ))}

@@ -14,7 +14,7 @@ const Rsvp = ({ notice, canReply, onDone }) => {
 
   const Btn = ({ status, icon: Icon, label }) => (
     <button type="button" aria-pressed={r.mine?.status === status} disabled={!!busy} onClick={() => reply(status)}
-      className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-semibold ring-1 ${r.mine?.status === status ? 'bg-brand text-brand-ink ring-brand' : 'bg-surface ring-line hover:bg-sunken'}`}>
+      className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-semibold ring-1 ${r.mine?.status === status ? 'bg-brand text-brand-ink ring-brand' : 'bg-surface ring-edge hover:bg-sunken'}`}>
       <Icon size={14} /> {label}
     </button>
   )

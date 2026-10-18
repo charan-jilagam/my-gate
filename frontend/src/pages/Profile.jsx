@@ -181,7 +181,7 @@ const Profile = () => {
         <section className="panel p-5">
           <div className="mb-5 flex items-center gap-4">
             {user?.profilePic ? (
-              <img src={imgSrc(user.profilePic)} alt="" className="h-14 w-14 rounded-full object-cover ring-1 ring-line" />
+              <img src={imgSrc(user.profilePic)} alt="" className="h-14 w-14 rounded-full object-cover ring-1 ring-edge" />
             ) : (
               <span className="grid h-14 w-14 place-items-center rounded-full bg-brand font-display text-xl font-bold text-brand-ink">
                 {(user?.name || '?').trim().charAt(0).toUpperCase()}
@@ -215,7 +215,7 @@ const Profile = () => {
               <input id="p-phone" type="tel" inputMode="numeric" maxLength={10} className="input" value={profile.phone} onChange={(e) => setProfile({ ...profile, phone: e.target.value })} />
             </Field>
             {user?.phoneVerified === false && (
-              <div className="rounded-xl border border-line bg-amber-soft px-4 py-3" role="group" aria-label="Verify your mobile number">
+              <div className="rounded-xl border border-edge bg-amber-soft px-4 py-3" role="group" aria-label="Verify your mobile number">
                 <p className="text-sm font-semibold">Confirm your mobile number</p>
                 <p className="mb-2 text-xs text-muted">Enter the 6-digit code we texted to {user.phone}.</p>
                 <div className="flex flex-wrap items-center gap-2">

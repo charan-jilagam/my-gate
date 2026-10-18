@@ -25,7 +25,7 @@ const VisitorCard = ({ visitor: v, actions }) => {
   const approverIsHost = approver && host && String(approver._id || approver) === String(host._id || host)
 
   return (
-    <div className="fade-in overflow-hidden rounded-2xl border border-line bg-surface shadow-card">
+    <div className="fade-in overflow-hidden rounded-2xl border border-edge bg-surface shadow-card">
       <div className="flex flex-wrap items-center gap-3 bg-brand-soft/60 px-5 py-4">
         <Avatar name={v.name} size={48} />
         <div className="min-w-0 flex-1">

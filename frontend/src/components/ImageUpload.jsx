@@ -70,7 +70,7 @@ const ImageUpload = ({ value = [], onChange, max = 4, label = 'Add photos' }) =>
     <div>
       <div className="flex flex-wrap gap-2">
         {value.map((img, i) => (
-          <div key={img.url} className="relative h-20 w-20 overflow-hidden rounded-md ring-1 ring-line">
+          <div key={img.url} className="relative h-20 w-20 overflow-hidden rounded-md ring-1 ring-edge">
             <img src={imgSrc(img.url)} alt={img.name || `Photo ${i + 1}`} className="h-full w-full object-cover" />
             <button
               type="button"

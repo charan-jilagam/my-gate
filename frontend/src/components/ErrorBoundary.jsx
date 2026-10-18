@@ -27,7 +27,7 @@ class ErrorBoundary extends Component {
     if (!error) return this.props.children
     const text = String(error?.message || error)
     return (
-      <div role="alert" className="mx-auto mt-10 max-w-lg rounded-2xl border border-line bg-surface p-8 text-center shadow-card">
+      <div role="alert" className="mx-auto mt-10 max-w-lg rounded-2xl border border-edge bg-surface p-8 text-center shadow-card">
         <span className="mx-auto grid h-12 w-12 place-items-center rounded-full bg-danger-soft text-danger"><FiAlertTriangle size={22} /></span>
         <h1 className="mt-4 font-display text-2xl font-extrabold">This screen hit a problem</h1>
         <p className="mt-2 text-sm text-muted">Nothing you did was lost. Try again, and if it keeps happening, send the details below to the person who looks after the app.</p>

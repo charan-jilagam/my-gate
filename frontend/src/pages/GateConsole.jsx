@@ -351,7 +351,7 @@ const GateConsole = () => {
           </div>
           {vehicleError && <p role="alert" className="mt-3 text-sm font-medium text-danger">{vehicleError}</p>}
           {vehicle && (
-            <div className="mt-4 flex flex-wrap items-center gap-3 rounded-md border border-line bg-sunken/60 p-3">
+            <div className="mt-4 flex flex-wrap items-center gap-3 rounded-md border border-edge bg-sunken/60 p-3">
               <div className="min-w-0 flex-1">
                 <p className="font-mono text-lg font-bold">{vehicle.vehicleNumber}</p>
                 <p className="text-xs text-muted">{[titleCase(vehicle.vehicleType), vehicle.brand, vehicle.color].filter(Boolean).join(' · ')} · {vehicle.residentId?.name} ({vehicle.residentId?.flatNo})</p>

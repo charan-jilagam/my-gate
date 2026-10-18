@@ -278,7 +278,7 @@ const Notifications = () => {
         )}
       </button>
       {open && (
-        <div className="absolute right-0 z-40 mt-2 w-[min(92vw,400px)] overflow-hidden rounded-xl border border-line bg-surface shadow-pop">
+        <div className="absolute right-0 z-40 mt-2 w-[min(92vw,400px)] overflow-hidden rounded-xl border border-edge bg-surface shadow-pop">
           <div className="flex items-center justify-between border-b border-line px-4 py-3">
             <div>
               <p className="font-display font-bold">Notifications</p>
@@ -452,7 +452,7 @@ const Layout = () => {
             <select
               value={lang}
               onChange={(e) => setLang(e.target.value)}
-              className="h-9 w-[5.5rem] cursor-pointer appearance-none truncate rounded-md border border-line bg-surface py-0 pl-7 pr-2 text-xs font-semibold text-ink hover:border-brand focus:border-brand sm:w-auto sm:pr-2 sm:text-sm"
+              className="h-9 w-[5.5rem] cursor-pointer appearance-none truncate rounded-md border border-edge bg-surface py-0 pl-7 pr-2 text-xs font-semibold text-ink hover:border-brand focus:border-brand sm:w-auto sm:pr-2 sm:text-sm"
             >
               {LANGUAGES.map((l) => (
                 <option key={l.code} value={l.code}>

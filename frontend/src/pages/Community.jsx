@@ -101,7 +101,7 @@ const Community = () => {
       <div className="mb-3 flex gap-2 overflow-x-auto pb-1" role="tablist" aria-label="Category">
         {[{ key: '', label: 'All' }, ...CATEGORIES].map((c) => (
           <button key={c.key} role="tab" aria-selected={category === c.key} onClick={() => setCategory(c.key)}
-            className={`shrink-0 rounded-full px-3.5 py-1.5 text-sm font-semibold ${category === c.key ? 'bg-brand text-brand-ink' : 'bg-surface text-muted ring-1 ring-line hover:text-ink'}`}>
+            className={`shrink-0 rounded-full px-3.5 py-1.5 text-sm font-semibold ${category === c.key ? 'bg-brand text-brand-ink' : 'bg-surface text-muted ring-1 ring-edge hover:text-ink'}`}>
             {c.label}
           </button>
         ))}

@@ -115,7 +115,7 @@ const Upkeep = () => {
             <div>
               <h3 className="mb-2 flex items-center gap-1.5 font-bold"><FiClock size={14} /> History</h3>
               {!open.history.length ? <p className="text-muted">Nothing recorded yet.</p> : (
-                <ul className="divide-y divide-line rounded-md border border-line">
+                <ul className="divide-y divide-line rounded-md border border-edge">
                   {open.history.map((h) => (
                     <li key={h._id} className="px-3 py-2">
                       <p className="font-semibold">{dayLabel(h.doneOn)}{h.byName ? <span className="font-normal text-muted"> · {h.byName}</span> : null}{h.cost > 0 ? <span className="float-right">{formatINR(h.cost)}</span> : null}</p>

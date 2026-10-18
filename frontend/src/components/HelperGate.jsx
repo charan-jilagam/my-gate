@@ -85,7 +85,7 @@ const HelperGate = () => {
         {error && <p role="alert" className="mt-3 text-sm font-medium text-danger">{error}</p>}
 
         {helper && (
-          <div className="fade-in mt-4 flex flex-wrap items-center gap-4 rounded-xl border border-line bg-sunken/60 p-4" role="status">
+          <div className="fade-in mt-4 flex flex-wrap items-center gap-4 rounded-xl border border-edge bg-sunken/60 p-4" role="status">
             <Avatar name={helper.name} src={helper.photo} size={52} />
             <div className="min-w-0 flex-1">
               <p className="font-display text-lg font-bold">{helper.name}</p>

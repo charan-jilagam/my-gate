@@ -363,7 +363,7 @@ export const Tabs = ({ items, value, onChange, label = 'Sections' }) => {
           aria-selected={value === item.key}
           onClick={() => onChange(item.key)}
           className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-semibold transition-colors ${
-            value === item.key ? 'bg-brand text-brand-ink' : 'bg-surface text-muted ring-1 ring-line hover:text-ink'
+            value === item.key ? 'bg-brand text-brand-ink' : 'bg-surface text-muted ring-1 ring-edge hover:text-ink'
           }`}
         >
           {t(item.label)}

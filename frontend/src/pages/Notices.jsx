@@ -38,7 +38,7 @@ const Poll = ({ notice, userId, canVote, onVote, busy }) => {
       {notice.pollOptions.map((o, i) => {
         const pct = total ? Math.round((o.votes.length / total) * 100) : 0
         return showResults ? (
-          <div key={o._id || i} className="relative overflow-hidden rounded-md border border-line px-3 py-2 text-sm">
+          <div key={o._id || i} className="relative overflow-hidden rounded-md border border-edge px-3 py-2 text-sm">
             <span className="absolute inset-y-0 left-0 bg-brand-soft" style={{ width: `${pct}%` }} aria-hidden="true" />
             <span className="relative flex justify-between gap-3">
               <span className="font-medium">{o.option}</span>

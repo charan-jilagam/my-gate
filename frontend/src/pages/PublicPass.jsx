@@ -64,7 +64,7 @@ const PublicPass = () => {
             <div className="bg-surface px-5 pb-5 pt-5 text-center text-ink">
               {pass.usable ? (
                 <>
-                  <div className="mx-auto inline-block rounded-xl bg-white p-2.5 ring-1 ring-line"><QRCodeSVG value={pass.qr} size={176} /></div>
+                  <div className="mx-auto inline-block rounded-xl bg-white p-2.5 ring-1 ring-edge"><QRCodeSVG value={pass.qr} size={176} /></div>
                   <p className="mt-3 text-xs font-semibold text-muted">Pass code for the guard</p>
                   <p className="font-mono text-2xl font-bold tracking-[0.25em]">{pass.code}</p>
                   <button className="btn-secondary btn-sm mt-3" onClick={copy}><FiCopy size={14} /> Copy code</button>

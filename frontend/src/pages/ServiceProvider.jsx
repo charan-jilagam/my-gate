@@ -174,7 +174,7 @@ const ServiceProvider = () => {
               <Field label="Photos" hint="Optional. A picture of the problem saves a trip.">
                 <ImageUpload value={form.images} onChange={(images) => setForm({ ...form, images })} max={4} />
               </Field>
-              <label className="flex cursor-pointer items-start gap-3 rounded-md border border-line p-3">
+              <label className="flex cursor-pointer items-start gap-3 rounded-md border border-edge p-3">
                 <input type="checkbox" className="mt-1" checked={form.urgency === 'urgent'} onChange={(e) => setForm({ ...form, urgency: e.target.checked ? 'urgent' : 'normal' })} />
                 <span>
                   <span className="block text-sm font-semibold">This is urgent</span>

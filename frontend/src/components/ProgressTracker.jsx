@@ -32,9 +32,13 @@ const ProgressTracker = ({ status, history = [] }) => {
     steps = FLOW.map((s, i) => ({ ...s, at: when[s.status], state: status === 'completed' || i < current ? 'done' : i === current ? 'now' : 'todo' }))
   }
 
-  const doneCount = steps.filter((s) => s.state === 'done' || s.state === 'now').length
-  const percent = ended ? Math.round(((steps.length - 1) / FLOW.length) * 100) : Math.round((doneCount / steps.length) * 100)
+  // The bar runs from the first dot to the last one shown and fills up to the dot where the job is now,
+  // so a cancelled job's red bar ends exactly at the red Cancelled dot.
+  const now = steps.findIndex((s) => s.state === 'now' || s.state === 'bad')
+  const at = status === 'completed' ? steps.length - 1 : Math.max(0, now)
+  const percent = steps.length > 1 ? Math.round((at / (steps.length - 1)) * 100) : 100
   const barTone = ended ? 'bg-danger' : 'bg-ok'
+  const inset = `${50 / steps.length}%` // half a step on each side: the centres of the first and last dots
 
   return (
     <div>
@@ -63,7 +67,7 @@ const ProgressTracker = ({ status, history = [] }) => {
           )
         })}
       </ol>
-      <div className="mt-5">
+      <div className="mt-5" style={{ marginLeft: inset, marginRight: inset }}>
         <div className="h-2 overflow-hidden rounded-full bg-sunken" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent}>
           <div className={`h-full rounded-full ${barTone} transition-all duration-700 ease-out`} style={{ width: `${percent}%` }} />
         </div>

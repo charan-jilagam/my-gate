@@ -5,10 +5,11 @@
 :root {
   --bg: 244 246 244;
   --surface: 255 255 255;
-  --sunken: 236 240 238;
+  --sunken: 229 235 232;
   --ink: 18 42 41;
   --muted: 91 111 109;
-  --line: 218 227 224;
+  --line: 205 216 213; /* dividers */
+  --edge: 168 183 179; /* outlines of fields, buttons, chips and cards: strong enough to see on white */
   --brand: 15 76 74;
   --brand-strong: 10 58 57;
   --brand-soft: 222 238 236;
@@ -33,6 +34,7 @@
   --ink: 231 238 238;
   --muted: 150 166 168;
   --line: 44 60 63;
+  --edge: 44 60 63;
   --brand: 78 196 187;
   --brand-strong: 112 214 205;
   --brand-soft: 24 54 56;
@@ -84,7 +86,7 @@
     @apply btn bg-brand text-brand-ink hover:bg-brand-strong;
   }
   .btn-secondary {
-    @apply btn border border-line bg-surface text-ink hover:bg-sunken;
+    @apply btn border border-edge bg-surface text-ink hover:bg-sunken;
   }
   .btn-ghost {
     @apply btn text-muted hover:bg-sunken hover:text-ink;
@@ -100,13 +102,13 @@
   }
   /* 16px on phones: anything smaller makes iOS zoom the page when a field is focused. */
   .input {
-    @apply block min-h-[42px] w-full rounded-lg border border-line bg-surface px-3 py-2 text-base text-ink sm:text-sm placeholder:text-muted/70 transition-colors focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/25 disabled:bg-sunken;
+    @apply block min-h-[42px] w-full rounded-lg border border-edge bg-surface px-3 py-2 text-base text-ink sm:text-sm placeholder:text-muted/70 transition-colors focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/25 disabled:bg-sunken;
   }
   .label {
     @apply mb-1 block text-sm font-semibold text-ink;
   }
   .panel {
-    @apply rounded-xl border border-line bg-surface shadow-card dark:shadow-none;
+    @apply rounded-xl border border-edge bg-surface shadow-card dark:shadow-none;
   }
   /* A card you can tap: lifts a little on hover. */
   .panel-link {

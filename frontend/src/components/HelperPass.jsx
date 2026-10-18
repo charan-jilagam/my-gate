@@ -36,7 +36,7 @@ const HelperPass = ({ helper, onClose }) => {
           <Avatar name={helper.name} src={helper.photo} size={56} className="mx-auto" />
           <p className="mt-2 font-display text-xl font-extrabold">{helper.name}</p>
           <p className="text-sm text-muted">Daily help pass</p>
-          <div className="mx-auto mt-4 grid h-52 w-52 place-items-center rounded-xl bg-white p-2 ring-1 ring-line">
+          <div className="mx-auto mt-4 grid h-52 w-52 place-items-center rounded-xl bg-white p-2 ring-1 ring-edge">
             {pass ? <img src={pass.qrCodeImage} alt={`QR code for ${helper.name}`} className="h-full w-full" /> : error ? <p role="alert" className="px-3 text-sm text-danger">{error}</p> : <Spinner className="h-6 w-6 text-brand" />}
           </div>
           {pass && (

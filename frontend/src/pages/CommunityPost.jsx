@@ -116,7 +116,7 @@ const CommunityPost = () => {
         {post.images?.length > 0 && (
           <ul className="mt-3 flex flex-wrap gap-2">
             {post.images.map((img) => (
-              <li key={img.url}><a href={imgSrc(img.url)} target="_blank" rel="noreferrer"><img src={imgSrc(img.url)} alt={img.name || 'Photo'} className="h-40 w-40 rounded-xl object-cover ring-1 ring-line transition-transform hover:scale-[1.02]" /></a></li>
+              <li key={img.url}><a href={imgSrc(img.url)} target="_blank" rel="noreferrer"><img src={imgSrc(img.url)} alt={img.name || 'Photo'} className="h-40 w-40 rounded-xl object-cover ring-1 ring-edge transition-transform hover:scale-[1.02]" /></a></li>
             ))}
           </ul>
         )}

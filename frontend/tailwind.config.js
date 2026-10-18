@@ -15,6 +15,7 @@ export default {
         side: 'rgb(var(--side) / <alpha-value>)',
         'on-solid': 'rgb(var(--on-solid) / <alpha-value>)',
         line: 'rgb(var(--line) / <alpha-value>)',
+        edge: 'rgb(var(--edge) / <alpha-value>)',
         brand: {
           DEFAULT: 'rgb(var(--brand) / <alpha-value>)',
           strong: 'rgb(var(--brand-strong) / <alpha-value>)',
