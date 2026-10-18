@@ -250,7 +250,7 @@ describe('verifying an email and a mobile number', () => {
     mockingoose(User).toReturn(null, 'findOne');
     const res = await h.api().post('/api/auth/register').send(body);
     expect(res.status).toBe(201);
-    expect(res.body).toMatchObject({ needsVerification: true, email: 'new@example.com', channels: ['email', 'phone'] });
+    expect(res.body).toMatchObject({ needsVerification: true, email: 'new@example.com', channels: ['email'] });
     expect(res.body.token).toBeUndefined();
     const saved = h.savedDocs(User)[0];
     expect(saved).toMatchObject({ emailVerified: false, phoneVerified: false, isApproved: false });
@@ -272,9 +272,18 @@ describe('verifying an email and a mobile number', () => {
     mockingoose(User).toReturn(user, 'findOne');
     const res = await h.api().post('/api/auth/login').send({ email: 'new@example.com', password: 'Passw0rd123' });
     expect(res.status).toBe(403);
-    expect(res.body).toMatchObject({ needsVerification: true, channels: ['email', 'phone'] });
+    expect(res.body).toMatchObject({ needsVerification: true, channels: ['email'] });
     expect(res.body.token).toBeUndefined();
     expect(spy).toHaveBeenCalled();
+  });
+
+  test('a verified email is enough to sign in: the mobile number can stay unverified', async () => {
+    const user = h.makeUser({ email: 'new@example.com', emailVerified: true, phoneVerified: false });
+    user.password = bcrypt.hashSync('Passw0rd123', 4);
+    mockingoose(User).toReturn(user, 'findOne');
+    const res = await h.api().post('/api/auth/login').send({ email: 'new@example.com', password: 'Passw0rd123' });
+    expect(res.status).toBe(200);
+    expect(res.body.token).toBeTruthy();
   });
 
   test('a wrong password still looks like a wrong password, not a verification prompt', async () => {
@@ -299,12 +308,31 @@ describe('verifying an email and a mobile number', () => {
     return u;
   };
 
-  test('the right email code verifies the email and asks for the mobile code', async () => {
+  test('the right email code finishes verification; the mobile code is optional', async () => {
     mockingoose(User).toReturn(pending(), 'findOne');
     const res = await h.api().post('/api/auth/otp/verify').send({ email: 'new@example.com', emailCode: '123456' });
     expect(res.status).toBe(200);
-    expect(res.body).toMatchObject({ success: true, pending: ['phone'], done: false });
+    expect(res.body).toMatchObject({ success: true, pending: [], done: true });
     expect(h.savedDocs(User)[0].emailVerified).toBe(true);
+  });
+
+  describe('when OTP_REQUIRE_PHONE=true the mobile code is compulsory', () => {
+    beforeEach(() => { process.env.OTP_REQUIRE_PHONE = 'true'; });
+    afterEach(() => { delete process.env.OTP_REQUIRE_PHONE; });
+
+    test('sign-up asks for both codes', async () => {
+      logs();
+      mockingoose(Society).toReturn({ _id: h.SOCIETY_ID, name: 'Green Heights' }, 'findOne');
+      mockingoose(User).toReturn(null, 'findOne');
+      const res = await h.api().post('/api/auth/register').send(body);
+      expect(res.body.channels).toEqual(['email', 'phone']);
+    });
+
+    test('the email code alone leaves the mobile code pending', async () => {
+      mockingoose(User).toReturn(pending(), 'findOne');
+      const res = await h.api().post('/api/auth/otp/verify').send({ email: 'new@example.com', emailCode: '123456' });
+      expect(res.body).toMatchObject({ success: true, pending: ['phone'], done: false });
+    });
   });
 
   test('both codes together finish verification', async () => {
@@ -432,12 +460,14 @@ describe('sending the mobile code', () => {
     expect(require('../utils/sms').isSmsConfigured()).toBe(true);
   });
 
-  test('a mobile code is only required in production when a gateway exists', () => {
+  test('a mobile code is optional unless OTP_REQUIRE_PHONE=true, even with a working gateway', () => {
     const was = process.env.NODE_ENV;
     process.env.NODE_ENV = 'production';
     expect(otp.requiredChannels()).toEqual(['email']);
     process.env.SMS_PROVIDER = '2factor';
     process.env.TWOFACTOR_API_KEY = 'KEY';
+    expect(otp.requiredChannels()).toEqual(['email']);
+    process.env.OTP_REQUIRE_PHONE = 'true';
     expect(otp.requiredChannels()).toEqual(['email', 'phone']);
     process.env.NODE_ENV = was;
   });

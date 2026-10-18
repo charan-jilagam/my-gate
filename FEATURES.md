@@ -172,7 +172,7 @@ Notes: the Hindi and Telugu wording for these screens was written by the assista
 
 1. **Email (free).** Turn on 2-step verification on a Gmail account, create an App password, then set `EMAIL_USER` and `EMAIL_PASS` in `backend/.env`. Leave them empty while developing and the code is printed in the backend terminal.
 2. **Mobile.** Leave `SMS_PROVIDER=console` while developing: the code is printed in the backend terminal. For real delivery set `SMS_PROVIDER=2factor` with `TWOFACTOR_API_KEY`, or `fast2sms` with `FAST2SMS_API_KEY`. Check each service for its current free credits and prices; none of them promises unlimited free texts.
-3. In production, email is always required. A mobile code is required only when a real gateway is configured (`OTP_REQUIRE_PHONE=true` or `false` overrides this), so a server without a gateway never locks people out.
+3. Email is always required. The **mobile code is optional**: sign-up and sign-in only ask for the email code, and a person can verify their number later from Profile. Set `OTP_REQUIRE_PHONE=true` to make the mobile code compulsory once your SMS provider works.
 
 Notes: nobody who signed up before this release is asked to verify. The Hindi and Telugu wording for the new screens was written by the assistant and should be reviewed by a native speaker. Visitor records made before this release count as invited visitors (they need the code).
 

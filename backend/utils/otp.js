@@ -13,13 +13,13 @@ const CHANNELS = ['email', 'phone'];
 const secret = () => process.env.JWT_SECRET || 'otp';
 const digest = (userId, channel, code) => crypto.createHmac('sha256', secret()).update(`${userId}:${channel}:${code}`).digest('hex');
 
-// Email is always checked. A mobile number is checked when a real SMS gateway is set up, or when running
-// locally (the code is printed in the terminal). OTP_REQUIRE_PHONE=true or false overrides this.
+// Email is always checked. Checking the mobile number is optional: it is only demanded when OTP_REQUIRE_PHONE=true.
+// Anyone can still verify their number later from Profile.
 const phoneRequired = () => {
   const v = String(process.env.OTP_REQUIRE_PHONE || 'auto').toLowerCase();
   if (v === 'true') return true;
   if (v === 'false') return false;
-  return isOtpSmsLive() || process.env.NODE_ENV !== 'production';
+  return false;
 };
 
 const requiredChannels = () => (phoneRequired() ? ['email', 'phone'] : ['email']);
