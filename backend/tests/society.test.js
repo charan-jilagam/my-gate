@@ -1,4 +1,5 @@
 const h = require('./helpers/harness');
+const { todayIn, DEFAULT_TZ } = require('../utils/timezone');
 const { mockingoose, mongoose } = h;
 const EmergencyAlert = require('../models/EmergencyAlert');
 const EmergencyContact = require('../models/EmergencyContact');
@@ -135,7 +136,7 @@ describe('emergency contacts', () => {
 
 describe('daily help', () => {
   const makeHelp = (over = {}) =>
-    new DailyHelp({ _id: h.oid(), societyId: h.SOCIETY_ID, name: 'Lakshmi', kind: 'maid', code: '482913', residents: [{ userId: resident._id, flat: 'A-101' }], ...over });
+    new DailyHelp({ _id: h.oid(), societyId: h.SOCIETY_ID, name: 'Lakshmi', kind: 'maid', code: '482913', codeDate: todayIn(DEFAULT_TZ), residents: [{ userId: resident._id, flat: 'A-101' }], ...over });
 
   test('adding a helper gives a six digit code and links the resident', async () => {
     mockingoose(DailyHelp).toReturn(0, 'countDocuments');
@@ -146,6 +147,45 @@ describe('daily help', () => {
     expect(saved.residents).toHaveLength(1);
     expect(String(saved.residents[0].userId)).toBe(String(resident._id));
     expect(res.body.helper.code).toBe(saved.code);
+  });
+
+  test('a new helper gets today\'s code and is stamped with today', async () => {
+    mockingoose(DailyHelp).toReturn(0, 'countDocuments');
+    await h.api().post('/api/daily-help').set(h.auth(resident)).send({ name: 'Lakshmi' });
+    expect(h.savedDocs(DailyHelp)[0].codeDate).toBe(todayIn(DEFAULT_TZ));
+  });
+
+  test('a code from an earlier day is replaced with a new one when the resident opens the list', async () => {
+    const old = makeHelp({ codeDate: '2020-01-01' });
+    mockingoose(DailyHelp).toReturn([old], 'find');
+    mockingoose(HelpAttendance).toReturn([], 'find');
+    mockingoose(DailyHelp).toReturn(makeHelp({ code: '654321', codeDate: todayIn(DEFAULT_TZ) }), 'findOneAndUpdate');
+    const res = await h.api().get('/api/daily-help').set(h.auth(resident));
+    expect(res.status).toBe(200);
+    expect(res.body.helpers[0].code).toBe('654321');
+    expect(res.body.helpers[0].code).not.toBe('482913');
+  });
+
+  test('a code that is already today\'s is left alone', async () => {
+    mockingoose(DailyHelp).toReturn([makeHelp()], 'find');
+    mockingoose(HelpAttendance).toReturn([], 'find');
+    mockingoose(DailyHelp).toReturn(makeHelp({ code: '999999' }), 'findOneAndUpdate');
+    const res = await h.api().get('/api/daily-help').set(h.auth(resident));
+    expect(res.body.helpers[0].code).toBe('482913');
+  });
+
+  test('the pass says which day the code is for', async () => {
+    mockingoose(DailyHelp).toReturn(makeHelp(), 'findOne');
+    const res = await h.api().get(`/api/daily-help/${h.oid()}/pass`).set(h.auth(resident));
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ code: '482913', validOn: todayIn(DEFAULT_TZ) });
+  });
+
+  test('yesterday\'s code is refused with a hint that codes change daily', async () => {
+    mockingoose(DailyHelp).toReturn(null, 'findOne');
+    const res = await h.api().post('/api/daily-help/check').set(h.auth(guard)).send({ code: '482913' });
+    expect(res.status).toBe(404);
+    expect(res.body.message).toMatch(/every day/);
   });
 
   test('retries when the generated code is already taken', async () => {

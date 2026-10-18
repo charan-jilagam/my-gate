@@ -74,6 +74,22 @@ describe('check-in needs the pass code', () => {
     expect(res.body.message).toMatch(/expired/);
   });
 
+  test('the resident can allow a longer or shorter validity than the 24 hour default', async () => {
+    // 30 hours late: expired under the default, still fine when the resident allowed 48 hours
+    mockingoose(Visitor).toReturn(visit({ expectedArrival: new Date(Date.now() - 30 * HOUR), validForHours: 48 }), 'findOne');
+    expect((await put(h.oid(), 'check-in', guard, { code: 'abcdef12', stayMinutes: 60 })).status).toBe(200);
+    // 3 hours late with a 2 hour validity is expired
+    mockingoose(Visitor).toReturn(visit({ expectedArrival: new Date(Date.now() - 3 * HOUR), validForHours: 2 }), 'findOne');
+    const late = await put(h.oid(), 'check-in', guard, { code: 'abcdef12', stayMinutes: 60 });
+    expect(late.status).toBe(400);
+    expect(late.body.message).toMatch(/expired/);
+  });
+
+  test('an invitation with no arrival time lasts from when it was created', async () => {
+    mockingoose(Visitor).toReturn(visit({ createdAt: new Date(Date.now() - 30 * HOUR) }), 'findOne');
+    expect((await put(h.oid(), 'check-in', guard, { code: 'abcdef12', stayMinutes: 60 })).status).toBe(400);
+  });
+
   test('a visitor the resident has not approved cannot go in', async () => {
     mockingoose(Visitor).toReturn(visit({ approved: false, status: 'pending', source: 'walk_in' }), 'findOne');
     const res = await put(h.oid(), 'check-in', guard, { stayMinutes: 60 });
@@ -386,5 +402,46 @@ describe('sending the mobile code', () => {
     process.env.TWOFACTOR_API_KEY = 'KEY';
     expect(otp.requiredChannels()).toEqual(['email', 'phone']);
     process.env.NODE_ENV = was;
+  });
+});
+
+describe('invitation validity set by the resident', () => {
+  beforeEach(() => mockingoose(User).toReturn([], 'find'));
+  const invite = (extra = {}) => h.api().post('/api/visitors/invite').set(h.auth(resident)).send({ name: 'Ravi', phone: '9876543210', purpose: 'personal', ...extra });
+
+  test('defaults to 24 hours', async () => {
+    const res = await invite();
+    expect(res.status).toBe(201);
+    expect(h.savedDocs(Visitor)[0].validForHours).toBe(24);
+    expect(res.body.visitor.validForHours).toBe(24);
+  });
+
+  test('the resident can choose how long it stays valid', async () => {
+    const arrival = new Date(Date.now() + 2 * HOUR);
+    const res = await invite({ expectedArrival: arrival.toISOString(), validForHours: 6 });
+    expect(res.status).toBe(201);
+    expect(h.savedDocs(Visitor)[0].validForHours).toBe(6);
+    expect(new Date(res.body.visitor.expiresAt).getTime()).toBe(arrival.getTime() + 6 * HOUR);
+  });
+
+  test('nonsense validity is refused', async () => {
+    expect((await invite({ validForHours: 0.5 })).status).toBe(400);
+    expect((await invite({ validForHours: 100000 })).status).toBe(400);
+    expect((await invite({ validForHours: 'abc' })).status).toBe(400);
+  });
+
+  test('can be changed while the invitation is unused', async () => {
+    mockingoose(Visitor).toReturn(visit(), 'findOne');
+    const res = await h.api().put(`/api/visitors/${h.oid()}`).set(h.auth(resident)).send({ validForHours: 72 });
+    expect(res.status).toBe(200);
+    expect(h.savedDocs(Visitor)[0].validForHours).toBe(72);
+  });
+
+  test('an expired pass is flagged for the resident', async () => {
+    mockingoose(Visitor).toReturn([visit({ expectedArrival: new Date(Date.now() - 30 * HOUR) })], 'find');
+    mockingoose(Visitor).toReturn(1, 'countDocuments');
+    const res = await h.api().get('/api/visitors').set(h.auth(resident));
+    expect(res.status).toBe(200);
+    expect(res.body.visitors[0].expired).toBe(true);
   });
 });

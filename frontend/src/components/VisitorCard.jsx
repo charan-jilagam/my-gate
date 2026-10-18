@@ -67,6 +67,9 @@ const VisitorCard = ({ visitor: v, actions }) => {
         {v.expectedArrival && v.status === 'approved' && (
           <Fact icon={FiClock} label="Expected at">{clockWithDay(v.expectedArrival)}</Fact>
         )}
+        {v.expiresAt && v.status === 'approved' && v.requiresCode !== false && (
+          <Fact icon={FiClock} label={v.expired ? 'Expired' : 'Valid until'}>{clockWithDay(v.expiresAt)}</Fact>
+        )}
         {v.entryTime && (
           <Fact icon={FiClock} label="Timing">
             {`In at ${clock(v.entryTime)}`}

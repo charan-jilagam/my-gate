@@ -41,12 +41,13 @@ const HelperPass = ({ helper, onClose }) => {
           </div>
           {pass && (
             <>
-              <p className="mt-3 text-xs font-semibold text-muted">Gate code</p>
+              <p className="mt-3 text-xs font-semibold text-muted">Today's gate code</p>
               <p className="font-mono text-2xl font-bold tracking-[0.25em]">{pass.code}</p>
               <button className="btn-secondary btn-sm mt-3" onClick={copy}><FiCopy size={14} /> Copy code</button>
             </>
           )}
           <p className="mt-4 text-sm text-muted">They show this to the guard when they arrive and again when they leave.</p>
+          <p className="mt-1 text-sm text-muted">The code changes every day. Open this pass each morning to get the new one.</p>
         </div>
       )}
     </Modal>

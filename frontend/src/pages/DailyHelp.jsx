@@ -53,7 +53,7 @@ const DailyHelp = () => {
     <>
       <PageHeader
         title="Daily help"
-        subtitle={isResident ? 'Maids, cooks, drivers and others who come to your home. Each gets a QR code and a code for the gate, for coming in and for leaving.' : 'Household staff are checked in and out with their QR code or gate code.'}
+        subtitle={isResident ? 'Maids, cooks, drivers and others who come to your home. Each gets a QR code and a code for the gate, for coming in and for leaving. The code changes every day.' : 'Household staff are checked in and out with their QR code or gate code.'}
         action={isResident && (
           <div className="flex gap-2">
             <button className="btn-secondary" onClick={() => setLinking(true)}><FiLink size={15} /> Add by code</button>
@@ -79,7 +79,7 @@ const DailyHelp = () => {
                 </div>
                 {h.code && (
                   <div className="text-right">
-                    <p className="text-[11px] font-semibold uppercase text-muted">Gate code</p>
+                    <p className="text-[11px] font-semibold uppercase text-muted">Today's code</p>
                     <p className="font-display text-xl font-extrabold tracking-widest">{h.code}</p>
                   </div>
                 )}
@@ -117,7 +117,7 @@ const DailyHelp = () => {
           <button className="btn-secondary" onClick={() => setLinking(false)}>Cancel</button>
           <button className="btn-primary" disabled={linkCode.length !== 6 || busy === 'link'} onClick={async () => { const ok = await run('link', () => api.post('/daily-help/link', { code: linkCode }), 'Helper added'); if (ok) { setLinking(false); setLinkCode('') } }}>Add</button>
         </>}>
-        <Field label="Their gate code" htmlFor="l-code" hint="If your maid or driver already works for a neighbour, ask them for the code they show at the gate.">
+        <Field label="Their gate code" htmlFor="l-code" hint="If your maid or driver already works for a neighbour, ask them for the code they show at the gate today. Codes change every day.">
           <input id="l-code" className="input text-center font-display text-xl tracking-[0.3em]" inputMode="numeric" maxLength={6} value={linkCode} onChange={(e) => setLinkCode(e.target.value.replace(/\D/g, ''))} />
         </Field>
       </Modal>

@@ -17,7 +17,7 @@ import { clock, clockWithDay, flatText, floorOf, isOverdue, minutesOver, overTex
 import { Avatar, ConfirmDialog, DataList, EmptyState, Field, Modal, PageHeader, Spinner, StatusTag, formatDate, titleCase } from '../components/ui'
 
 const PURPOSES = ['personal', 'business', 'delivery', 'service', 'other']
-const EMPTY_FORM = { name: '', phone: '', purpose: 'personal', numberOfVisitors: 1, vehicleNumber: '', expectedArrival: '' }
+const EMPTY_FORM = { name: '', phone: '', purpose: 'personal', numberOfVisitors: 1, vehicleNumber: '', expectedArrival: '', validForHours: 24 }
 
 const FILTERS = [
   { key: 'all', label: 'All' },
@@ -39,7 +39,17 @@ const EXPORT_COLUMNS = [
   { header: 'In', value: (v) => (v.entryTime ? formatDate(v.entryTime, true) : '') },
   { header: 'Expected out', value: (v) => (v.expectedExit ? formatDate(v.expectedExit, true) : '') },
   { header: 'Out', value: (v) => (v.exitTime ? formatDate(v.exitTime, true) : '') },
-  { header: 'Status', value: (v) => titleCase(v.status) }
+  { header: 'Status', value: (v) => (v.expired ? 'Expired' : titleCase(v.status)) }
+]
+
+// How long an invitation keeps working after the time the guest was expected. 24 hours unless the resident changes it.
+const VALID_CHOICES = [
+  { hours: 6, label: '6 hours' },
+  { hours: 12, label: '12 hours' },
+  { hours: 24, label: '24 hours (recommended)' },
+  { hours: 48, label: '48 hours' },
+  { hours: 72, label: '3 days' },
+  { hours: 168, label: '7 days' }
 ]
 
 const GatePass = ({ visitor, host }) => {
@@ -74,6 +84,7 @@ const GatePass = ({ visitor, host }) => {
             <div><dt className="text-xs opacity-75">Flat</dt><dd className="font-semibold">{flatText(visitor)}</dd></div>
             <div><dt className="text-xs opacity-75">Floor</dt><dd className="font-semibold">{floorOf(visitor.flatNo) || '-'}</dd></div>
             <div className="col-span-2"><dt className="text-xs opacity-75">Arriving</dt><dd className="font-semibold">{when}</dd></div>
+            {visitor.expiresAt && <div className="col-span-2"><dt className="text-xs opacity-75">Valid until</dt><dd className="font-semibold">{formatDate(visitor.expiresAt, true)}</dd></div>}
           </dl>
         </div>
         <div className="ticket-notch relative border-t-2 border-dashed border-brand-ink/30" aria-hidden="true" />
@@ -131,7 +142,7 @@ const Visitors = () => {
     e.preventDefault()
     setFormError('')
     if (!/^[0-9]{10}$/.test(form.phone)) return setFormError('Enter a 10-digit phone number.')
-    const payload = { ...form, numberOfVisitors: Number(form.numberOfVisitors) || 1 }
+    const payload = { ...form, numberOfVisitors: Number(form.numberOfVisitors) || 1, validForHours: Number(form.validForHours) || 24 }
     if (!payload.expectedArrival) delete payload.expectedArrival
     else payload.expectedArrival = new Date(payload.expectedArrival).toISOString()
     if (!payload.vehicleNumber) delete payload.vehicleNumber
@@ -167,7 +178,8 @@ const Visitors = () => {
       purpose: v.purpose || 'personal',
       numberOfVisitors: v.numberOfVisitors || 1,
       vehicleNumber: v.vehicleNumber || '',
-      expectedArrival: toLocalInput(v.expectedArrival)
+      expectedArrival: toLocalInput(v.expectedArrival),
+      validForHours: v.validForHours || 24
     })
     setInviteOpen(true)
   }
@@ -216,7 +228,7 @@ const Visitors = () => {
         </span>
       )
     },
-    { key: 'status', header: 'Status', render: (v) => <StatusTag status={v.status} /> },
+    { key: 'status', header: 'Status', render: (v) => (v.expired ? <StatusTag status="expired" /> : <StatusTag status={v.status} />) },
     {
       key: 'actions',
       header: 'Actions',
@@ -416,6 +428,12 @@ const Visitors = () => {
               <input id="v-when" type="datetime-local" className="input" value={form.expectedArrival} onChange={(e) => setForm({ ...form, expectedArrival: e.target.value })} />
             </Field>
           </div>
+          <Field label="Invitation valid for" htmlFor="v-valid" hint="After the expected arrival time">
+            <select id="v-valid" className="input" value={form.validForHours} onChange={(e) => setForm({ ...form, validForHours: Number(e.target.value) })}>
+              {VALID_CHOICES.map((c) => <option key={c.hours} value={c.hours}>{c.label}</option>)}
+              {!VALID_CHOICES.some((c) => c.hours === Number(form.validForHours)) && <option value={form.validForHours}>{`${form.validForHours} hours`}</option>}
+            </select>
+          </Field>
           <Field label="Vehicle number" htmlFor="v-vehicle" hint="Optional">
             <input id="v-vehicle" className="input uppercase" value={form.vehicleNumber} onChange={(e) => setForm({ ...form, vehicleNumber: e.target.value })} />
           </Field>

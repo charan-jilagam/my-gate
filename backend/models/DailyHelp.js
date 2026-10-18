@@ -9,8 +9,10 @@ const schema = new mongoose.Schema(
     phone: { type: String, trim: true, maxlength: 20, default: '' },
     kind: { type: String, enum: KINDS, default: 'maid' },
     photo: String,
-    // The code the helper shows the guard at the gate. Unique within a society.
+    // The code the helper shows the guard at the gate today. It changes every day (society time) and is unique within a society.
     code: { type: String, required: true, match: /^\d{6}$/ },
+    // The society-local day (YYYY-MM-DD) this code belongs to. A different day means the code is out of date and gets replaced.
+    codeDate: { type: String, match: /^\d{4}-\d{2}-\d{2}$/ },
     // The flats they work in. One helper can work for several households.
     residents: {
       type: [new mongoose.Schema({ userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true }, flat: String }, { _id: false })],

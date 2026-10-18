@@ -35,6 +35,42 @@ const societyTz = async (societyId) => {
 
 const sixDigits = () => String(crypto.randomInt(0, 1000000)).padStart(6, '0');
 
+// Every helper gets a new code each day. Anything that reads or checks a code calls this first, so yesterday's code never works
+// and nobody has to run a nightly job. The conditional update means two requests at midnight cannot rotate the same helper twice.
+const rotate = async (help, today) => {
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      const next = await DailyHelp.findOneAndUpdate({ _id: help._id, codeDate: { $ne: today } }, { $set: { code: sixDigits(), codeDate: today } }, { new: true });
+      if (next) {
+        help.code = next.code;
+        help.codeDate = today;
+      } else {
+        // eslint-disable-next-line no-await-in-loop
+        const current = await DailyHelp.findById(help._id); // another request already rotated it
+        if (current) {
+          help.code = current.code;
+          help.codeDate = current.codeDate;
+        }
+      }
+      return;
+    } catch (e) {
+      if (e.code !== 11000) throw e; // the new code clashed with another helper's: draw again
+    }
+  }
+  throw new Error('Could not renew the gate codes');
+};
+
+const renewCodes = async (societyId, tz, known) => {
+  const today = todayIn(tz);
+  const helpers = known || (await DailyHelp.find({ societyId, isActive: true, codeDate: { $ne: today } }).limit(2000)) || [];
+  for (const h of helpers) {
+    // eslint-disable-next-line no-await-in-loop
+    if (h.codeDate !== today) await rotate(h, today);
+  }
+  return today;
+};
+
 const linked = (help, userId) => help.residents.some((r) => String(r.userId) === String(userId));
 
 const present = (help, { today, viewer, attendance } = {}) => {
@@ -80,8 +116,10 @@ router.get('/', protect, authorize('resident', 'society_admin', 'super_admin', '
       const open = await HelpAttendance.find({ societyId, checkOut: null, checkIn: { $gte: new Date(Date.now() - STALE_HOURS * 3600 * 1000) } }).select('helpId');
       filter._id = { $in: open.map((o) => o.helpId) };
     }
+    const tz = await societyTz(societyId);
     const helpers = await DailyHelp.find(filter).sort({ name: 1 }).limit(300);
-    const today = todayIn(await societyTz(societyId));
+    // Only residents read codes, so only their list needs today's code.
+    const today = await renewCodes(societyId, tz, req.user.role === 'resident' ? helpers : []);
     const rows = await todaysRows(helpers.map((h) => h._id), today);
     res.json({ success: true, helpers: helpers.map((h) => present(h, { today, viewer: req.user, attendance: rows[String(h._id)] })) });
   } catch (error) {
@@ -104,6 +142,8 @@ router.post('/', protect, authorize('resident'), helpRules, async (req, res) => 
     const mine = await DailyHelp.countDocuments({ 'residents.userId': req.user.id, isActive: true });
     if (mine >= 15) return fail(res, 400, 'You have reached the limit of 15 helpers.');
 
+    const tz = await societyTz(req.user.societyId);
+    const today = todayIn(tz);
     let help = null;
     for (let attempt = 0; attempt < 5 && !help; attempt += 1) {
       try {
@@ -115,6 +155,7 @@ router.post('/', protect, authorize('resident'), helpRules, async (req, res) => 
           kind: req.body.kind || 'maid',
           photo: req.body.photo || undefined,
           code: sixDigits(),
+          codeDate: today,
           residents: [{ userId: req.user.id, flat: flatLabel(req.user) }],
           addedBy: req.user.id
         });
@@ -123,7 +164,7 @@ router.post('/', protect, authorize('resident'), helpRules, async (req, res) => 
       }
     }
     if (!help) return fail(res, 500, 'Could not create a gate code. Please try again.');
-    res.status(201).json({ success: true, helper: present(help, { viewer: req.user }), message: `Added. Their gate code is ${help.code}.` });
+    res.status(201).json({ success: true, helper: present(help, { viewer: req.user }), message: `Added. Today's gate code is ${help.code}. It changes every day.` });
   } catch (error) {
     if (error.name === 'ValidationError') return fail(res, 400, Object.values(error.errors)[0].message);
     return serverError(res, error, 'Add daily help');
@@ -135,8 +176,9 @@ router.post('/', protect, authorize('resident'), helpRules, async (req, res) => 
 router.post('/link', protect, authorize('resident'), guessLimiter, [body('code').trim().matches(/^\d{6}$/).withMessage('The code is 6 digits')], async (req, res) => {
   try {
     if (invalid(req, res)) return undefined;
+    await renewCodes(req.user.societyId, await societyTz(req.user.societyId));
     const help = await DailyHelp.findOne({ societyId: req.user.societyId, code: req.body.code, isActive: true });
-    if (!help) return fail(res, 404, 'No helper found with that code.');
+    if (!help) return fail(res, 404, 'No helper found with that code. Codes change every day, so use today\'s code.');
     if (linked(help, req.user.id)) return fail(res, 409, 'This helper is already on your list.');
     const existing = help.residents.map((r) => r.userId);
     help.residents.push({ userId: req.user.id, flat: flatLabel(req.user) });
@@ -209,8 +251,9 @@ router.get('/:id/pass', protect, authorize('resident'), async (req, res) => {
     const help = await DailyHelp.findById(req.params.id);
     if (!help || !help.isActive) return fail(res, 404, 'Helper not found');
     if (!linked(help, req.user.id)) return fail(res, 403, 'This helper is not on your list.');
-    const qrCodeImage = await generateQRCode({ type: 'daily_help', code: help.code, societyId: String(help.societyId) });
-    res.json({ success: true, code: help.code, qrCodeImage });
+    const today = await renewCodes(help.societyId, await societyTz(help.societyId), [help]);
+    const qrCodeImage = await generateQRCode({ type: 'daily_help', code: help.code, societyId: String(help.societyId), date: today });
+    res.json({ success: true, code: help.code, validOn: today, qrCodeImage });
   } catch (error) {
     serverError(res, error, 'Helper pass');
   }
@@ -223,8 +266,9 @@ router.get('/lookup/:code', protect, authorize('security', 'society_admin', 'sup
     const societyId = societyFor(req);
     if (!societyId) return fail(res, 400, 'Choose a society first.');
     if (!/^\d{6}$/.test(req.params.code)) return fail(res, 400, 'The code is 6 digits');
+    await renewCodes(societyId, await societyTz(societyId));
     const help = await DailyHelp.findOne({ societyId, code: req.params.code, isActive: true });
-    if (!help) return fail(res, 404, 'This code is not valid. Ask the resident to check it.');
+    if (!help) return fail(res, 404, 'This code is not valid today. Codes change every day, so ask for today\'s code.');
     const fresh = new Date(Date.now() - STALE_HOURS * 3600 * 1000);
     const open = await HelpAttendance.findOne({ helpId: help._id, open: true, checkIn: { $gte: fresh } }).sort({ checkIn: -1 });
     res.json({
@@ -246,11 +290,12 @@ router.post('/check', protect, authorize('security', 'society_admin', 'super_adm
     if (invalid(req, res)) return undefined;
     const societyId = societyFor(req);
     if (!societyId) return fail(res, 400, 'Choose a society first.');
+    const tz = await societyTz(societyId);
+    await renewCodes(societyId, tz);
     const help = await DailyHelp.findOne({ societyId, code: req.body.code, isActive: true });
-    if (!help) return fail(res, 404, 'This code is not valid. Ask the resident to check it.');
+    if (!help) return fail(res, 404, 'This code is not valid today. Codes change every day, so ask for today\'s code.');
 
     const now = new Date();
-    const tz = await societyTz(societyId);
     const fresh = new Date(now.getTime() - STALE_HOURS * 3600 * 1000);
     // A visit left open for too long was forgotten at the gate: close it so today's check-in is not blocked.
     await HelpAttendance.updateMany({ helpId: help._id, open: true, checkIn: { $lt: fresh } }, { $set: { open: false } });

@@ -31,6 +31,7 @@ module.exports = {
         'Invited visitor: tap Scan and scan the QR on their pass, or type the 8-character pass code they tell you in Visitor\'s pass code. You see the visitor\'s name, the flat and floor, the resident, and who approved them.',
         'Tap Check in and choose how long they will stay. The expected exit time is saved, and anyone still inside after it is flagged. When they leave, ask for their QR code or pass code again and tap Check out with code.',
         'You cannot check an invited visitor in or out with a click alone, and you never see their code. A walk-in that the resident approved is checked in and out by hand.',
+        'An invitation stops working after the time the resident allowed, which is 24 hours after the expected arrival unless they changed it. If the check-in says it has expired, ask the resident to extend it.',
         'Walk-in visitor: tap Log a walk-in visitor, enter name, phone, purpose, block and flat, and Ask resident to approve. The visitor appears under Waiting for the resident; let them in only when approved.',
         'Deliveries: approved deliveries are listed. Check the courier in and mark handed over.',
         'Vehicles: search a registered vehicle by number and log entry or exit. The Inside now list shows who is currently in.'
@@ -69,8 +70,8 @@ module.exports = {
       title: 'Daily help check-in',
       path: '/daily-help',
       covers: ['/daily-help'],
-      summary: 'Maids, cooks and drivers show a QR code or say a 6-digit code, both when they arrive and when they leave.',
-      steps: ['Open Daily help and scan the helper\'s QR code or type the code they tell you, then tap Find.', 'You see who they are and whether they are inside. Tap Check in when they arrive and Check out when they leave. Every household they work for is notified.', 'To check someone out from the Inside now list, tap Check out and enter their code.', 'Too many wrong codes locks you out for 15 minutes. Ask the helper to check their code with the resident.'],
+      summary: 'Maids, cooks and drivers show a QR code or say today\'s 6-digit code, both when they arrive and when they leave.',
+      steps: ['Open Daily help and scan the helper\'s QR code or type the code they tell you, then tap Find.', 'You see who they are and whether they are inside. Tap Check in when they arrive and Check out when they leave. Every household they work for is notified.', 'To check someone out from the Inside now list, tap Check out and enter their code.', 'Too many wrong codes locks you out for 15 minutes. Codes change every day, so ask the helper to read today\'s code from the resident\'s app.'],
       tips: []
     },
     {

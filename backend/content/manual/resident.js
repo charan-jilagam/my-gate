@@ -39,7 +39,7 @@ module.exports = {
       covers: ['/visitors'],
       summary: 'Invite guests ahead of time, approve walk-ins, and see who is inside.',
       steps: [
-        'Tap Invite visitor. Enter their name, phone, purpose, number of people, expected arrival and vehicle number if any, then save.',
+        'Tap Invite visitor. Enter their name, phone, purpose, number of people, expected arrival and vehicle number if any, then save. Under Invitation valid for, choose how long the pass keeps working after the expected arrival. It is 24 hours unless you change it.',
         'On the invitation tap Show pass to see the gate pass with its QR code and pass code. Share it with your guest. They show the QR code or say the pass code to get in, and again to leave. The guard cannot check anyone in or out with a click alone.',
         'If someone arrives without an invitation, the guard asks you to approve. You get a notification: approve or reject (with a reason). Nobody is let in until you approve.',
         'Use the filters (Needs approval, Expected, Inside, Left) to find a visitor. You can edit or cancel an invitation until the visitor checks in.'
@@ -79,12 +79,13 @@ module.exports = {
       covers: ['/daily-help'],
       summary: 'Maids, cooks and drivers get a gate code; you see when they arrive and leave.',
       steps: [
-        'Tap Add helper and enter their name, phone and what they do. The app gives them a 6-digit gate code.',
-        'Tap Show pass on a helper to see their QR code and 6-digit code. They show it to the guard when they arrive and again when they leave, and you are told each time.',
+        'Tap Add helper and enter their name, phone and what they do. The app gives them a 6-digit gate code that changes every day.',
+        'Tap Show pass on a helper to see their QR code and today\'s 6-digit code. They show it to the guard when they arrive and again when they leave, and you are told each time.',
+        'A new code is made for every helper each day. Open Show pass in the morning to get today\'s code; yesterday\'s code stops working.',
         'Open a helper to see monthly attendance.',
-        'If your helper also works in another flat, ask that household to add them using the helper\'s code (Add by code).'
+        'If your helper also works in another flat, ask that household to add them using the helper\'s code for today (Add by code).'
       ],
-      tips: ['Anyone who knows the code can enter as that helper. Remove the helper if they stop working for you.']
+      tips: ['Anyone who knows today\'s code can enter as that helper, but only for that day. Remove the helper if they stop working for you.']
     },
     {
       id: 'services',

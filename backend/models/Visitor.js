@@ -99,6 +99,13 @@ const visitorSchema = new mongoose.Schema({
   expectedArrival: {
     type: Date
   },
+  // How long after the expected arrival the invitation keeps working. The resident sets it; 24 hours unless changed.
+  validForHours: {
+    type: Number,
+    min: 1,
+    max: 720,
+    default: 24
+  },
   // Asked at the gate when the visitor goes in; the guard and the resident can see when they should be out.
   expectedExit: {
     type: Date

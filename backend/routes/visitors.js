@@ -22,7 +22,16 @@ const guessLimiter = rateLimit({
   message: { success: false, message: 'Too many wrong codes. Please wait 15 minutes and try again.' }
 });
 
-const INVITE_GRACE_HOURS = 24; // an invitation stops working this long after the time it was meant for
+// An invitation stops working this many hours after the time the visitor was expected. The resident can change it per invitation.
+const DEFAULT_VALID_HOURS = 24;
+const MAX_VALID_HOURS = 24 * 30;
+const validHours = (v) => Number(v.validForHours) || DEFAULT_VALID_HOURS;
+// When the invitation lapses: counted from the expected arrival, or from when it was created if no time was given.
+const expiryOf = (v) => {
+  const from = v.expectedArrival || v.createdAt;
+  return from ? new Date(new Date(from).getTime() + validHours(v) * 3600 * 1000) : null;
+};
+const validForRule = body('validForHours').optional({ nullable: true, checkFalsy: true }).isInt({ min: 1, max: MAX_VALID_HOURS }).withMessage(`Choose a validity between 1 hour and ${MAX_VALID_HOURS / 24} days`);
 
 const passId = (v) => {
   try {
@@ -61,6 +70,9 @@ const present = (v, user) => {
   const owner = user && user.role === 'resident' && String((o.residentId && o.residentId._id) || o.residentId) === String(user.id);
   if (!owner) delete o.qrCode;
   o.requiresCode = needsCode(o);
+  o.validForHours = validHours(o);
+  o.expiresAt = expiryOf(o);
+  o.expired = o.status === 'approved' && needsCode(o) && !!o.expiresAt && Date.now() > o.expiresAt.getTime();
   return o;
 };
 
@@ -71,7 +83,8 @@ router.post('/invite', protect, authorize('resident'), [
   body('name').trim().notEmpty().withMessage('Visitor name is required'),
   body('phone').matches(/^[0-9]{10}$/).withMessage('Please provide a valid phone number'),
   body('purpose').isIn(['personal', 'business', 'delivery', 'service', 'other']).withMessage('Invalid purpose'),
-  body('expectedArrival').optional().isISO8601().withMessage('Invalid date format')
+  body('expectedArrival').optional().isISO8601().withMessage('Invalid date format'),
+  validForRule
 ], async (req, res) => {
   try {
     const errors = validationResult(req);
@@ -88,6 +101,7 @@ router.post('/invite', protect, authorize('resident'), [
       numberOfVisitors,
       vehicleNumber,
       expectedArrival,
+      validForHours,
       notes
     } = req.body;
 
@@ -114,6 +128,7 @@ router.post('/invite', protect, authorize('resident'), [
       block: req.user.block,
       qrCode: qrCodeString,
       expectedArrival: expectedArrival ? new Date(expectedArrival) : null,
+      validForHours: validForHours ? Number(validForHours) : DEFAULT_VALID_HOURS,
       notes,
       // A resident inviting a guest is the approval: the guard should let them in without a second step.
       approved: true,
@@ -151,7 +166,7 @@ router.post('/invite', protect, authorize('resident'), [
     res.status(201).json({
       success: true,
       visitor: {
-        ...visitor.toObject(),
+        ...present(visitor, req.user),
         qrCodeImage
       },
       message: 'Visitor invitation sent successfully'
@@ -264,7 +279,8 @@ router.put('/:id', protect, authorize('resident'), [
   body('phone').optional().matches(/^[0-9]{10}$/).withMessage('Please provide a valid phone number'),
   body('purpose').optional().isIn(['personal', 'business', 'delivery', 'service', 'other']).withMessage('Invalid purpose'),
   body('numberOfVisitors').optional().isInt({ min: 1, max: 50 }),
-  body('expectedArrival').optional({ nullable: true, checkFalsy: true }).isISO8601().withMessage('Invalid date format')
+  body('expectedArrival').optional({ nullable: true, checkFalsy: true }).isISO8601().withMessage('Invalid date format'),
+  validForRule
 ], async (req, res) => {
   try {
     const errors = validationResult(req);
@@ -286,6 +302,7 @@ router.put('/:id', protect, authorize('resident'), [
     if (req.body.expectedArrival !== undefined) {
       visitor.expectedArrival = req.body.expectedArrival ? new Date(req.body.expectedArrival) : null;
     }
+    if (req.body.validForHours !== undefined) visitor.validForHours = Number(req.body.validForHours) || DEFAULT_VALID_HOURS;
     await visitor.save();
 
     res.json({ success: true, visitor: present(visitor, req.user), message: 'Invitation updated' });
@@ -456,9 +473,9 @@ router.put('/:id/check-in', protect, authorize('security', 'society_admin', 'sup
       if (!codeMatches(visitor, req.body.code)) {
         return res.status(403).json({ success: false, message: req.body.code ? 'That pass code does not match this visitor.' : 'Scan the visitor\'s QR code or enter their pass code to let them in.' });
       }
-      const until = visitor.expectedArrival ? new Date(visitor.expectedArrival).getTime() + INVITE_GRACE_HOURS * 3600 * 1000 : null;
-      if (until && Date.now() > until) {
-        return res.status(400).json({ success: false, message: 'This invitation has expired. The resident can invite them again.' });
+      const until = expiryOf(visitor);
+      if (until && Date.now() > until.getTime()) {
+        return res.status(400).json({ success: false, message: 'This invitation has expired. The resident can extend it or invite them again.' });
       }
     }
 
