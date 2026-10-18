@@ -79,11 +79,11 @@ const SlotGrid = ({ amenity, date, onDate, picked, onPick, today, refreshKey }) 
         })}
       </div>
 
-      {!date ? <p className="mt-2 text-sm text-muted">Choose a day to see the free slots.</p> : day.loading ? <div className="skeleton mt-2 h-32" /> : day.error ? <ErrorState message={day.error} onRetry={day.reload} /> : day.data.closed ? (
+      {!date ? <p className="mt-2 text-sm text-muted">Choose a day to see the free slots.</p> : day.loading || (!day.data && !day.error) ? <div className="skeleton mt-2 h-32" /> : day.error ? <ErrorState message={day.error} onRetry={day.reload} /> : day.data.closed ? (
         <p className="mt-2 rounded-md bg-sunken px-3 py-3 text-sm text-muted">{REASON[day.data.reason] || 'Closed'}</p>
       ) : (
         <div className="mt-2 grid grid-cols-3 gap-2 sm:grid-cols-4" role="group" aria-label="Time slots">
-          {day.data.slots.map((s) => {
+          {(day.data.slots || []).map((s) => {
             const on = picked.some((p) => p.start === s.start)
             return (
               <button key={s.start} type="button" disabled={!s.available} aria-pressed={on} onClick={() => toggle(s)}
