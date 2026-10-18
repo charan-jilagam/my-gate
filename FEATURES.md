@@ -137,3 +137,18 @@ before going live.
 - The app is called **Nivora** ("Every Community. One Platform."). Technical identifiers were deliberately kept: database name `mygate`, seed emails `@mygate.com`, Cloudinary folder `mygate/`, repo URLs.
 - Translation works by a runtime dictionary (`frontend/src/i18n/rows*.js`, rows of `[English, Hindi, Telugu]`) plus rules for dates, numbers and `{0}` templates. `npm run check:i18n` checks the tables; `python3 smoke/i18n_audit.py <lang> <role>` lists English still on screen.
 - Known limits: the Hindi/Telugu wording should be reviewed by a native speaker; push/e-mail text built on the server stays English; user-entered data is not translated.
+
+
+## Round 4: amenity list, who reacted, who voted, gate scan details, expected exit
+
+| Feature | Who | What it does |
+|---|---|---|
+| **Amenity list per society** | Society office | Amenities, then "Our amenities": add a space (with quick-start names like Clubhouse or Gym), set hours, price, capacity, slot length, booking rules, close it for booking, edit or remove it. Residents only see their own society's open amenities, as cards they can tap to book. A space with upcoming bookings cannot be removed: close it instead. API: `POST/PUT/DELETE /api/bookings/amenities`, `GET /api/bookings/amenities?all=1` |
+| **Who liked and who reported** | Society office | Opening a community post shows the people who liked it and who reported it, with each reason. Residents see counts only. Reporting now asks for a reason |
+| **Who has voted** | Society office | Opening a vote shows turnout, the people (or flats) who voted, and those still to vote. It never shows what anyone chose: the turnout record is stored apart from the ballots, ballots have no timestamp and a random id, so the two cannot be matched. `GET /api/elections/:id/voters`. Votes cast before this release are counted but not named |
+| **Gate scan details** | Guard, office | After scanning a pass or typing its code the guard sees the visitor, the flat and floor (worked out from the flat number, so the screen says so), the resident, and who approved the visit and when |
+| **Expected exit** | Guard | Check in now asks how long the visitor will stay (30 minutes to 8 hours, or a time). The server refuses a check-in without it. The resident is told when to expect them out; the gate console and visitor list flag anyone still inside past that time |
+| **Gate pass** | Resident | The pass is a ticket with the flat, floor, arrival time, QR and pass code, with Copy code and Share |
+| **Look and feel** | Everyone | Softer cards, sheet-style dialogs, a redesigned guide (search in the header, step timeline, previous and next topic), narrower and calmer post page, readable dropdown lists in dark theme |
+
+Notes: the Hindi and Telugu wording for these screens was written by the assistant and should be reviewed by a native speaker. Floors are a guess from the flat number (210 is floor 2); a society that numbers flats differently would need a floor field on the user.

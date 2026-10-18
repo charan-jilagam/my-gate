@@ -86,8 +86,8 @@ describe('manual covers every screen in the menu', () => {
 });
 
 describe('guide translations', () => {
-  // The guide text is translated on screen from frontend/src/i18n/rows5.js; a new or reworded sentence without a row would silently stay English.
-  const rows = require('fs').readFileSync(require('path').join(__dirname, '../../frontend/src/i18n/rows5.js'), 'utf8');
+  // The guide text is translated on screen from frontend/src/i18n/rows5.js and rows6.js; a new or reworded sentence without a row would silently stay English.
+  const rows = ['rows5.js', 'rows6.js'].map((f) => require('fs').readFileSync(require('path').join(__dirname, '../../frontend/src/i18n', f), 'utf8')).join('\n');
   const strings = new Set();
   const walk = (o) => {
     if (typeof o === 'string') strings.add(o.trim());

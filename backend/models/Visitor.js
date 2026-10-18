@@ -99,6 +99,10 @@ const visitorSchema = new mongoose.Schema({
   expectedArrival: {
     type: Date
   },
+  // Asked at the gate when the visitor goes in; the guard and the resident can see when they should be out.
+  expectedExit: {
+    type: Date
+  },
   notes: {
     type: String
   }

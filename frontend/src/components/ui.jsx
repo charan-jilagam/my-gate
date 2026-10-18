@@ -188,17 +188,17 @@ export const Modal = ({ open, onClose, title: rawTitle, children, footer, size =
   }, [open])
 
   if (!open) return null
-  const width = { sm: 'max-w-sm', md: 'max-w-lg', lg: 'max-w-2xl' }[size]
+  const width = { sm: 'max-w-sm', md: 'max-w-lg', lg: 'max-w-2xl', xl: 'max-w-4xl' }[size]
 
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center sm:p-4">
-      <div className="absolute inset-0 bg-[#031414]/60" onClick={onClose} aria-hidden="true" />
+      <div className="fade-in absolute inset-0 bg-[#031414]/60 backdrop-blur-[2px]" onClick={onClose} aria-hidden="true" />
       <div
         ref={panelRef}
         role="dialog"
         aria-modal="true"
         aria-label={title}
-        className={`relative flex max-h-[92vh] w-full flex-col rounded-t-lg bg-surface shadow-pop sm:rounded-lg ${width}`}
+        className={`sheet-in relative flex max-h-[92vh] w-full flex-col rounded-t-2xl bg-surface shadow-pop sm:rounded-2xl ${width}`}
       >
         <div className="flex items-center justify-between border-b border-line px-5 py-4">
           <h2 className="text-lg font-bold">{title}</h2>
@@ -266,9 +266,9 @@ export const DataList = ({ columns, rows, rowKey = (r) => r._id, loading, error,
         </thead>
         <tbody className="divide-y divide-line">
           {shown.map((row) => (
-            <tr key={rowKey(row)} className="align-middle hover:bg-sunken/60">
+            <tr key={rowKey(row)} className="align-middle transition-colors hover:bg-sunken/60">
               {columns.map((c) => (
-                <td key={c.key} className={`px-4 py-3 text-sm ${c.className || ''}`}>
+                <td key={c.key} className={`px-4 py-3.5 text-sm ${c.className || ''}`}>
                   {c.render ? c.render(row) : row[c.key]}
                 </td>
               ))}

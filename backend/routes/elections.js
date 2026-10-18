@@ -4,10 +4,11 @@ const crypto = require('crypto');
 const { body } = require('express-validator');
 const Election = require('../models/Election');
 const Ballot = require('../models/Ballot');
+const VoteLog = require('../models/VoteLog');
 const User = require('../models/User');
 const { protect, authorize, scopeToSociety } = require('../middleware/auth');
 const { safeNotifyMany } = require('../utils/safeNotify');
-const { fail, invalid, serverError, isAdminRole, societyFor } = require('../utils/routeKit');
+const { fail, invalid, serverError, isAdminRole, societyFor, flatLabel } = require('../utils/routeKit');
 
 router.param('id', scopeToSociety(Election));
 
@@ -125,6 +126,40 @@ router.get('/:id', protect, authorize('resident', ...ADMINS), async (req, res) =
   }
 });
 
+// @route   GET /api/elections/:id/voters
+// @desc    Office only: who has voted and who has not. Never says what anyone chose.
+router.get('/:id/voters', protect, authorize(...ADMINS), async (req, res) => {
+  try {
+    const election = await Election.findById(req.params.id);
+    if (!election) return fail(res, 404, 'Vote not found');
+    const [logs, ballots, people] = await Promise.all([
+      VoteLog.find({ electionId: election._id }).sort({ votedAt: 1 }).lean(),
+      Ballot.countDocuments({ electionId: election._id }),
+      User.find({ societyId: election.societyId, role: 'resident', isApproved: true, isActive: true }).select('name block flatNo').lean()
+    ]);
+    const voted = logs.map((l) => ({ name: l.name || 'Resident', flat: l.flat || '', votedAt: l.votedAt }));
+    const votedKeys = new Set(logs.map((l) => l.voterKey));
+    const waiting = [];
+    if (election.voting === 'per_resident') {
+      people.forEach((p) => { if (!votedKeys.has(voterKeyFor(election, p))) waiting.push({ name: p.name, flat: flatLabel(p) }); });
+    } else {
+      const flats = new Map();
+      people.filter((p) => p.flatNo).forEach((p) => {
+        const key = voterKeyFor(election, p);
+        if (votedKeys.has(key)) return;
+        const row = flats.get(key) || { name: [], flat: flatLabel(p) };
+        row.name.push(p.name);
+        flats.set(key, row);
+      });
+      flats.forEach((r) => waiting.push({ name: r.name.join(', '), flat: r.flat }));
+    }
+    res.json({ success: true, voting: election.voting, voted, waiting, votes: ballots, unlisted: Math.max(0, ballots - voted.length) });
+    return undefined;
+  } catch (error) {
+    return serverError(res, error, 'Voter list');
+  }
+});
+
 // @route   POST /api/elections
 router.post('/', protect, authorize(...ADMINS), rules, async (req, res) => {
   try {
@@ -217,6 +252,12 @@ router.post('/:id/vote', protect, authorize('resident'), [body('optionId').isMon
     } catch (e) {
       if (isDuplicateKey(e)) return fail(res, 409, election.voting === 'per_flat' ? 'Your flat has already voted.' : 'You have already voted.');
       throw e;
+    }
+    // Turnout record for the office: who took part, never what they chose. A failure here must not undo the vote.
+    try {
+      await VoteLog.create({ electionId: election._id, societyId: election.societyId, voterKey: voterKeyFor(election, req.user), userId: req.user._id || req.user.id, name: req.user.name, flat: flatLabel(req.user) });
+    } catch (e) {
+      if (!isDuplicateKey(e)) console.error('Vote log failed:', e.message);
     }
     res.status(201).json({ success: true, message: 'Your vote is recorded. Thank you!' });
     return undefined;

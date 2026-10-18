@@ -86,6 +86,7 @@ module.exports = {
         'Tap New vote. Give it a title and description, choose Election (pick a candidate) or Resolution (pick an option such as Yes or No), and list two to twelve options.',
         'Choose One vote per flat (default, stops one household outvoting another) or One vote per resident.',
         'Set when voting opens and closes. Residents are notified.',
+        'Open a vote to see turnout and who has voted and who has not. You never see what anyone chose.',
         'While open, you see turnout only. Results are hidden from everyone until voting closes, then appear with counts and the leading option. A tie is shown as a tie.',
         'You can edit a vote only before it opens. After that you can cancel it and start again.'
       ],
@@ -106,7 +107,7 @@ module.exports = {
       path: '/community',
       covers: ['/community', '/community/:id'],
       summary: 'Keep the resident board friendly.',
-      steps: ['Use the Reported tab to see posts that residents flagged.', 'Pin an important post, hide one that breaks the rules, or delete it. Three reports hide a post automatically and alert you.'],
+      steps: ['Use the Reported tab to see posts that residents flagged.', 'Pin an important post, hide one that breaks the rules, or delete it. Three reports hide a post automatically and alert you.', 'Open a post to see who liked it and who reported it, with their reasons.'],
       tips: []
     },
     {
@@ -115,7 +116,7 @@ module.exports = {
       path: '/bookings',
       covers: ['/bookings'],
       summary: 'Approve or reject requests for shared spaces.',
-      steps: ['Pending bookings show amenity, date, time, guests and the amount. Approve or Reject (give a reason).', 'The system refuses overlapping bookings, also when you approve.', 'To change an amenity\'s hours, price, slot length, advance window or whether bookings need approval, open Society and edit its Amenities.'],
+      steps: ['Pending bookings show amenity, date, time, guests and the amount. Approve or Reject (give a reason).', 'The system refuses overlapping bookings, also when you approve.', 'Open Our amenities, next to Booking requests, to add a space, change its hours, price, slot length or approval rule, close it for booking, or remove it. Every society has its own list.'],
       tips: []
     },
     {

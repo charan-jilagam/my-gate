@@ -50,10 +50,14 @@ export default {
         sm: '4px',
         DEFAULT: '6px',
         md: '8px',
-        lg: '10px'
+        lg: '12px',
+        xl: '16px',
+        '2xl': '20px'
       },
       boxShadow: {
-        pop: '0 12px 32px -12px rgb(8 30 30 / 0.35)'
+        pop: '0 12px 32px -12px rgb(8 30 30 / 0.35)',
+        card: '0 1px 2px rgb(16 42 41 / 0.04), 0 8px 24px -12px rgb(16 42 41 / 0.14)',
+        lift: '0 2px 4px rgb(16 42 41 / 0.05), 0 16px 32px -14px rgb(16 42 41 / 0.22)'
       }
     }
   },

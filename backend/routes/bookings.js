@@ -65,10 +65,102 @@ router.get('/amenities', protect, authorize(...MEMBERS, 'security'), async (req,
     const societyId = req.user.role === 'super_admin' ? req.query.societyId : req.user.societyId;
     if (!societyId) return res.json({ success: true, amenities: [] });
     const society = await loadSociety(societyId);
-    const amenities = ((society && society.amenities) || []).filter((a) => a.isActive !== false).map(presentAmenity);
+    // Admins managing the list also see the closed ones.
+    const everything = req.query.all === '1' && isAdminRole(req.user);
+    const amenities = ((society && society.amenities) || []).filter((a) => everything || a.isActive !== false).map((a) => ({ ...presentAmenity(a), isActive: a.isActive !== false }));
     res.json({ success: true, amenities, timezone: (society && society.timezone) || DEFAULT_TZ });
   } catch (error) {
     serverError(res, error, 'List amenities');
+  }
+});
+
+const amenityRules = () => [
+  body('name').trim().notEmpty().withMessage('Give the amenity a name').isLength({ max: 60 }).withMessage('Keep the name under 60 characters'),
+  body('description').optional({ nullable: true }).trim().isLength({ max: 300 }).withMessage('Keep the description under 300 characters'),
+  body('capacity').optional({ nullable: true, checkFalsy: true }).isInt({ min: 1, max: 5000 }).withMessage('Capacity must be 1 or more'),
+  body('hourlyRate').optional({ nullable: true, checkFalsy: true }).isFloat({ min: 0, max: 100000 }).withMessage('The hourly price must be 0 or more'),
+  body('openTime').optional().custom(isValidTime).withMessage('Opening time must look like 06:00'),
+  body('closeTime').optional().custom(isValidTime).withMessage('Closing time must look like 22:00'),
+  body('slotMinutes').optional().isIn([30, 60, 90, 120]).withMessage('Slot length must be 30, 60, 90 or 120 minutes'),
+  body('maxSlotsPerBooking').optional().isInt({ min: 1, max: 12 }).withMessage('Slots in a row must be 1 to 12'),
+  body('maxAdvanceDays').optional().isInt({ min: 1, max: 90 }).withMessage('Booking ahead must be 1 to 90 days')
+];
+
+const pickAmenity = (b) => {
+  const out = {};
+  if (b.name !== undefined) out.name = String(b.name).trim();
+  if (b.description !== undefined) out.description = String(b.description || '').trim();
+  if (b.capacity !== undefined) out.capacity = b.capacity === '' || b.capacity === null ? undefined : Number(b.capacity);
+  if (b.hourlyRate !== undefined) out.hourlyRate = b.hourlyRate === '' || b.hourlyRate === null ? 0 : Number(b.hourlyRate);
+  ['openTime', 'closeTime'].forEach((k) => { if (b[k] !== undefined) out[k] = b[k]; });
+  ['slotMinutes', 'maxSlotsPerBooking', 'maxAdvanceDays'].forEach((k) => { if (b[k] !== undefined) out[k] = Number(b[k]); });
+  ['requiresApproval', 'isActive'].forEach((k) => { if (b[k] !== undefined) out[k] = !!b[k]; });
+  return out;
+};
+
+const sameName = (list, name, exceptId) => list.some((a) => a.name.trim().toLowerCase() === name.trim().toLowerCase() && String(a._id) !== String(exceptId));
+const hoursOk = (a) => toMinutes(a.closeTime || '22:00') > toMinutes(a.openTime || '06:00');
+
+// @route   POST /api/bookings/amenities
+// @desc    Society admin adds a space residents can book. Every society has its own list.
+router.post('/amenities', protect, authorize('society_admin'), amenityRules(), async (req, res) => {
+  try {
+    const bad = invalid(req, res);
+    if (bad) return bad;
+    const society = await Society.findById(req.user.societyId).select('amenities');
+    if (!society) return fail(res, 404, 'Society not found.');
+    const data = pickAmenity(req.body);
+    if (sameName(society.amenities, data.name)) return fail(res, 409, `You already have an amenity called ${data.name}.`);
+    if (!hoursOk(data)) return fail(res, 400, 'Closing time must be after opening time.');
+    if (society.amenities.length >= 40) return fail(res, 400, 'That is the most amenities one society can list.');
+    society.amenities.push(data);
+    await society.save();
+    const created = society.amenities[society.amenities.length - 1];
+    res.status(201).json({ success: true, amenity: { ...presentAmenity(created), isActive: created.isActive !== false }, message: `${data.name} added` });
+  } catch (error) {
+    serverError(res, error, 'Add amenity');
+  }
+});
+
+// @route   PUT /api/bookings/amenities/:amenityId
+// @desc    Change an amenity's details, hours, price or whether it is open for booking
+router.put('/amenities/:amenityId', protect, authorize('society_admin'), amenityRules().map((r) => r.optional()), async (req, res) => {
+  try {
+    const bad = invalid(req, res);
+    if (bad) return bad;
+    const society = await Society.findById(req.user.societyId).select('amenities');
+    const current = society && society.amenities.id(req.params.amenityId);
+    if (!current) return fail(res, 404, 'Amenity not found.');
+    const data = pickAmenity(req.body);
+    if (data.name && sameName(society.amenities, data.name, current._id)) return fail(res, 409, `You already have an amenity called ${data.name}.`);
+    const oldName = current.name;
+    Object.assign(current, data);
+    if (!hoursOk(current)) return fail(res, 400, 'Closing time must be after opening time.');
+    await society.save();
+    // Bookings and slot locks are keyed by name, so a rename is carried over to future bookings.
+    if (data.name && data.name !== oldName) {
+      await Booking.updateMany({ societyId: req.user.societyId, amenityId: current._id }, { $set: { amenity: data.name } });
+    }
+    res.json({ success: true, amenity: { ...presentAmenity(current), isActive: current.isActive !== false }, message: 'Amenity saved' });
+  } catch (error) {
+    serverError(res, error, 'Update amenity');
+  }
+});
+
+// @route   DELETE /api/bookings/amenities/:amenityId
+// @desc    Remove an amenity. It cannot go while people still hold future bookings: close it instead.
+router.delete('/amenities/:amenityId', protect, authorize('society_admin'), async (req, res) => {
+  try {
+    const society = await Society.findById(req.user.societyId).select('amenities');
+    const current = society && society.amenities.id(req.params.amenityId);
+    if (!current) return fail(res, 404, 'Amenity not found.');
+    const upcoming = await Booking.countDocuments({ societyId: req.user.societyId, amenity: current.name, status: { $in: ACTIVE }, endTime: { $gt: new Date() } });
+    if (upcoming) return fail(res, 409, `${current.name} still has ${upcoming} upcoming booking${upcoming === 1 ? '' : 's'}. Close it for new bookings instead, or cancel those first.`);
+    current.deleteOne();
+    await society.save();
+    res.json({ success: true, message: `${current.name} removed` });
+  } catch (error) {
+    serverError(res, error, 'Remove amenity');
   }
 });
 

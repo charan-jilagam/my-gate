@@ -196,12 +196,57 @@ def guide_in_telugu(page):
     assert 'డౌన్‌లోడ్' in body or 'చెల్లింపు' in body
     assert page.locator('main li button').count() < 6, 'search should narrow the topic list'
 
+def admin_amenities(page):
+    page.goto(smoke.BASE + '/bookings'); page.wait_for_selector('text=Our amenities')
+    page.click('[role=tab]:has-text("Our amenities")'); page.wait_for_selector('h3:has-text("Clubhouse")')
+    page.click('button:has-text("Add amenity")'); page.wait_for_selector('#am-name')
+    page.click('button:has-text("Gym")')
+    assert page.input_value('#am-name') == 'Gym'
+    page.click('button[form="amenity-form"]'); page.wait_for_timeout(600)
+    sent = [b for m, p, b in posts if m == 'POST' and p == '/bookings/amenities']
+    assert sent and sent[-1]['name'] == 'Gym' and sent[-1]['capacity'] == 15, sent
+
+def post_activity(page):
+    page.goto(smoke.BASE + '/community/po1'); page.wait_for_selector('text=Who reacted')
+    page.click('[role=tab]:has-text("Liked by")'); page.wait_for_selector('text=Kabir Mehta')
+    page.click('[role=tab]:has-text("Reports")'); page.wait_for_selector('text=Spam: selling twice')
+
+def voter_list(page):
+    page.goto(smoke.BASE + '/votes'); page.wait_for_selector('text=Install solar panels?')
+    page.click('text=Install solar panels?'); page.wait_for_selector('text=turnout')
+    page.wait_for_selector('text=Asha Rao')
+    page.click('[role=tab]:has-text("Yet to vote")'); page.wait_for_selector('text=Bina Shah')
+    page.wait_for_selector('text=What each person chose stays secret')
+
+def gate_scan(page):
+    page.goto(smoke.BASE + '/gate'); page.wait_for_selector('#pass')
+    page.fill('#pass', 'ABCDEF12'); page.click('button:has-text("Find")')
+    page.wait_for_selector('text=Approved by'); body = page.inner_text('main')
+    assert 'Asha Rao · Resident' in body and 'Floor 1' in body, body[:400]
+    page.locator('main button:has-text("Check in")').first.click()
+    page.wait_for_selector('text=How long will they stay?')
+    page.click('[role=radio]:has-text("2 hours")'); page.wait_for_selector('text=Expected out by')
+    page.click('button:has-text("Let them in")'); page.wait_for_timeout(600)
+    sent = [(p, b) for m, p, b in posts if m == 'PUT' and p.endswith('/check-in')]
+    assert sent and sent[-1][1].get('stayMinutes') == 120, sent
+
+def gate_pass(page):
+    page.goto(smoke.BASE + '/visitors'); page.locator('button:has-text("Show pass"):visible').first.wait_for()
+    page.locator('button:has-text("Show pass"):visible').first.click()
+    page.wait_for_selector('text=Nivora gate pass'); body = page.inner_text('[role=dialog]')
+    assert 'ABCDEF12' in body and 'Floor 1' in body, body
+
+def inside_overdue(page):
+    page.goto(smoke.BASE + '/gate'); page.wait_for_selector('text=Inside now')
+    page.wait_for_selector('text=over')
+
 def main():
   for role, name, fn in [('resident', 'book service', book_service), ('resident', 'amenity booking', amenity), ('resident', 'SOS', sos), ('resident', 'RSVP', rsvp), ('resident', 'notification deep link', notif), ('security', 'gate check', gate_check),
                          ('resident', 'language switch', language), ('resident', 'data and headings translate and restore', translate_data), ('resident', 'guide is role-only and searchable', help_isolation), ('resident', 'guide is translated and searchable in Telugu', guide_in_telugu), ('society_admin', 'admin guide', help_admin),
                          ('resident', 'cast a vote', vote), ('staff', 'mark upkeep done', mark_done), ('society_admin', 'add shifts', add_shift),
                          ('society_admin', 'create a vote', new_vote), ('society_admin', 'add a document', add_document),
-                         ('resident', 'pay a service bill online', pay_online), ('super_admin', 'roster as platform admin', super_roster), ('security', 'clock in', clock_in)]:
+                         ('resident', 'pay a service bill online', pay_online), ('super_admin', 'roster as platform admin', super_roster), ('security', 'clock in', clock_in),
+                         ('society_admin', 'admin manages amenities', admin_amenities), ('society_admin', 'admin sees who liked and reported', post_activity), ('society_admin', 'admin sees who voted', voter_list), ('security', 'gate scan and expected exit', gate_scan), ('resident', 'gate pass ticket', gate_pass), ('security', 'overdue visitor is flagged', inside_overdue)]:
       try:
           e = go(role, fn, init=RAZORPAY_STUB if name == 'pay a service bill online' else None); print('OK  ' if not e else 'ERR ', name, e or '')
       except Exception as ex:

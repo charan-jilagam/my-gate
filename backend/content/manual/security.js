@@ -28,7 +28,8 @@ module.exports = {
       summary: 'Check people, parcels and vehicles in and out.',
       steps: [
         'The console has three tabs: Visitors, Deliveries and Vehicles.',
-        'Invited visitor: tap Scan and scan the QR on their pass, or type the pass code in "Find an invited visitor by pass code". Check them in. Check them out when they leave.',
+        'Invited visitor: tap Scan and scan the QR on their pass, or type the pass code in "Find an invited visitor by pass code". You see the visitor\'s name, the flat and floor, the resident, and who approved them.',
+        'Tap Check in and choose how long they will stay. The expected exit time is saved, and anyone still inside after it is flagged. Check them out when they leave.',
         'Walk-in visitor: tap Log a walk-in visitor, enter name, phone, purpose, block and flat, and Ask resident to approve. The visitor appears under Waiting for the resident; let them in only when approved.',
         'Deliveries: approved deliveries are listed. Check the courier in and mark handed over.',
         'Vehicles: search a registered vehicle by number and log entry or exit. The Inside now list shows who is currently in.'

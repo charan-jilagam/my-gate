@@ -7,6 +7,9 @@ import useApi from '../hooks/useApi'
 import useAction from '../hooks/useAction'
 import { passCode } from '../utils/pass'
 import QrScanner from '../components/QrScanner'
+import VisitorCard from '../components/VisitorCard'
+import CheckInSheet from '../components/CheckInSheet'
+import { clock, flatText, isOverdue, minutesOver, overText } from '../utils/gate'
 import { EmptyState, ErrorState, Field, ListSkeleton, Modal, PageHeader, Spinner, StatusTag, errorMessage, formatDate, titleCase } from '../components/ui'
 
 const PURPOSES = ['personal', 'business', 'delivery', 'service', 'other']
@@ -38,7 +41,7 @@ const Group = ({ title, hint, loading, error, onRetry, count, empty, children })
   </section>
 )
 
-const flatOf = (v) => `${v.block ? `${v.block}-` : ''}${v.flatNo || '-'}`
+const flatOf = flatText
 
 const GateConsole = () => {
   const { user } = useAuth()
@@ -54,6 +57,14 @@ const GateConsole = () => {
     await Promise.all([expected.reload(), inside.reload(), waiting.reload(), tab === 'deliveries' && dApproved.reload(), tab === 'deliveries' && dTransit.reload()].filter(Boolean))
   }
   const { busy, run } = useAction(refreshAll)
+
+  const [checkingIn, setCheckingIn] = useState(null)
+  const afterCheckIn = async (v) => {
+    setCheckingIn(null)
+    toast.success(`${v.name} checked in`)
+    await refreshAll()
+    if (lookup?._id === v._id) await refreshLookup()
+  }
 
   // Pass-code lookup
   const [code, setCode] = useState('')
@@ -91,16 +102,18 @@ const GateConsole = () => {
     }
   }
 
+  const refreshLookup = async () => {
+    try {
+      const { data } = await api.get(`/visitors/lookup/${encodeURIComponent(passCode(lookup).toLowerCase())}`)
+      setLookup(data.visitor)
+    } catch (e) {
+      setLookup(null)
+    }
+  }
+
   const act = async (id, path, message) => {
     const ok = await run(id, () => api.put(path), message)
-    if (ok && lookup?._id === id) {
-      try {
-        const { data } = await api.get(`/visitors/lookup/${encodeURIComponent(passCode(lookup).toLowerCase())}`)
-        setLookup(data.visitor)
-      } catch (e) {
-        setLookup(null)
-      }
-    }
+    if (ok && lookup?._id === id) await refreshLookup()
   }
 
   // Walk-in
@@ -154,7 +167,7 @@ const GateConsole = () => {
   const visitorButtons = (v) => (
     <>
       {v.status === 'approved' && (
-        <button className="btn-primary btn-sm" disabled={busy === v._id} onClick={() => act(v._id, `/visitors/${v._id}/check-in`, `${v.name} checked in`)}>
+        <button className="btn-primary btn-sm" disabled={busy === v._id} onClick={() => setCheckingIn(v)}>
           <FiLogIn size={14} /> Check in
         </button>
       )}
@@ -187,12 +200,27 @@ const GateConsole = () => {
         ))}
       </div>
 
+      <CheckInSheet visitor={checkingIn} onClose={() => setCheckingIn(null)} onDone={afterCheckIn} />
+
       <Modal open={scanning} onClose={() => setScanning(false)} title="Scan visitor pass" size="sm">
         {scanning && <QrScanner onScan={onScan} />}
       </Modal>
 
       {tab === 'visitors' && (
         <div className="space-y-5">
+          <div className="grid grid-cols-3 gap-3">
+            {[
+              ['Expected', expected.data?.length ?? 0, 'text-ink'],
+              ['Inside now', inside.data?.length ?? 0, 'text-brand'],
+              ['Past exit time', (inside.data || []).filter((v) => isOverdue(v)).length, (inside.data || []).some((v) => isOverdue(v)) ? 'text-danger' : 'text-muted']
+            ].map(([label, n, tone]) => (
+              <div key={label} className="panel px-4 py-3">
+                <p className={`font-display text-3xl font-extrabold leading-none ${tone}`}>{n}</p>
+                <p className="mt-1 text-xs font-semibold text-muted">{label}</p>
+              </div>
+            ))}
+          </div>
+
           <form onSubmit={findPass} className="panel p-4">
             <label htmlFor="pass" className="label">Find an invited visitor by pass code</label>
             <div className="flex gap-2">
@@ -205,17 +233,9 @@ const GateConsole = () => {
               </button>
             </div>
             {lookupError && <p role="alert" className="mt-2 text-sm font-medium text-danger">{lookupError}</p>}
-            {lookup && (
-              <div className="mt-3 flex flex-wrap items-center gap-3 rounded-md border border-line bg-sunken/60 p-3">
-                <div className="min-w-0 flex-1">
-                  <p className="font-semibold">{lookup.name} <span className="font-normal text-muted">· {lookup.phone}</span></p>
-                  <p className="text-xs text-muted">Visiting {flatOf(lookup)}{lookup.residentId?.name ? ` (${lookup.residentId.name})` : ''} · {titleCase(lookup.purpose)}</p>
-                </div>
-                <StatusTag status={lookup.status} />
-                {visitorButtons(lookup)}
-              </div>
-            )}
           </form>
+
+          {lookup && <VisitorCard visitor={lookup} actions={visitorButtons(lookup)} />}
 
           <Group title="Waiting for the resident" hint="Walk-ins you logged" loading={waiting.loading} error={waiting.error} onRetry={waiting.reload} count={waiting.data?.length} empty="No walk-ins are waiting.">
             {(waiting.data || []).map((v) => (
@@ -232,8 +252,8 @@ const GateConsole = () => {
           </Group>
 
           <Group title="Inside now" hint="Checked in" loading={inside.loading} error={inside.error} onRetry={inside.reload} count={inside.data?.length} empty="Nobody is inside right now.">
-            {(inside.data || []).map((v) => (
-              <Row key={v._id} title={v.name} meta={`${flatOf(v)} · in at ${formatDate(v.entryTime, true)}`}>
+            {[...(inside.data || [])].sort((a, b) => Number(isOverdue(b)) - Number(isOverdue(a))).map((v) => (
+              <Row key={v._id} title={v.name} meta={`${flatOf(v)} · in at ${clock(v.entryTime)}${v.expectedExit ? ` · out by ${clock(v.expectedExit)}` : ''}`} status={isOverdue(v) && <span className="tag-danger">{overText(minutesOver(v))}</span>}>
                 {visitorButtons(v)}
               </Row>
             ))}

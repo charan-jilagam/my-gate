@@ -1,16 +1,67 @@
 import { useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { FiArrowLeft, FiCheck, FiFlag, FiHeart, FiSend, FiTrash2 } from 'react-icons/fi'
+import { FiArrowLeft, FiCheck, FiEyeOff, FiFlag, FiHeart, FiMessageCircle, FiSend, FiTrash2 } from 'react-icons/fi'
 import { FaThumbtack } from 'react-icons/fa'
 import { useAuth } from '../contexts/AuthContext'
 import api from '../services/api'
 import useApi from '../hooks/useApi'
 import useAction from '../hooks/useAction'
-import { Avatar, ConfirmDialog, ErrorState, ListSkeleton, Spinner, formatDate, formatINR } from '../components/ui'
+import { Avatar, ConfirmDialog, ErrorState, ListSkeleton, Modal, Spinner, formatDate, formatINR } from '../components/ui'
 import { categoryLabel } from './Community'
 import { imgSrc } from '../utils/media'
 
+const REPORT_REASONS = ['Spam', 'Rude or abusive', 'Wrong category', 'Not for this community', 'Other']
 const RESOLVE = { buy_sell: ['Mark as sold', 'Mark as available'], lost_found: ['Mark as found', 'Mark as still missing'], help: ['Mark as solved', 'Reopen'] }
+
+/** Office only: exactly who liked the post and who reported it, and why. */
+const ActivityPanel = ({ post }) => {
+  const [tab, setTab] = useState(post.reports.length ? 'reports' : 'likes')
+  const tabs = [
+    { key: 'likes', label: 'Liked by', n: post.likers.length },
+    { key: 'reports', label: 'Reports', n: post.reports.length }
+  ]
+  return (
+    <section className="panel mt-5 overflow-hidden" aria-labelledby="act-h">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-5 py-3">
+        <h2 id="act-h" className="text-base font-bold">Who reacted</h2>
+        <div className="flex gap-1 rounded-lg bg-sunken p-1" role="tablist" aria-label="Reactions">
+          {tabs.map((t) => (
+            <button key={t.key} role="tab" aria-selected={tab === t.key} onClick={() => setTab(t.key)}
+              className={`rounded-md px-3 py-1 text-sm font-semibold transition-colors ${tab === t.key ? 'bg-surface shadow-sm' : 'text-muted hover:text-ink'}`}>
+              {t.label} <span className={t.key === 'reports' && t.n ? 'text-danger' : 'text-muted'}>{t.n}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+      {tab === 'likes' ? (
+        post.likers.length === 0 ? <p className="px-5 py-6 text-sm text-muted">Nobody has liked this yet.</p> : (
+          <ul className="grid gap-x-6 sm:grid-cols-2">
+            {post.likers.map((u, i) => (
+              <li key={u.id || i} className="flex items-center gap-3 border-b border-line px-5 py-3 last:border-0">
+                <Avatar name={u.name} size={34} />
+                <p className="min-w-0 text-sm"><span className="block truncate font-semibold">{u.name}</span><span className="block text-xs text-muted">{u.flat || (u.isAdmin ? 'Society office' : 'No flat')}</span></p>
+              </li>
+            ))}
+          </ul>
+        )
+      ) : post.reports.length === 0 ? (
+        <p className="px-5 py-6 text-sm text-muted">Nobody has reported this post.</p>
+      ) : (
+        <ul>
+          {post.reports.map((r, i) => (
+            <li key={r.by.id || i} className="flex gap-3 border-b border-line px-5 py-3.5 last:border-0">
+              <Avatar name={r.by.name} size={34} />
+              <div className="min-w-0 text-sm">
+                <p className="font-semibold">{r.by.name} <span className="font-normal text-muted">{r.by.flat && `· ${r.by.flat}`}</span></p>
+                <p className="mt-0.5 text-muted">{r.reason ? `"${r.reason}"` : 'No reason given.'}</p>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  )
+}
 
 const CommunityPost = () => {
   const { id } = useParams()
@@ -20,6 +71,8 @@ const CommunityPost = () => {
   const { busy, run } = useAction(reload)
   const [text, setText] = useState('')
   const [confirm, setConfirm] = useState(null)
+  const [reportWhy, setReportWhy] = useState('')
+  const [reportNote, setReportNote] = useState('')
 
   if (loading) return <div className="panel"><ListSkeleton rows={4} /></div>
   if (error || !post) return <div className="panel"><ErrorState message={error || 'This post is no longer available.'} onRetry={reload} /></div>
@@ -33,10 +86,17 @@ const CommunityPost = () => {
   const [resolveOn, resolveOff] = RESOLVE[post.category] || []
 
   return (
-    <>
-      <Link to="/community" className="mb-4 inline-flex items-center gap-1.5 text-sm font-semibold text-muted hover:text-ink"><FiArrowLeft size={15} /> Community</Link>
+    <div className="mx-auto max-w-3xl">
+      <Link to="/community" className="mb-4 inline-flex items-center gap-1.5 rounded-lg py-1 text-sm font-semibold text-muted hover:text-ink"><FiArrowLeft size={15} /> Community</Link>
 
-      <article className="panel p-5">
+      {post.isHidden && isAdmin && (
+        <p className="mb-3 flex items-center gap-2 rounded-xl bg-danger-soft px-4 py-3 text-sm font-semibold text-danger" role="status">
+          <FiEyeOff size={16} /> {post.reportCount ? `Hidden from residents after ${post.reportCount} ${post.reportCount === 1 ? 'report' : 'reports'}. Only the office can see it.` : 'Hidden from residents. Only the office can see it.'}
+        </p>
+      )}
+
+      <article className="panel overflow-hidden">
+        <div className="p-5 sm:p-7">
         <div className="flex items-start gap-3">
           <Avatar name={post.author.name} size={44} />
           <div className="min-w-0 flex-1">
@@ -44,27 +104,30 @@ const CommunityPost = () => {
             <p className="text-xs text-muted">{post.author.flat && `${post.author.flat} · `}{formatDate(post.createdAt, true)}</p>
           </div>
         </div>
-        <div className="mt-3 flex flex-wrap items-center gap-2">
+        <div className="mt-5 flex flex-wrap items-center gap-2">
           {post.isPinned && <span className="tag-neutral"><FaThumbtack size={10} /> Pinned</span>}
           <span className="tag-neutral">{categoryLabel(post.category)}</span>
           {post.isResolved && <span className="tag-ok">Closed</span>}
           {post.isHidden && <span className="tag-danger">Hidden{post.reportCount ? ` · ${post.reportCount} reports` : ''}</span>}
         </div>
-        <h1 className="mt-2 text-2xl font-bold">{post.title}</h1>
+        <h1 className="mt-3 text-2xl font-bold leading-tight sm:text-3xl">{post.title}</h1>
         {post.category === 'buy_sell' && post.price != null && <p className="mt-1 font-display text-2xl font-extrabold">{formatINR(post.price)}</p>}
-        {post.body && <p className="mt-3 whitespace-pre-line leading-relaxed">{post.body}</p>}
+        {post.body && <p className="mt-4 max-w-prose whitespace-pre-line text-[15px] leading-7">{post.body}</p>}
         {post.images?.length > 0 && (
           <ul className="mt-3 flex flex-wrap gap-2">
             {post.images.map((img) => (
-              <li key={img.url}><a href={imgSrc(img.url)} target="_blank" rel="noreferrer"><img src={imgSrc(img.url)} alt={img.name || 'Photo'} className="h-32 w-32 rounded-md object-cover ring-1 ring-line" /></a></li>
+              <li key={img.url}><a href={imgSrc(img.url)} target="_blank" rel="noreferrer"><img src={imgSrc(img.url)} alt={img.name || 'Photo'} className="h-40 w-40 rounded-xl object-cover ring-1 ring-line transition-transform hover:scale-[1.02]" /></a></li>
             ))}
           </ul>
         )}
 
-        <div className="mt-4 flex flex-wrap gap-2 border-t border-line pt-4">
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2 border-t border-line bg-sunken/40 px-5 py-3 sm:px-7">
           <button className="btn-secondary btn-sm" disabled={busy === 'like'} onClick={() => run('like', () => api.post(`/community/posts/${id}/like`))} aria-pressed={post.liked}>
             <FiHeart size={14} className={post.liked ? 'fill-current text-danger' : ''} /> {post.likeCount}
           </button>
+          <span className="inline-flex items-center gap-1.5 px-2 text-sm text-muted"><FiMessageCircle size={14} /> {post.commentCount}</span>
           {post.mine && resolveOn && (
             <button className="btn-secondary btn-sm" disabled={busy === 'resolve'} onClick={() => run('resolve', () => api.put(`/community/posts/${id}/resolve`))}>
               <FiCheck size={14} /> {post.isResolved ? resolveOff : resolveOn}
@@ -85,7 +148,9 @@ const CommunityPost = () => {
         </div>
       </article>
 
-      <section className="panel mt-5" aria-labelledby="c-h">
+      {isAdmin && post.likers && <ActivityPanel post={post} />}
+
+      <section className="panel mt-5 overflow-hidden" aria-labelledby="c-h">
         <h2 id="c-h" className="border-b border-line px-5 py-3.5 text-base font-bold">Replies ({post.commentCount})</h2>
         {post.comments.length === 0 ? (
           <p className="px-5 py-6 text-sm text-muted">No replies yet.</p>
@@ -126,19 +191,40 @@ const CommunityPost = () => {
           if (ok) navigate('/community', { replace: true })
         }}
       />
-      <ConfirmDialog
+      <Modal
         open={confirm === 'report'}
-        title="Report this post?"
-        text="The society office will be told. Posts with several reports are hidden until someone looks."
-        confirmLabel="Report"
-        busy={busy === 'rep'}
         onClose={() => setConfirm(null)}
-        onConfirm={async () => {
-          const ok = await run('rep', () => api.post(`/community/posts/${id}/report`), 'Thanks. The office will look at it.')
-          if (ok) setConfirm(null)
-        }}
-      />
-    </>
+        title="Report this post"
+        size="sm"
+        footer={
+          <>
+            <button className="btn-secondary" onClick={() => setConfirm(null)}>Cancel</button>
+            <button
+              className="btn-danger"
+              disabled={busy === 'rep'}
+              onClick={async () => {
+                const reason = [reportWhy, reportNote.trim()].filter(Boolean).join(': ')
+                const ok = await run('rep', () => api.post(`/community/posts/${id}/report`, { reason }), 'Thanks. The office will look at it.')
+                if (ok) { setConfirm(null); setReportWhy(''); setReportNote('') }
+              }}
+            >
+              {busy === 'rep' && <Spinner className="h-4 w-4" />} Report post
+            </button>
+          </>
+        }
+      >
+        <p className="mb-3 text-sm text-muted">The society office is told who reported it and why. Posts with several reports are hidden until someone looks.</p>
+        <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Reason">
+          {REPORT_REASONS.map((r) => (
+            <button key={r} type="button" role="radio" aria-checked={reportWhy === r} onClick={() => setReportWhy(r)}
+              className={`rounded-full border px-3 py-1.5 text-sm font-semibold transition-colors ${reportWhy === r ? 'border-brand bg-brand text-brand-ink' : 'border-line bg-surface hover:border-brand'}`}>
+              {r}
+            </button>
+          ))}
+        </div>
+        <input className="input mt-3" aria-label="More detail" placeholder="Add a detail (optional)" maxLength={120} value={reportNote} onChange={(e) => setReportNote(e.target.value)} />
+      </Modal>
+    </div>
   )
 }
 

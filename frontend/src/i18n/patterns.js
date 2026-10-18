@@ -17,18 +17,23 @@ const DAY_RE = /\b(Mon|Tue|Wed|Thu|Fri|Sat|Sun)[a-z]*\b/g
 const esc = (x) => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
 /** Turns [English with {0}, Hindi, Telugu] rows into rules. */
-const templateRules = (templates, index) =>
-  templates.map((row) => {
+const literalLength = (row) => row[0].replace(/\{\d\}/g, '').length
+
+// More specific templates first, so "Going to {0}" wins over a looser "{0} hour". A placeholder never spans " · ",
+// so a line of several facts is split into its pieces and each piece is translated on its own.
+const templateRules = (templates, index, fix) =>
+  [...templates].sort((a, b) => literalLength(b) - literalLength(a)).map((row) => {
     const names = []
     const source = esc(row[0]).replace(/\\\{(\d)\\\}/g, (_, n) => {
       names.push(Number(n))
-      return '(.+?)'
+      return '([^·]+?)'
     })
     const re = new RegExp(`^${source}$`)
-    return (text) => {
+    return (text, dict) => {
       const m = text.match(re)
       if (!m) return undefined
-      return row[index].replace(/\{(\d)\}/g, (_, n) => m[1 + names.indexOf(Number(n))] ?? '')
+      // The carried-over pieces may be a time or a day ("9:30 am", "Tomorrow, 6:30 pm"), so they get the same rules.
+      return row[index].replace(/\{(\d)\}/g, (_, n) => fix(m[1 + names.indexOf(Number(n))] ?? '', dict))
     }
   })
 
@@ -39,6 +44,7 @@ export const makePatterns = (lang, templates = []) => {
   if (!months) return []
 
   const dateRule = (text) => {
+    if (text.includes(' · ')) return undefined // several facts in one line: translate each piece on its own
     const hasDate = /\b\d{1,2}\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\b/.test(text) || /\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{4}\b/.test(text)
     const hasTime = /\b\d{1,2}:\d{2}\s?(am|pm)\b/i.test(text)
     const hasDay = /^(Mon|Tue|Wed|Thu|Fri|Sat|Sun)[a-z]*,\s/.test(text)
@@ -69,7 +75,15 @@ export const makePatterns = (lang, templates = []) => {
     return `${m[1]} ${UNITS[m[2].toLowerCase()]}${m[3]}`
   }
 
-  const rules = [dayWordRule, dateRule, ...templateRules(templates, lang === 'hi' ? 1 : 2), unitRule]
+  // "6:00 AM to 10:00 PM": opening hours and other time ranges
+  const TO = { hi: 'से', te: 'నుండి' }[lang]
+  const rangeRule = (text) => {
+    const m = text.match(/^(\d{1,2}:\d{2}\s?[ap]m) to (\d{1,2}:\d{2}\s?[ap]m)$/i)
+    return m ? `${dateRule(m[1])} ${TO} ${dateRule(m[2])}` : undefined
+  }
+
+  const fix = (piece, dict) => (dict && (dayWordRule(piece, dict) || dateRule(piece))) || piece
+  const rules = [rangeRule, ...templateRules(templates, lang === 'hi' ? 1 : 2, fix), dayWordRule, dateRule, unitRule]
 
   // "A-101 · Personal", "Plumber, Electrician", "· Block B terrace": translate each piece that is known
   const segmentRule = (text, dict) => {

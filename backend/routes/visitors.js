@@ -7,6 +7,7 @@ router.param('id', scopeToSociety(require('../models/Visitor')));
 const { generateQRCode } = require('../utils/generateQR');
 const { notifyUser } = require('../utils/notifyUser');
 const crypto = require('crypto');
+const { floorOf } = require('../utils/routeKit');
 
 // @route   POST /api/visitors/invite
 // @desc    Invite a visitor
@@ -144,7 +145,7 @@ router.get('/', protect, async (req, res) => {
 
     const visitors = await Visitor.find(query)
       .populate('residentId', 'name email phone flatNo')
-      .populate('approvedBy', 'name')
+      .populate('approvedBy', 'name role')
       .populate('loggedBy', 'name')
       .sort({ createdAt: -1 })
       .limit(Math.min(parseInt(req.query.limit) || 200, 500))
@@ -170,7 +171,7 @@ router.get('/:id', protect, async (req, res) => {
   try {
     const visitor = await Visitor.findById(req.params.id)
       .populate('residentId', 'name email phone flatNo')
-      .populate('approvedBy', 'name')
+      .populate('approvedBy', 'name role')
       .populate('loggedBy', 'name');
 
     if (!visitor) {
@@ -365,9 +366,13 @@ router.put('/:id/reject', protect, authorize('resident', 'security', 'society_ad
 // @desc    Check in visitor
 // @access  Private (Security)
 router.put('/:id/check-in', protect, authorize('security', 'society_admin', 'super_admin'), [
-  body('entryPhoto').optional().trim()
+  body('entryPhoto').optional().trim(),
+  body('expectedExit').optional({ nullable: true, checkFalsy: true }).isISO8601().withMessage('Pick when the visitor is expected to leave'),
+  body('stayMinutes').optional({ nullable: true, checkFalsy: true }).isInt({ min: 5, max: 1440 }).withMessage('The stay must be between 5 minutes and 24 hours')
 ], async (req, res) => {
   try {
+    const errs = validationResult(req);
+    if (!errs.isEmpty()) return res.status(400).json({ success: false, message: errs.array()[0].msg });
     const visitor = await Visitor.findById(req.params.id);
 
     if (!visitor) {
@@ -384,7 +389,18 @@ router.put('/:id/check-in', protect, authorize('security', 'society_admin', 'sup
       });
     }
 
-    visitor.entryTime = new Date();
+    // The guard always records when this person should be out, so anyone who stays past it can be spotted.
+    const now = new Date();
+    const leaveAt = req.body.expectedExit ? new Date(req.body.expectedExit) : req.body.stayMinutes ? new Date(now.getTime() + Number(req.body.stayMinutes) * 60000) : null;
+    if (!leaveAt) {
+      return res.status(400).json({ success: false, message: 'Pick when the visitor is expected to leave.' });
+    }
+    if (leaveAt <= now || leaveAt - now > 24 * 3600 * 1000) {
+      return res.status(400).json({ success: false, message: 'The expected exit must be later than now and within 24 hours.' });
+    }
+
+    visitor.entryTime = now;
+    visitor.expectedExit = leaveAt;
     visitor.status = 'checked_in';
     visitor.loggedBy = req.user.id;
     visitor.entryPhoto = req.body.entryPhoto || '';
@@ -398,7 +414,7 @@ router.put('/:id/check-in', protect, authorize('security', 'society_admin', 'sup
         societyId: visitor.societyId,
         type: 'visitor_entry',
         title: 'Visitor Checked In',
-        message: `${visitor.name} has checked in`,
+        message: `${visitor.name} has checked in and is expected to leave by ${leaveAt.toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit', timeZone: 'Asia/Kolkata' })}`,
         relatedId: visitor._id,
         relatedModel: 'Visitor',
         actionUrl: `/visitors/${visitor._id}`
@@ -603,12 +619,12 @@ router.get('/lookup/:code', protect, authorize('security', 'society_admin', 'sup
     const query = { qrCode: { $regex: `"visitorId":"${code}` } };
     if (req.user.role !== 'super_admin') query.societyId = req.user.societyId;
 
-    const visitor = await Visitor.findOne(query).populate('residentId', 'name phone flatNo block');
+    const visitor = await Visitor.findOne(query).populate('residentId', 'name phone flatNo block').populate('approvedBy', 'name role').populate('loggedBy', 'name');
     if (!visitor) {
       return res.status(404).json({ success: false, message: 'No visitor found for that pass code' });
     }
 
-    res.json({ success: true, visitor });
+    res.json({ success: true, visitor: { ...visitor.toObject(), floor: floorOf(visitor.flatNo) } });
   } catch (error) {
     res.status(500).json({ success: false, message: 'Server error' });
   }

@@ -6,6 +6,8 @@ import useApi from '../hooks/useApi'
 import useAction from '../hooks/useAction'
 import { ConfirmDialog, DataList, EmptyState, ErrorState, Field, Modal, PageHeader, Spinner, StatusTag, formatDate, formatINR } from '../components/ui'
 import { dayLabel, dayParts, timeLabel } from '../utils/services'
+import AmenityManager from '../components/AmenityManager'
+import { amenityIcon } from '../utils/amenity'
 
 const EMPTY_FORM = { amenity: '', date: '', picked: [], numberOfGuests: 0, notes: '' }
 const FILTERS = [
@@ -87,7 +89,9 @@ const SlotGrid = ({ amenity, date, onDate, picked, onPick, today, refreshKey }) 
 }
 
 const Bookings = () => {
-  const { isResident, isAdmin } = useAuth()
+  const { user, isResident, isAdmin } = useAuth()
+  const canManage = user?.role === 'society_admin'
+  const [view, setView] = useState('bookings')
   const { data, loading, error, reload } = useApi('/bookings', { params: { limit: 100 }, select: (d) => d.bookings || [] })
   const amenityInfo = useApi('/bookings/amenities', { enabled: isResident, live: false })
   const amenities = amenityInfo.data?.amenities
@@ -140,7 +144,7 @@ const Bookings = () => {
     ...(isResident ? [] : [{ key: 'who', header: 'Booked by', render: (b) => `${b.residentId?.name || '-'}${b.residentId?.flatNo ? ` (${b.residentId.flatNo})` : ''}` }]),
     { key: 'date', header: 'Date', render: (b) => (b.dateStr ? dayLabel(b.dateStr) : formatDate(b.slotDate)) },
     { key: 'time', header: 'Time', render: timeRange },
-    { key: 'amount', header: 'Amount', render: (b) => (b.amount ? formatINR(b.amount) : 'Free') },
+    { key: 'amount', header: 'Amount', render: (b) => (b.amount ? formatINR(b.amount) : 'No charge') },
     { key: 'status', header: 'Status', render: (b) => <StatusTag status={b.status} /> },
     {
       key: 'actions',
@@ -170,7 +174,7 @@ const Bookings = () => {
     <>
       <PageHeader
         title="Amenities"
-        subtitle={isResident ? 'Book the clubhouse, courts and other shared spaces.' : 'Booking requests for shared spaces.'}
+        subtitle={isResident ? 'Book the clubhouse, courts and other shared spaces.' : canManage ? 'Choose which spaces residents can book, and handle their requests.' : 'Booking requests for shared spaces.'}
         action={
           isResident && (
             <button className="btn-primary" onClick={() => setOpen(true)}>
@@ -179,6 +183,41 @@ const Bookings = () => {
           )
         }
       />
+
+      {canManage && (
+        <div className="mb-5 flex gap-1 rounded-xl bg-sunken p-1" role="tablist" aria-label="Amenities sections">
+          {[['bookings', 'Booking requests'], ['amenities', 'Our amenities']].map(([key, label]) => (
+            <button key={key} role="tab" aria-selected={view === key} onClick={() => setView(key)}
+              className={`flex-1 rounded-lg px-3 py-2 text-sm font-semibold transition-colors ${view === key ? 'bg-surface shadow-sm' : 'text-muted hover:text-ink'}`}>
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {canManage && view === 'amenities' ? <AmenityManager /> : (
+      <>
+      {isResident && amenities?.length > 0 && (
+        <section className="mb-6" aria-label="Spaces you can book">
+          <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {amenities.map((a) => {
+              const Icon = amenityIcon(a.name)
+              return (
+                <li key={a._id}>
+                  <button className="panel-link flex w-full items-center gap-3 p-4 text-left" onClick={() => { setForm({ ...EMPTY_FORM, amenity: a.name }); setFormError(''); setOpen(true) }}>
+                    <span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-brand-soft text-brand"><Icon size={20} /></span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate font-display font-bold">{a.name}</span>
+                      <span className="block text-xs text-muted">{`${timeLabel(a.openTime)} to ${timeLabel(a.closeTime)} · ${a.hourlyRate ? `${formatINR(a.hourlyRate)} per hour` : 'No charge'}`}</span>
+                    </span>
+                    <span className="text-sm font-semibold text-brand">Book</span>
+                  </button>
+                </li>
+              )
+            })}
+          </ul>
+        </section>
+      )}
 
       <div className="mb-4 flex flex-wrap gap-2" role="tablist" aria-label="Filter bookings">
         {FILTERS.map((f) => (
@@ -205,6 +244,9 @@ const Bookings = () => {
         }
       />
 
+      </>
+      )}
+
       <Modal
         open={open}
         onClose={() => setOpen(false)}
@@ -224,7 +266,7 @@ const Bookings = () => {
             <p className="rounded-md bg-sunken px-3 py-3 text-sm text-muted">The society office has not set up any amenities for booking yet.</p>
           ) : (
             <>
-              <Field label="Amenity" htmlFor="b-amenity" hint={chosen ? `Open ${timeLabel(chosen.openTime)} to ${timeLabel(chosen.closeTime)}. ${chosen.hourlyRate ? `${formatINR(chosen.hourlyRate)} per hour.` : 'Free.'}${chosen.requiresApproval ? ' Needs approval from the office.' : ' Confirmed instantly.'}` : undefined}>
+              <Field label="Amenity" htmlFor="b-amenity" hint={chosen ? `Open ${timeLabel(chosen.openTime)} to ${timeLabel(chosen.closeTime)}. ${chosen.hourlyRate ? `${formatINR(chosen.hourlyRate)} per hour.` : 'No charge.'}${chosen.requiresApproval ? ' Needs approval from the office.' : ' Confirmed instantly.'}` : undefined}>
                 <select id="b-amenity" required className="input" value={form.amenity} onChange={(e) => setForm({ ...EMPTY_FORM, amenity: e.target.value })}>
                   <option value="">Select amenity</option>
                   {amenities.map((a) => <option key={a._id} value={a.name}>{a.name}</option>)}
@@ -235,7 +277,7 @@ const Bookings = () => {
               )}
               {chosen && sortedPick.length > 0 && (
                 <p className="rounded-md bg-brand-soft px-3 py-2 text-sm font-semibold" role="status">
-                  {dayLabel(form.date)}, {timeLabel(startTime)} to {timeLabel(endTime)} · {price ? formatINR(price) : 'Free'}
+                  {dayLabel(form.date)}, {timeLabel(startTime)} to {timeLabel(endTime)} · {price ? formatINR(price) : 'No charge'}
                 </p>
               )}
               <Field label="Number of guests" htmlFor="b-guests" hint={chosen?.capacity ? `Capacity ${chosen.capacity} including you` : undefined}>

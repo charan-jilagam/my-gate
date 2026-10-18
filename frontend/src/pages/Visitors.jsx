@@ -1,13 +1,17 @@
 import { useMemo, useState } from 'react'
 import { QRCodeSVG } from 'qrcode.react'
-import { FiCheck, FiEdit2, FiLogIn, FiLogOut, FiPlus, FiUsers, FiX } from 'react-icons/fi'
+import { FiCheck, FiCopy, FiEdit2, FiLogIn, FiLogOut, FiPlus, FiShare2, FiUsers, FiX } from 'react-icons/fi'
+import toast from 'react-hot-toast'
 import { useAuth } from '../contexts/AuthContext'
 import api from '../services/api'
 import useApi from '../hooks/useApi'
 import useAction from '../hooks/useAction'
 import { passCode } from '../utils/pass'
 import ExportButtons from '../components/ExportButtons'
-import { ConfirmDialog, DataList, EmptyState, Field, Modal, PageHeader, Spinner, StatusTag, formatDate, titleCase } from '../components/ui'
+import CheckInSheet from '../components/CheckInSheet'
+import VisitorCard from '../components/VisitorCard'
+import { clock, clockWithDay, flatText, floorOf, isOverdue, minutesOver, overText } from '../utils/gate'
+import { Avatar, ConfirmDialog, DataList, EmptyState, Field, Modal, PageHeader, Spinner, StatusTag, formatDate, titleCase } from '../components/ui'
 
 const PURPOSES = ['personal', 'business', 'delivery', 'service', 'other']
 const EMPTY_FORM = { name: '', phone: '', purpose: 'personal', numberOfVisitors: 1, vehicleNumber: '', expectedArrival: '' }
@@ -28,11 +32,67 @@ const EXPORT_COLUMNS = [
   { header: 'Resident', value: (v) => v.residentId?.name || '' },
   { header: 'Purpose', value: (v) => titleCase(v.purpose) },
   { header: 'People', value: (v) => v.numberOfVisitors || 1 },
+  { header: 'Approved by', value: (v) => v.approvedBy?.name || '' },
+  { header: 'In', value: (v) => (v.entryTime ? formatDate(v.entryTime, true) : '') },
+  { header: 'Expected out', value: (v) => (v.expectedExit ? formatDate(v.expectedExit, true) : '') },
+  { header: 'Out', value: (v) => (v.exitTime ? formatDate(v.exitTime, true) : '') },
   { header: 'Status', value: (v) => titleCase(v.status) }
 ]
 
+const GatePass = ({ visitor, host }) => {
+  const code = passCode(visitor) || '-'
+  const when = visitor.expectedArrival ? formatDate(visitor.expectedArrival, true) : 'Any time today'
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(code)
+      toast.success('Pass code copied')
+    } catch (e) {
+      toast.error('Could not copy. Read the code out instead.')
+    }
+  }
+  const share = async () => {
+    const text = `Your Nivora gate pass for ${flatText(visitor)}. Pass code: ${code}.`
+    try {
+      if (navigator.share) await navigator.share({ title: 'Gate pass', text })
+      else await navigator.clipboard.writeText(text)
+      if (!navigator.share) toast.success('Message copied. Paste it to your guest.')
+    } catch (e) {
+      /* the person closed the share sheet */
+    }
+  }
+  return (
+    <div className="mx-auto max-w-[19rem]">
+      <div className="overflow-hidden rounded-2xl bg-brand text-brand-ink shadow-lift">
+        <div className="px-5 pb-5 pt-4">
+          <p className="text-xs font-semibold opacity-80">Nivora gate pass</p>
+          <p className="mt-1 font-display text-2xl font-extrabold leading-tight">{visitor.name}</p>
+          <p className="mt-0.5 text-sm opacity-90">{`Visiting ${host?.name || 'a resident'}`}</p>
+          <dl className="mt-4 grid grid-cols-2 gap-3 text-sm">
+            <div><dt className="text-xs opacity-75">Flat</dt><dd className="font-semibold">{flatText(visitor)}</dd></div>
+            <div><dt className="text-xs opacity-75">Floor</dt><dd className="font-semibold">{floorOf(visitor.flatNo) || '-'}</dd></div>
+            <div className="col-span-2"><dt className="text-xs opacity-75">Arriving</dt><dd className="font-semibold">{when}</dd></div>
+          </dl>
+        </div>
+        <div className="ticket-notch relative border-t-2 border-dashed border-brand-ink/30" aria-hidden="true" />
+        <div className="bg-surface px-5 pb-5 pt-5 text-center text-ink">
+          <div className="mx-auto inline-block rounded-xl bg-white p-2.5 ring-1 ring-line">
+            <QRCodeSVG value={visitor.qrCode} size={168} />
+          </div>
+          <p className="mt-3 text-xs font-semibold text-muted">Pass code for the guard</p>
+          <p className="font-mono text-2xl font-bold tracking-[0.25em]">{code}</p>
+        </div>
+      </div>
+      <p className="mt-4 text-center text-sm text-muted">Share this with your guest. The guard scans the code or types the pass code.</p>
+      <div className="mt-3 flex justify-center gap-2 print:hidden">
+        <button className="btn-secondary btn-sm" onClick={copy}><FiCopy size={14} /> Copy code</button>
+        <button className="btn-secondary btn-sm" onClick={share}><FiShare2 size={14} /> Share</button>
+      </div>
+    </div>
+  )
+}
+
 const Visitors = () => {
-  const { isResident, isSecurity, isAdmin } = useAuth()
+  const { user, isResident, isSecurity, isAdmin } = useAuth()
   const [filter, setFilter] = useState('all')
   const { data, loading, error, reload } = useApi('/visitors', { params: { limit: 500 }, select: (d) => d.visitors || [] })
   const { busy, run } = useAction(reload)
@@ -45,6 +105,8 @@ const Visitors = () => {
   const [editing, setEditing] = useState(null)
   const [cancelling, setCancelling] = useState(null)
   const [reason, setReason] = useState('')
+  const [checkingIn, setCheckingIn] = useState(null)
+  const [viewing, setViewing] = useState(null)
 
   const visitors = useMemo(
     () => (filter === 'all' ? data || [] : (data || []).filter((v) => v.status === filter)),
@@ -109,10 +171,13 @@ const Visitors = () => {
       key: 'name',
       header: 'Visitor',
       render: (v) => (
-        <div className="md:text-left">
-          <p className="font-semibold">{v.name}</p>
-          <p className="text-xs text-muted">{v.phone}</p>
-        </div>
+        <button className="flex items-center gap-3 text-left md:text-left" onClick={() => setViewing(v)} aria-label={`Details of ${v.name}`}>
+          <Avatar name={v.name} size={36} />
+          <span>
+            <span className="block font-semibold">{v.name}</span>
+            <span className="block text-xs text-muted">{v.phone}</span>
+          </span>
+        </button>
       )
     },
     ...(isResident
@@ -121,11 +186,30 @@ const Visitors = () => {
           {
             key: 'host',
             header: 'Visiting',
-            render: (v) => `${v.block ? `${v.block}-` : ''}${v.flatNo || '-'}${v.residentId?.name ? ` (${v.residentId.name})` : ''}`
+            render: (v) => (
+              <span className="md:text-left">
+                <span className="block font-semibold">{flatText(v)}{floorOf(v.flatNo) ? <span className="font-normal text-muted"> · {floorOf(v.flatNo)}</span> : null}</span>
+                {v.residentId?.name && <span className="block text-xs text-muted">{v.residentId.name}</span>}
+              </span>
+            )
           }
         ]),
     { key: 'purpose', header: 'Purpose', render: (v) => titleCase(v.purpose) },
-    { key: 'when', header: 'When', render: (v) => formatDate(v.entryTime || v.expectedArrival || v.createdAt, true) },
+    {
+      key: 'when',
+      header: 'When',
+      render: (v) => (
+        <span className="md:text-left">
+          <span className="block">{formatDate(v.entryTime || v.expectedArrival || v.createdAt, true)}</span>
+          {v.status === 'checked_in' && v.expectedExit && (
+            <span className={`block text-xs ${isOverdue(v) ? 'font-semibold text-danger' : 'text-muted'}`}>
+              {isOverdue(v) ? overText(minutesOver(v)) : `Out by ${clockWithDay(v.expectedExit)}`}
+            </span>
+          )}
+          {v.status === 'checked_out' && v.exitTime && <span className="block text-xs text-muted">Left {clock(v.exitTime)}</span>}
+        </span>
+      )
+    },
     { key: 'status', header: 'Status', render: (v) => <StatusTag status={v.status} /> },
     {
       key: 'actions',
@@ -163,7 +247,7 @@ const Visitors = () => {
               </button>
             )}
             {(isSecurity || isAdmin) && v.status === 'approved' && (
-              <button className="btn-primary btn-sm" disabled={isBusy} onClick={() => run(v._id, () => api.put(`/visitors/${v._id}/check-in`), 'Checked in')}>
+              <button className="btn-primary btn-sm" disabled={isBusy} onClick={() => setCheckingIn(v)}>
                 <FiLogIn size={14} /> Check in
               </button>
             )}
@@ -302,17 +386,13 @@ const Visitors = () => {
       />
 
       <Modal open={!!passFor} onClose={() => setPassFor(null)} title="Gate pass" size="sm" footer={<button className="btn-primary" onClick={() => setPassFor(null)}>Done</button>}>
-        {passFor && (
-          <div className="text-center">
-            <div className="mx-auto inline-block rounded-lg bg-white p-3 ring-1 ring-line">
-              <QRCodeSVG value={passFor.qrCode} size={176} />
-            </div>
-            <p className="mt-3 font-display text-lg font-bold">{passFor.name}</p>
-            <p className="mt-3 text-xs text-muted">Pass code for the guard</p>
-            <p className="font-mono text-2xl font-bold tracking-widest">{passCode(passFor) || '-'}</p>
-            <p className="mt-3 text-sm text-muted">Share this with your guest. The guard can scan the code or type the pass code.</p>
-          </div>
-        )}
+        {passFor && <GatePass visitor={passFor} host={user} />}
+      </Modal>
+
+      <CheckInSheet visitor={checkingIn} onClose={() => setCheckingIn(null)} onDone={async (v) => { setCheckingIn(null); toast.success(`${v.name} checked in`); await reload() }} />
+
+      <Modal open={!!viewing} onClose={() => setViewing(null)} title="Visitor details" size="lg">
+        {viewing && <VisitorCard visitor={viewing} />}
       </Modal>
 
       <Modal

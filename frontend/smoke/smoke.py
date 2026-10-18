@@ -35,6 +35,11 @@ PROVIDER = dict(_id='p1', name='Ravi Kumar', photo=None, categories=['plumber', 
 POST = dict(_id='po1', category='buy_sell', title='Study table', body='Barely used', price=1500, images=[], isPinned=True, isResolved=False, isHidden=False,
             author=dict(id='u9', name='Bina Shah', flat='B-202', isAdmin=False), likeCount=2, liked=False, commentCount=1, mine=False, canManage=False, createdAt=NOW)
 WEEK = [dict(day=i, enabled=i != 0, start='09:00', end='18:00') for i in range(7)]
+VISITORS = [
+    dict(_id='v1', name='siri', phone='9876543210', purpose='personal', status='checked_out', numberOfVisitors=1, entryTime='2026-10-12T09:37:00Z', exitTime='2026-10-12T11:00:00Z', flatNo='101', block='A', residentId=dict(name='Asha Rao')),
+    dict(_id='v2', name='Ravi Teja', phone='9876500001', purpose='business', status='approved', approved=True, numberOfVisitors=2, flatNo='101', block='A', qrCode='{"visitorId":"abcdef123456"}', approvedBy=dict(_id='u1', name='Asha Rao', role='resident'), residentId=dict(_id='u1', name='Asha Rao', phone='9876543210')),
+    dict(_id='v3', name='Meena Courier', phone='9876500002', purpose='delivery', status='checked_in', approved=True, numberOfVisitors=1, flatNo='101', block='A', entryTime='2026-10-12T09:00:00Z', expectedExit='2026-10-12T09:30:00Z', approvedBy=dict(_id='u1', name='Asha Rao', role='resident'), residentId=dict(_id='u1', name='Asha Rao', phone='9876543210'))
+]
 AMEN = dict(_id='am1', name='Clubhouse', capacity=40, hourlyRate=500, openTime='06:00', closeTime='22:00', slotMinutes=60, maxSlotsPerBooking=3, requiresApproval=True, maxAdvanceDays=30)
 
 def api(role, method, path, q):
@@ -62,6 +67,7 @@ def api(role, method, path, q):
         return dict(success=True, elections=[
             dict(_id='e1', title='Install solar panels?', kind='resolution', voting='per_flat', phase='open', voted=False, opensAt=NOW, closesAt=(datetime.datetime.utcnow() + datetime.timedelta(days=3)).isoformat() + 'Z', options=[dict(_id='o1', label='Yes'), dict(_id='o2', label='No')], canManage=role in OFFICE),
             dict(_id='e2', title='Elect the treasurer', kind='election', voting='per_flat', phase='closed', voted=True, opensAt=NOW, closesAt=NOW, options=[dict(_id='o3', label='Meera'), dict(_id='o4', label='Kabir')], canManage=role in OFFICE)])
+    if p == '/elections/e1/voters': return dict(success=True, voting='per_flat', votes=12, unlisted=2, voted=[dict(name='Asha Rao', flat='A-101', votedAt=NOW)], waiting=[dict(name='Bina Shah', flat='B-202')])
     if p == '/elections/e1': return dict(success=True, election=dict(_id='e1', title='Install solar panels?', description='Cost 4 lakh, saves 30 percent of power bills.', kind='resolution', voting='per_flat', phase='open', voted=False, opensAt=NOW, closesAt=(datetime.datetime.utcnow() + datetime.timedelta(days=3)).isoformat() + 'Z', options=[dict(_id='o1', label='Yes', detail='Install this year'), dict(_id='o2', label='No')], canManage=role in OFFICE, **(dict(turnout=dict(votes=12, eligible=40)) if role in OFFICE else {})))
     if p == '/elections/e2': return dict(success=True, election=dict(_id='e2', title='Elect the treasurer', kind='election', voting='per_flat', phase='closed', voted=True, opensAt=NOW, closesAt=NOW, resultsVisible=True, tied=False, turnout=dict(votes=20, eligible=40), options=[dict(_id='o3', label='Meera', votes=14, percent=70, leading=True), dict(_id='o4', label='Kabir', votes=6, percent=30, leading=False)]))
     if p == '/facility':
@@ -73,17 +79,22 @@ def api(role, method, path, q):
     if p == '/roster/mine': return dict(success=True, today=d(0), shifts=[dict(_id='s1', userId='u4', date=d(0), startTime='08:00', endTime='16:00', overnight=False, post='main_gate', note='', phase='scheduled', canClockIn=True, canClockOut=False), dict(_id='s2', userId='u4', date=d(1), startTime='22:00', endTime='06:00', overnight=True, post='patrol', note='', phase='scheduled', canClockIn=False, canClockOut=False)])
     if p == '/roster': return dict(success=True, from_=d(0), today=d(0), shifts=[dict(_id='s1', userId='u4', person=dict(name='Gate Guard', role='security'), date=d(0), startTime='08:00', endTime='16:00', overnight=False, post='main_gate', phase='on_duty', clockInAt=NOW), dict(_id='s3', userId='u5', person=dict(name='Sunil Staff', role='staff'), date=d(1), startTime='22:00', endTime='06:00', overnight=True, post='housekeeping', phase='scheduled')])
     if p == '/community/posts': return dict(success=True, posts=[POST])
-    if p.startswith('/community/posts/'): return dict(success=True, post=dict(POST, comments=[dict(_id='c1', text='Is it still available?', createdAt=NOW, author=dict(id='u1', name='Asha Rao', flat='A-101'), canDelete=False)]))
+    if p.startswith('/community/posts/'):
+        extra = dict(likers=[dict(id='u1', name='Asha Rao', flat='A-101', isAdmin=False), dict(id='u8', name='Kabir Mehta', flat='C-303', isAdmin=False)], reports=[dict(by=dict(id='u8', name='Kabir Mehta', flat='C-303', isAdmin=False), reason='Spam: selling twice')], reportCount=1) if role in OFFICE else {}
+        return dict(success=True, post=dict(POST, **extra, comments=[dict(_id='c1', text='Is it still available?', createdAt=NOW, author=dict(id='u1', name='Asha Rao', flat='A-101'), canDelete=False)]))
     if p == '/emergency/contacts': return dict(success=True, contacts=[dict(_id='e1', name='City Police', phone='100', kind='police', note='24x7')])
     if p == '/emergency/alerts': return dict(success=True, alerts=[dict(_id='a1', type='medical', typeLabel='Medical emergency', note='Father fainted', status='active', flat='A-101', resident=dict(name='Asha Rao', phone='9876543210'), createdAt=NOW)] if role in ('security', 'society_admin') else [])
     if p == '/daily-help': return dict(success=True, helpers=[dict(_id='h1', name='Lakshmi', phone='9000000000', kind='maid', isActive=True, flats=['A-101'], households=1, code='482913' if role == 'resident' else None, today=dict(status='inside', checkIn=NOW))])
     if p == '/expenses/summary': return dict(success=True, month=today.strftime('%Y-%m'), collected=100000, spent=42500, balance=57500, pendingDues=8000, pendingCount=4, byCategory=[dict(category='security', amount=30000, count=2), dict(category='lift', amount=12500, count=1)])
     if p == '/expenses': return dict(success=True, total=0, expenses=[dict(_id='x1', title='Lift service', amount=12500, date=d(-3), category='lift', vendor='OTIS')])
-    if p == '/bookings/amenities': return dict(success=True, amenities=[AMEN], timezone='Asia/Kolkata')
+    if p == '/bookings/amenities': return dict(success=True, amenities=[dict(AMEN, isActive=True)], timezone='Asia/Kolkata')
     if p == '/bookings/availability': return dict(success=True, amenity=AMEN, date=q.get('date'), closed=False, slots=[dict(start=f'{h:02d}:00', end=f'{h+1:02d}:00', available=(h != 18), reason=None if h != 18 else 'booked') for h in range(6, 22)])
     if p == '/bookings': return dict(success=True, bookings=[dict(_id='b1', amenity='Clubhouse', dateStr=d(3), slotDate=NOW, startTime=NOW, endTime=NOW, status='pending', amount=1000, residentId=dict(name='Asha Rao', flatNo='101'))])
     if p == '/notices': return dict(success=True, notices=[dict(_id='nt1', title='Diwali night', content='Join us', type='event', priority='medium', category='general', isPublished=True, eventDate=(datetime.datetime.utcnow() + datetime.timedelta(days=5)).isoformat() + 'Z', eventLocation='Clubhouse lawn', createdBy=dict(name='Admin'), createdAt=NOW, pollOptions=[], rsvp=dict(going=3, people=7, maybe=1, no=0, mine=None))])
-    if p == '/visitors': return dict(success=True, count=1, visitors=[dict(_id='v1', name='siri', phone='9876543210', purpose='personal', status='checked_out', numberOfVisitors=1, entryTime='2026-10-12T09:37:00Z', flatNo='101', block='A', residentId=dict(name='Asha Rao'))])
+    if p.startswith('/visitors/lookup/'): return dict(success=True, visitor=dict(VISITORS[1], floor='Floor 1', approvedAt=NOW, approvedBy=dict(_id='u1', name='Asha Rao', role='resident'), residentId=dict(_id='u1', name='Asha Rao', phone='9876543210')))
+    if p == '/visitors':
+        rows = VISITORS if q.get('status') is None else [v for v in VISITORS if v['status'] == q['status']]
+        return dict(success=True, count=len(rows), visitors=rows)
     if p in ('/deliveries', '/vehicles', '/complaints', '/payments'): return dict(success=True, count=0, **{p[1:]: []})
     if p == '/users/pending-approvals': return dict(success=True, count=0, users=[])
     if p == '/societies': return dict(success=True, societies=[dict(_id=SOC, name='Green Heights', amenities=[dict(AMEN)])])

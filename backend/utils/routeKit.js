@@ -41,4 +41,15 @@ const isSafeUrl = (value) => typeof value === 'string' && value.length <= 500 &&
 
 const flatLabel = (u) => (u && u.flatNo ? `${u.block ? `${u.block}-` : ''}${u.flatNo}` : '');
 
-module.exports = { fail, invalid, serverError, ADMIN_ROLES, isAdminRole, societyFor, paging, isSafeUrl, flatLabel };
+// "Floor 2" from a flat number like 210 or A-1204. Only a guess from the number, so callers label it as such.
+const floorOf = (flatNo) => {
+  const digits = String(flatNo || '').match(/\d+/g);
+  if (!digits) return '';
+  const n = parseInt(digits[digits.length - 1], 10);
+  if (!Number.isFinite(n)) return '';
+  if (digits[digits.length - 1].length <= 2) return n === 0 ? '' : 'Ground floor';
+  const f = Math.floor(n / 100);
+  return f === 0 ? 'Ground floor' : `Floor ${f}`;
+};
+
+module.exports = { floorOf, fail, invalid, serverError, ADMIN_ROLES, isAdminRole, societyFor, paging, isSafeUrl, flatLabel };

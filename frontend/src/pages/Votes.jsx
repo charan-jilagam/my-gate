@@ -6,6 +6,7 @@ import api from '../services/api'
 import useApi from '../hooks/useApi'
 import useAction from '../hooks/useAction'
 import { useSocietyScope } from '../components/SocietyPicker'
+import VoterList from '../components/VoterList'
 import { ConfirmDialog, EmptyState, ErrorState, Field, ListSkeleton, Modal, PageHeader, Spinner, StatusTag, Tabs, formatDate } from '../components/ui'
 
 const PHASE = { open: 'Open now', upcoming: 'Upcoming', closed: 'Closed', cancelled: 'Cancelled' }
@@ -65,7 +66,7 @@ const Votes = () => {
     <>
       <PageHeader
         title="Votes and elections"
-        subtitle={isAdmin ? 'Run committee elections and decisions with a secret ballot.' : 'Have your say. One vote per flat, and nobody can see how you voted.'}
+        subtitle={isAdmin ? 'Run committee elections and decisions with a secret ballot.' : 'Have your say. One vote per flat. The office can see that you voted, never what you chose.'}
         action={isAdmin && scope.ready && <button className="btn-primary" onClick={() => setForm(blank())}><FiPlus size={16} /> {t('New vote')}</button>}
       />
       {scope.picker}
@@ -83,7 +84,7 @@ const Votes = () => {
         <ul className="space-y-2">
           {list.map((e) => (
             <li key={e._id}>
-              <button className="panel block w-full p-4 text-left hover:ring-2 hover:ring-brand/30" onClick={() => { setChoice(''); setOpenId(e._id) }}>
+              <button className="panel-link block w-full p-5 text-left" onClick={() => { setChoice(''); setOpenId(e._id) }}>
                 <div className="flex flex-wrap items-center gap-2">
                   <StatusTag status={e.phase === 'open' ? 'active' : e.phase === 'upcoming' ? 'on_the_way' : e.phase === 'closed' ? 'checked_out' : 'cancelled'} label={PHASE[e.phase]} />
                   <span className="tag-neutral">{e.kind === 'election' ? 'Election' : 'Decision'}</span>
@@ -146,7 +147,7 @@ const Votes = () => {
 
             {v.voted && v.phase !== 'closed' && <p className="flex items-center gap-2 rounded-md bg-ok-soft px-3 py-2 text-sm font-semibold text-ok"><FiCheckCircle size={15} /> Your vote is recorded. It cannot be changed.</p>}
             {v.phase === 'upcoming' && <p className="text-sm text-muted">Voting has not opened yet.</p>}
-            {v.turnout && <p className="flex items-center gap-2 text-sm text-muted"><FiUsers size={15} /> {v.turnout.votes} of {v.turnout.eligible} {v.voting === 'per_flat' ? 'flats' : 'residents'} have voted{v.phase === 'open' ? ' so far' : ''}.</p>}
+            {v.canManage && v.phase !== 'upcoming' ? <VoterList electionId={v._id} eligible={v.turnout?.eligible} /> : v.turnout && <p className="flex items-center gap-2 text-sm text-muted"><FiUsers size={15} /> {v.turnout.votes} of {v.turnout.eligible} {v.voting === 'per_flat' ? 'flats' : 'residents'} have voted{v.phase === 'open' ? ' so far' : ''}.</p>}
             {v.phase === 'open' && v.canManage && <p className="text-xs text-muted">Results stay hidden until voting closes.</p>}
           </div>
         )}

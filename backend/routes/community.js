@@ -37,6 +37,11 @@ const present = (post, me, { full = false } = {}) => {
     createdAt: post.createdAt
   };
   if (isAdminRole(me)) out.reportCount = post.reports.length;
+  // The office can see exactly who liked and who reported a post. Other residents only see counts.
+  if (full && isAdminRole(me)) {
+    out.likers = post.likes.map((u) => who(u && u._id ? u : null));
+    out.reports = post.reports.map((r) => ({ by: who(r.userId && r.userId._id ? r.userId : null), reason: r.reason || '' }));
+  }
   if (full) {
     out.comments = post.comments.map((c) => ({
       _id: c._id,
@@ -49,7 +54,7 @@ const present = (post, me, { full = false } = {}) => {
   return out;
 };
 
-const loadFull = (id) => Post.findById(id).populate('authorId', 'name flatNo block role').populate('comments.userId', 'name flatNo block role');
+const loadFull = (id) => Post.findById(id).populate('authorId', 'name flatNo block role').populate('comments.userId', 'name flatNo block role').populate('likes', 'name flatNo block role').populate('reports.userId', 'name flatNo block role');
 const idOf = (ref) => String(ref && ref._id ? ref._id : ref);
 const canManage = (post, user) => idOf(post.authorId) === String(user.id) || isAdminRole(user);
 

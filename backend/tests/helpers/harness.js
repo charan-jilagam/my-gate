@@ -128,7 +128,7 @@ const reset = () => {
   mongoose.Model.prototype.$save.mockClear();
   ['updateOne', 'findOneAndUpdate', 'updateMany'].forEach((op) => mongoose.Query.prototype[op].mockClear());
   jest.spyOn(console, 'log').mockImplementation(() => {});
-  jest.spyOn(console, 'error').mockImplementation(() => {});
+  if (!process.env.SHOW_ERR) jest.spyOn(console, 'error').mockImplementation(() => {});
 };
 
 module.exports = {
