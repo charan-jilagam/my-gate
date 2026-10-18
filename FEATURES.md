@@ -187,3 +187,17 @@ Notes: nobody who signed up before this release is asked to verify. The Hindi an
 | **Gate and linking use today's code** | Guard, resident | Lookup, check in/out and **Add by code** all work with today's code only; an old code gets "This code is not valid today". Guards and the office still never see codes. The renewed code is unique within the society (a clash draws again), and two requests at midnight cannot renew the same helper twice |
 
 Notes: helpers made before this release get their first new code the next time anyone opens or checks them. A helper who checked in the evening can check out after midnight using the new code. The Hindi and Telugu wording was written by the assistant and should be reviewed by a native speaker.
+
+
+## Round 7: pass links for guests and alerts for what needs action
+
+| Feature | Who | What it does |
+|---|---|---|
+| **Entry pass sent to the guest** | Guest, resident | When a resident saves an invitation the guest gets a message "Nivora: You have an entry pass for <society> (<flat>) from <host>. Pass code ... Open your pass: <link>" by text message, and by email (with the QR code attached and an Open your pass button) when the resident entered the guest's email. The invite form has a new optional **Guest's email** field, and the resident is told what was sent. A slow or failing provider never blocks the invitation (`utils/passLink.js`) |
+| **Pass page for the guest** | Guest | The link opens `/pass/:passId`, a page that needs no sign-in: QR code, pass code, society, flat, floor, people, arrival and validity. A used, cancelled or expired pass shows why instead of the QR code. The link is a 32-character secret, rate limited, and the page never shows the guest's phone number (`GET /api/public/pass/:passId`) |
+| **Service booked** | Resident, vendor | The vendor gets an in-app alert, a text and an email for every new booking or request. The resident gets a receipt by email (and a text when the vendor confirms). Vendor declined, cancelled by either side, moved (a text when the vendor has to confirm again), completed and payment received all reach the other side by email, with a text where someone must act |
+| **Amenities** | Resident, office | A booking that needs the office's decision texts and emails the office. The resident gets a receipt by email, and the decision (approved, not approved, cancelled by the office) by email, with a text when it was refused or cancelled |
+| **Payments** | Resident | New dues arrive by text and email; a successful or recorded payment sends a receipt by email |
+| **Choose what you get** | Everyone | Profile has a new **Email** switch beside Text messages and Push (`PUT /api/push/prefs` accepts `email`). Only events that need action or are a record of money or access are sent outside the app; everything else stays in the bell. The text switch now works with Fast2SMS as well as Twilio |
+
+Setup: email uses the same `EMAIL_*` settings as the verification codes. Text messages for pass links and alerts need `SMS_PROVIDER=fast2sms` with `FAST2SMS_API_KEY` (or Twilio); with neither they are printed in the backend terminal while developing. Set `FRONTEND_URL` to the address guests can open, because it is the start of the pass link: `localhost` links only open on your own computer.

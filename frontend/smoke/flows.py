@@ -27,6 +27,8 @@ def go(role, fn, init=None):
                 route.fulfill(status=200 if ok else 403, content_type='application/json', body=json.dumps(body)); return
             if req.method == 'POST' and m.group(1) == '/auth/otp/verify': body = dict(success=True, pending=[], done=True, message='Verified. You can sign in now.')
             if req.method == 'POST' and m.group(1) == '/daily-help/check': body = dict(success=True, action='in', time='2026-10-19T04:00:00Z', helper=dict(_id='h1', name='Lakshmi', kind='maid', flats=['A-101']))
+            if req.method == 'GET' and m.group(1).startswith('/public/pass/'): body = dict({'pass': dict(name='Ravi Teja', host='Asha', society='Green Meadows', flat='A-210', floor='2', purpose='personal', numberOfVisitors=2, expectedArrival='2026-10-20T10:00:00Z', expiresAt='2026-10-21T10:00:00Z', status='approved', usable=True, expired=False, qr='{"visitorId":"abcdef1234567890abcdef1234567890"}', code='ABCDEF12')}, success=True)
+            if req.method == 'POST' and m.group(1) == '/visitors/invite': body = dict(success=True, visitor=dict(_id='v9', name='Guest', phone='9812345678', status='approved', qrCode='{"visitorId":"abcdef1234567890abcdef1234567890"}', delivery=dict(sms=True, email=True), passLink='http://x/pass/abcdef1234567890abcdef1234567890'))
             if req.method == 'POST' and m.group(1) == '/emergency/sos': body = dict(success=True, message='Alert sent to the gate and the society office.', alert={}, notified=2)
             if req.method == 'POST' and m.group(1) == '/service-requests/r9/pay-online': body = dict(success=True, order=dict(id='order_1', amount=45000, currency='INR'), keyId='rzp_test')
             route.fulfill(status=200, content_type='application/json', body=json.dumps(body))
@@ -268,6 +270,21 @@ def resident_help_pass(page):
     page.locator('button:has-text("Show pass")').first.click()
     page.wait_for_selector('text=Daily help pass'); assert '482913' in page.inner_text('[role=dialog]')
 
+def public_pass(page):
+    page.goto(smoke.BASE + '/pass/abcdef1234567890abcdef1234567890'); page.wait_for_selector('text=Nivora entry pass')
+    body = page.inner_text('body')
+    assert 'ABCDEF12' in body and 'Green Meadows' in body and 'Flat A-210' in body and 'Invited by Asha' in body, body
+    assert 'Sign out' not in body, 'the guest page must not show the app menu'
+    assert page.locator('svg').count() >= 1
+
+def invite_with_email(page):
+    page.goto(smoke.BASE + '/visitors'); page.wait_for_selector('text=Ravi Teja', state='attached')
+    page.locator('button:has-text("Invite visitor"):visible').first.click()
+    page.fill('#v-name', 'Guest'); page.fill('#v-phone', '9812345678'); page.fill('#v-email', 'guest@example.com')
+    page.click('button[form=invite-form]'); page.wait_for_selector('text=by text and email', timeout=5000)
+    sent = [b for m, p, b in posts if p == '/visitors/invite']
+    assert sent and sent[-1].get('email') == 'guest@example.com', sent
+
 def verify_flow(page):
     page.goto(smoke.BASE + '/login'); page.fill('#email', 'asha@example.com'); page.fill('#password', 'Passw0rd123')
     page.click('button[type=submit]'); page.wait_for_url('**/verify')
@@ -284,7 +301,7 @@ def main():
                          ('resident', 'cast a vote', vote), ('staff', 'mark upkeep done', mark_done), ('society_admin', 'add shifts', add_shift),
                          ('society_admin', 'create a vote', new_vote), ('society_admin', 'add a document', add_document),
                          ('resident', 'pay a service bill online', pay_online), ('super_admin', 'roster as platform admin', super_roster), ('security', 'clock in', clock_in),
-                         ('society_admin', 'admin manages amenities', admin_amenities), ('society_admin', 'admin sees who liked and reported', post_activity), ('society_admin', 'admin sees who voted', voter_list), ('security', 'gate scan and expected exit', gate_scan), ('resident', 'gate pass ticket', gate_pass), ('security', 'overdue visitor is flagged', inside_overdue), ('security', 'exit needs the visitor code', exit_needs_code), ('security', 'no click check-in or approval for staff', visitors_no_click_checkin), ('resident', 'daily help pass from visitors', resident_help_pass), ('resident', 'verify email and mobile with codes', verify_flow)]:
+                         ('society_admin', 'admin manages amenities', admin_amenities), ('society_admin', 'admin sees who liked and reported', post_activity), ('society_admin', 'admin sees who voted', voter_list), ('security', 'gate scan and expected exit', gate_scan), ('resident', 'gate pass ticket', gate_pass), ('security', 'overdue visitor is flagged', inside_overdue), ('security', 'exit needs the visitor code', exit_needs_code), ('security', 'no click check-in or approval for staff', visitors_no_click_checkin), ('resident', 'daily help pass from visitors', resident_help_pass), ('resident', 'verify email and mobile with codes', verify_flow), ('resident', 'guest opens the pass link', public_pass), ('resident', 'invite sends the pass by text and email', invite_with_email)]:
       try:
           e = go(role, fn, init=RAZORPAY_STUB if name == 'pay a service bill online' else ("localStorage.removeItem('token')" if name.startswith('verify') else None)); print('OK  ' if not e else 'ERR ', name, e or '')
       except Exception as ex:

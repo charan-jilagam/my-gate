@@ -84,7 +84,8 @@ const userSchema = new mongoose.Schema({
   },
   notificationPrefs: {
     push: { type: Boolean, default: true },
-    sms: { type: Boolean, default: true }
+    sms: { type: Boolean, default: true },
+    email: { type: Boolean, default: true }
   },
   pushSubscriptions: {
     type: [{

@@ -14,6 +14,7 @@ const Register = lazy(() => import('./pages/Register'))
 const VerifyAccount = lazy(() => import('./pages/VerifyAccount'))
 const ForgotPassword = lazy(() => import('./pages/ForgotPassword'))
 const ResetPassword = lazy(() => import('./pages/ResetPassword'))
+const PublicPass = lazy(() => import('./pages/PublicPass'))
 const Dashboard = lazy(() => import('./pages/Dashboard'))
 const Visitors = lazy(() => import('./pages/Visitors'))
 const Deliveries = lazy(() => import('./pages/Deliveries'))
@@ -65,6 +66,7 @@ function App() {
           <ErrorBoundary>
           <Suspense fallback={<FullPageSpinner />}>
             <Routes>
+              <Route path="/pass/:passId" element={<PublicPass />} />
               <Route path="/login" element={<GuestOnly><Login /></GuestOnly>} />
               <Route path="/register" element={<GuestOnly><Register /></GuestOnly>} />
               <Route path="/verify" element={<GuestOnly><VerifyAccount /></GuestOnly>} />

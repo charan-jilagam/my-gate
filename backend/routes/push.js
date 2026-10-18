@@ -16,7 +16,8 @@ router.get('/config', protect, (req, res) => {
     pushEnabled: isPushConfigured(),
     publicKey: isPushConfigured() ? process.env.VAPID_PUBLIC_KEY : null,
     smsEnabled: isSmsConfigured(),
-    prefs: { push: req.user.notificationPrefs?.push !== false, sms: req.user.notificationPrefs?.sms !== false }
+    emailEnabled: require('../utils/sendEmail').isEmailConfigured(),
+    prefs: { push: req.user.notificationPrefs?.push !== false, sms: req.user.notificationPrefs?.sms !== false, email: req.user.notificationPrefs?.email !== false }
   });
 });
 
@@ -63,6 +64,7 @@ router.post('/unsubscribe', protect, [body('endpoint').notEmpty()], async (req, 
 // @access  Private
 router.put('/prefs', protect, [
   body('sms').optional().isBoolean(),
+  body('email').optional().isBoolean(),
   body('push').optional().isBoolean()
 ], async (req, res) => {
   try {
@@ -70,6 +72,7 @@ router.put('/prefs', protect, [
     if (!errors.isEmpty()) return res.status(400).json({ success: false, errors: errors.array() });
     const set = {};
     if (req.body.sms !== undefined) set['notificationPrefs.sms'] = req.body.sms === true || req.body.sms === 'true';
+    if (req.body.email !== undefined) set['notificationPrefs.email'] = req.body.email === true || req.body.email === 'true';
     if (req.body.push !== undefined) set['notificationPrefs.push'] = req.body.push === true || req.body.push === 'true';
     if (Object.keys(set).length) await User.updateOne({ _id: req.user.id }, { $set: set });
     res.json({ success: true, message: 'Preferences saved' });

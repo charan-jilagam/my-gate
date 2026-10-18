@@ -110,6 +110,16 @@ const Profile = () => {
       setNotifBusy(false)
     }
   }
+  const toggleEmail = async () => {
+    const next = !notif.prefs?.email
+    setNotif({ ...notif, prefs: { ...(notif.prefs || {}), email: next } })
+    try {
+      await api.put('/push/prefs', { email: next })
+    } catch (err) {
+      setNotif({ ...notif, prefs: { ...(notif.prefs || {}), email: !next } })
+      toast.error(errorMessage(err, 'Could not save that.'))
+    }
+  }
   const toggleSms = async () => {
     const next = !notif.prefs?.sms
     setNotif({ ...notif, prefs: { ...(notif.prefs || {}), sms: next } })
@@ -255,6 +265,15 @@ const Profile = () => {
                 </span>
                 <button className={notif.prefs?.sms ? 'btn-secondary btn-sm' : 'btn-primary btn-sm'} disabled={!notif.smsEnabled} onClick={toggleSms}>
                   {notif.prefs?.sms ? 'Turn off' : 'Turn on'}
+                </button>
+              </li>
+              <li className="flex items-center justify-between gap-4">
+                <span>
+                  <span className="block font-semibold">Email</span>
+                  <span className="text-muted">{notif.emailEnabled ? 'Bookings, payments and anything that needs your action.' : 'Not set up on this server yet.'}</span>
+                </span>
+                <button className={notif.prefs?.email ? 'btn-secondary btn-sm' : 'btn-primary btn-sm'} disabled={!notif.emailEnabled} onClick={toggleEmail}>
+                  {notif.prefs?.email ? 'Turn off' : 'Turn on'}
                 </button>
               </li>
             </ul>

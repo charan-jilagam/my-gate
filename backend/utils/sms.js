@@ -8,7 +8,8 @@
 const provider = () => String(process.env.SMS_PROVIDER || '').trim().toLowerCase() || 'console';
 
 const isTwilioConfigured = () => !!(process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN && process.env.TWILIO_FROM);
-const isSmsConfigured = isTwilioConfigured;
+// True when ordinary text alerts can really be delivered (Twilio, or Fast2SMS when it is the chosen provider).
+const isSmsConfigured = () => isTwilioConfigured() || (provider() === 'fast2sms' && !!process.env.FAST2SMS_API_KEY);
 
 const toE164 = (phone) => {
   const digits = String(phone || '').replace(/\D/g, '');
@@ -31,20 +32,33 @@ const sendTwilio = async (phone, text) => {
       Authorization: `Basic ${Buffer.from(`${sid}:${process.env.TWILIO_AUTH_TOKEN}`).toString('base64')}`,
       'Content-Type': 'application/x-www-form-urlencoded'
     },
-    body: new URLSearchParams({ To: to, From: process.env.TWILIO_FROM, Body: String(text).slice(0, 300) })
+    body: new URLSearchParams({ To: to, From: process.env.TWILIO_FROM, Body: String(text).slice(0, 450) })
   });
   if (!res.ok) throw new Error(`Twilio responded ${res.status}`);
+  return true;
+};
+
+// Ordinary alerts (pass links, booking updates). Twilio when it is set up; otherwise Fast2SMS' quick route when
+// SMS_PROVIDER=fast2sms (it uses your Fast2SMS balance); otherwise the text is printed in the terminal while developing.
+const sendFast2Sms = async (phone, text) => {
+  const res = await fetch('https://www.fast2sms.com/dev/bulkV2', {
+    method: 'POST',
+    headers: { authorization: process.env.FAST2SMS_API_KEY, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ route: 'q', message: String(text).slice(0, 450), language: 'english', flash: 0, numbers: national(phone) })
+  });
+  if (!res.ok) throw new Error(`Fast2SMS responded ${res.status}`);
+  const json = await res.json().catch(() => null);
+  if (json && json.return === false) throw new Error(`Fast2SMS: ${json.message || 'not accepted'}`);
   return true;
 };
 
 const sendSms = async (phone, text) => {
   const to = toE164(phone);
   if (!to) return false;
-  if (!isTwilioConfigured()) {
-    if (process.env.NODE_ENV !== 'production') console.log(`[dev] SMS to ${to}: ${text}`);
-    return false;
-  }
-  return sendTwilio(phone, text);
+  if (isTwilioConfigured()) return sendTwilio(phone, text);
+  if (provider() === 'fast2sms' && process.env.FAST2SMS_API_KEY) return sendFast2Sms(phone, text);
+  if (process.env.NODE_ENV !== 'production') console.log(`[dev] SMS to ${to}: ${text}`);
+  return false;
 };
 
 // True when a real gateway will deliver the code. The console provider only prints it.

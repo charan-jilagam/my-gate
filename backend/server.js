@@ -37,6 +37,7 @@ const io = new Server(httpServer, {
 const authRoutes = require('./routes/auth');
 const societyRoutes = require('./routes/societies');
 const visitorRoutes = require('./routes/visitors');
+const publicPassRoutes = require('./routes/publicPass');
 const deliveryRoutes = require('./routes/deliveries');
 const vehicleRoutes = require('./routes/vehicles');
 const noticeRoutes = require('./routes/notices');
@@ -118,6 +119,7 @@ app.set('io', io);
 app.use('/api/auth', authRoutes);
 app.use('/api/societies', societyRoutes);
 app.use('/api/visitors', visitorRoutes);
+app.use('/api/public', publicPassRoutes);
 app.use('/api/deliveries', deliveryRoutes);
 app.use('/api/vehicles', vehicleRoutes);
 app.use('/api/notices', noticeRoutes);

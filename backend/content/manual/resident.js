@@ -40,6 +40,7 @@ module.exports = {
       summary: 'Invite guests ahead of time, approve walk-ins, and see who is inside.',
       steps: [
         'Tap Invite visitor. Enter their name, phone, purpose, number of people, expected arrival and vehicle number if any, then save. Under Invitation valid for, choose how long the pass keeps working after the expected arrival. It is 24 hours unless you change it.',
+        'Add your guest\'s email if you have it. When you save, they get a message from Nivora with a link to their entry pass: the QR code, the pass code and the flat details. It goes by text message, and by email when you gave one.',
         'On the invitation tap Show pass to see the gate pass with its QR code and pass code. Share it with your guest. They show the QR code or say the pass code to get in, and again to leave. The guard cannot check anyone in or out with a click alone.',
         'If someone arrives without an invitation, the guard asks you to approve. You get a notification: approve or reject (with a reason). Nobody is let in until you approve.',
         'Use the filters (Needs approval, Expected, Inside, Left) to find a visitor. You can edit or cancel an invitation until the visitor checks in.'
@@ -233,7 +234,7 @@ module.exports = {
       steps: [
         'Update your name, mobile number and photo.',
         'Change your password with your current password.',
-        'Turn text messages on or off, and turn push notifications on for this device.',
+        'Turn text messages and email on or off, and turn push notifications on for this device. Only things that need you, such as bookings, payments and visitors, are sent by text or email.',
         'Use the language selector in the top bar to switch between English, Hindi and Telugu. Use the moon or sun icon to change light or dark mode.'
       ],
       tips: []

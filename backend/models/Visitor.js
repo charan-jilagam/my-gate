@@ -99,6 +99,12 @@ const visitorSchema = new mongoose.Schema({
   expectedArrival: {
     type: Date
   },
+  // The secret in the link sent to the guest (same as the visitorId inside the QR code). Looked up by the public pass page.
+  passId: {
+    type: String,
+    index: true,
+    sparse: true
+  },
   // How long after the expected arrival the invitation keeps working. The resident sets it; 24 hours unless changed.
   validForHours: {
     type: Number,

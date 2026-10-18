@@ -290,8 +290,15 @@ router.post(
         relatedId: booking._id,
         relatedModel: 'Booking',
         actionUrl: '/bookings',
-        priority: auto ? 'low' : 'medium'
+        priority: auto ? 'low' : 'medium',
+        // The office only needs a text or email when a booking is waiting for its decision.
+        sms: !auto,
+        email: !auto
       });
+      // The resident gets a receipt of what they booked.
+      await tell(req, booking, auto
+        ? { type: 'booking_approved', title: 'Amenity booked', message: `${amenity.name} on ${date}, ${startTime} to ${endTime} is confirmed.`, email: true }
+        : { type: 'booking_request', title: 'Booking request sent', message: `${amenity.name} on ${date}, ${startTime} to ${endTime} is waiting for the office. You will be told when it is decided.`, email: true });
 
       res.status(201).json({
         success: true,
@@ -365,7 +372,7 @@ router.put('/:id/approve', protect, authorize('society_admin', 'super_admin'), a
     const booking = await decide(current._id, ['pending'], { status: 'approved', approvedBy: req.user.id, approvedAt: new Date() });
     if (!booking) return notFoundOrDecided(res, current._id);
 
-    await tell(req, booking, { type: 'booking_approved', title: 'Booking approved', message: `Your ${booking.amenity} booking is confirmed.` });
+    await tell(req, booking, { type: 'booking_approved', title: 'Booking approved', message: `Your ${booking.amenity} booking is confirmed.`, email: true });
     res.json({ success: true, booking, message: 'Booking approved' });
   } catch (error) {
     serverError(res, error, 'Approve booking');
@@ -380,7 +387,7 @@ router.put('/:id/reject', protect, authorize('society_admin', 'super_admin'), [b
     const booking = await decide(req.params.id, ACTIVE, { status: 'rejected', rejectedReason: reason, slotKeys: [] });
     if (!booking) return notFoundOrDecided(res, req.params.id);
 
-    await tell(req, booking, { type: 'booking_rejected', title: 'Booking not approved', message: `Your ${booking.amenity} booking was not approved: ${reason}`, priority: 'high' });
+    await tell(req, booking, { type: 'booking_rejected', title: 'Booking not approved', message: `Your ${booking.amenity} booking was not approved: ${reason}`, priority: 'high', sms: true, email: true });
     res.json({ success: true, booking, message: 'Booking rejected' });
   } catch (error) {
     serverError(res, error, 'Reject booking');
@@ -404,7 +411,7 @@ router.put('/:id/cancel', protect, authorize('resident', 'society_admin', 'super
     if (!booking) return notFoundOrDecided(res, current._id);
 
     if (byAdmin) {
-      await tell(req, booking, { type: 'booking_rejected', title: 'Booking cancelled', message: `Your ${booking.amenity} booking was cancelled: ${reason}`, priority: 'high' });
+      await tell(req, booking, { type: 'booking_rejected', title: 'Booking cancelled', message: `Your ${booking.amenity} booking was cancelled: ${reason}`, priority: 'high', sms: true, email: true });
     } else {
       const admins = await User.find({ societyId: booking.societyId, role: 'society_admin', isActive: true }).select('_id');
       await safeNotifyMany(req.app.get('io'), admins.map((a) => a._id), {

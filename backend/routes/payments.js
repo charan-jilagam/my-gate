@@ -206,6 +206,7 @@ router.post('/verify', protect, authorize('resident'), [
         societyId: req.user.societyId,
         type: 'payment_received',
         title: 'Payment Successful',
+        email: true,
         message: `Your payment of ₹${payment.amount} has been received`,
         relatedId: payment._id,
         relatedModel: 'Payment',
@@ -347,6 +348,7 @@ router.post('/generate', protect, authorize(...ADMINS), [
             type: 'payment_due',
             title: 'New payment due',
             sms: true,
+            email: true,
             message: `₹${p.amount} is due${p.month ? ` for ${p.month}` : ''}${p.description && !p.month ? `: ${p.description}` : ''}`,
             relatedId: p._id,
             relatedModel: 'Payment',
@@ -434,6 +436,7 @@ router.put('/:id/mark-paid', protect, authorize(...ADMINS), [
         await notifyUser(io, payment.residentId, {
           societyId: payment.societyId,
           type: 'payment_received',
+          email: true,
           title: 'Payment recorded',
           message: `Your ${req.body.paymentMethod} payment of ₹${payment.amount} was recorded`,
           relatedId: payment._id,

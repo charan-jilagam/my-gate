@@ -63,7 +63,7 @@ const whenText = (r) => `${humanDate(r.date)}, ${humanTime(r.startTime)}`;
 const link = (r) => `/services/requests/${r._id}`;
 
 // Tell someone about a change on a request. Never throws.
-const tell = (req, userId, request, { title, message, priority = 'medium', sms = false }) =>
+const tell = (req, userId, request, { title, message, priority = 'medium', sms = false, email = false }) =>
   safeNotify(req.app.get('io'), idOf(userId), {
     societyId: request.societyId,
     type: 'service_update',
@@ -73,7 +73,8 @@ const tell = (req, userId, request, { title, message, priority = 'medium', sms =
     relatedModel: 'ServiceRequest',
     actionUrl: link(request),
     priority,
-    sms
+    sms,
+    email
   });
 
 const respond = (res, req, request, message, status = 200) =>
@@ -171,14 +172,14 @@ router.post(
         title: request.urgency === 'urgent' ? 'Urgent service request' : autoAccept ? 'New booking' : 'New service request',
         message: `${who} needs ${labelOf(category).toLowerCase()}: ${title}. ${whenText(request)}.`,
         priority: request.urgency === 'urgent' ? 'high' : 'medium',
-        sms: request.urgency === 'urgent'
+        // The vendor has to act (or prepare), so they are told by text and email as well as in the app.
+        sms: true,
+        email: true
       });
-      if (autoAccept) {
-        await tell(req, req.user.id, request, {
-          title: 'Booking confirmed',
-          message: `${provider.userId.name} will come on ${whenText(request)}.`
-        });
-      }
+      // The resident gets a receipt for what they booked, by email too.
+      await tell(req, req.user.id, request, autoAccept
+        ? { title: 'Booking confirmed', message: `${provider.userId.name} will come on ${whenText(request)}.`, sms: true, email: true }
+        : { title: 'Request sent', message: `${provider.userId.name} has your request for ${whenText(request)}. You will be told when they confirm.`, email: true });
 
       // The creator needs the start code, which the schema hides by default.
       const full = await loadRequest(request._id, { withOtp: true });
@@ -304,7 +305,8 @@ step({
     await tell(req, request.residentId, request, {
       title: 'Booking confirmed',
       message: `${request.providerUserId.name} will come on ${whenText(request)}. Keep your start code ready.`,
-      sms: true
+      sms: true,
+      email: true
     });
   }
 });
@@ -322,7 +324,9 @@ step({
     await tell(req, request.residentId, request, {
       title: 'Vendor could not take the job',
       message: `${request.providerUserId.name} cannot do ${whenText(request)}${request.declineReason ? `: ${request.declineReason}` : '.'} Please pick another vendor or time.`,
-      priority: 'high'
+      priority: 'high',
+      sms: true,
+      email: true
     });
   }
 });
@@ -391,7 +395,8 @@ step({
     const money = request.finalAmount ? ` Amount: ₹${request.finalAmount}${request.paymentStatus === 'paid' ? ' (paid)' : ' (to pay)'}.` : '';
     await tell(req, request.residentId, request, {
       title: 'Job completed',
-      message: `${request.providerUserId.name} finished: ${request.title}.${money} Tap to rate your experience.`
+      message: `${request.providerUserId.name} finished: ${request.title}.${money} Tap to rate your experience.`,
+      email: true
     });
   }
 });
@@ -416,17 +421,20 @@ step({
     if (actor === 'resident') {
       await tell(req, request.providerUserId, request, {
         title: 'Booking cancelled',
-        message: `${firstName(request.residentId.name)} (${flatLabel(request)}) cancelled ${whenText(request)}.${why}`
+        message: `${firstName(request.residentId.name)} (${flatLabel(request)}) cancelled ${whenText(request)}.${why}`,
+        sms: true,
+        email: true
       });
     } else {
       await tell(req, request.residentId, request, {
         title: 'Booking cancelled',
         message: `Your ${labelOf(request.category).toLowerCase()} booking for ${whenText(request)} was cancelled${actor === 'admin' ? ' by the society office' : ' by the vendor'}.${why}`,
         priority: 'high',
-        sms: true
+        sms: true,
+        email: true
       });
       if (actor === 'admin') {
-        await tell(req, request.providerUserId, request, { title: 'Booking cancelled by the society office', message: `${request.title} on ${whenText(request)}.${why}` });
+        await tell(req, request.providerUserId, request, { title: 'Booking cancelled by the society office', message: `${request.title} on ${whenText(request)}.${why}`, sms: true, email: true });
       }
     }
   }
@@ -492,7 +500,9 @@ router.put(
       await tell(req, request.providerUserId, request, {
         title: needsReconfirm ? 'Booking moved: please confirm' : 'Booking moved',
         message: `${firstName(request.residentId.name)} (${flatLabel(request)}) moved ${before} to ${whenText(request)}.`,
-        priority: 'high'
+        priority: 'high',
+        sms: needsReconfirm, // only a booking that needs the vendor to confirm again is worth a text
+        email: true
       });
       respond(res, req, request, needsReconfirm ? 'Moved. The vendor needs to confirm the new time.' : 'Moved to the new time.');
       return undefined;
@@ -525,7 +535,8 @@ router.put(
 
       await tell(req, request.residentId, request, {
         title: 'Payment received',
-        message: `${request.providerUserId.name} marked ₹${request.finalAmount || 0} as paid (${req.body.paymentMethod}).`
+        message: `${request.providerUserId.name} marked ₹${request.finalAmount || 0} as paid (${req.body.paymentMethod}).`,
+        email: true
       });
       respond(res, req, request, 'Marked as paid.');
       return undefined;
@@ -592,7 +603,7 @@ router.post(
       if (!paid) return fail(res, 409, 'This job is already paid.');
 
       const fresh = await loadRequest(request._id);
-      await tell(req, fresh.providerUserId, fresh, { title: 'Paid online', message: `${fresh.residentId.name} paid ₹${fresh.finalAmount || 0} online for ${fresh.title}.` });
+      await tell(req, fresh.providerUserId, fresh, { title: 'Paid online', message: `${fresh.residentId.name} paid ₹${fresh.finalAmount || 0} online for ${fresh.title}.`, sms: true, email: true });
       respond(res, req, fresh, 'Payment received. Thank you!');
       return undefined;
     } catch (error) {

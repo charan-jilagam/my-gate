@@ -78,7 +78,7 @@ module.exports = {
       path: '/profile',
       covers: ['/profile'],
       summary: 'Your details and password.',
-      steps: ['Update your name, phone and photo, change your password and turn on push notifications so you hear about new requests instantly.', 'The language selector in the top bar switches between English, Hindi and Telugu.'],
+      steps: ['Update your name, phone and photo, change your password and turn on push notifications so you hear about new requests instantly. Each new booking also reaches you by text message and email.', 'The language selector in the top bar switches between English, Hindi and Telugu.'],
       tips: []
     }
   ]

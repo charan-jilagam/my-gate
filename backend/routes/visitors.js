@@ -6,6 +6,7 @@ const { protect, authorize, checkSocietyAccess , scopeToSociety } = require('../
 router.param('id', scopeToSociety(require('../models/Visitor')));
 const { generateQRCode } = require('../utils/generateQR');
 const { notifyUser } = require('../utils/notifyUser');
+const { sendPassLink, passUrl } = require('../utils/passLink');
 const crypto = require('crypto');
 const { floorOf } = require('../utils/routeKit');
 const rateLimit = require('express-rate-limit');
@@ -82,6 +83,7 @@ const present = (v, user) => {
 router.post('/invite', protect, authorize('resident'), [
   body('name').trim().notEmpty().withMessage('Visitor name is required'),
   body('phone').matches(/^[0-9]{10}$/).withMessage('Please provide a valid phone number'),
+  body('email').optional({ checkFalsy: true }).isEmail().withMessage('Enter a valid email address for the guest'),
   body('purpose').isIn(['personal', 'business', 'delivery', 'service', 'other']).withMessage('Invalid purpose'),
   body('expectedArrival').optional().isISO8601().withMessage('Invalid date format'),
   validForRule
@@ -127,6 +129,7 @@ router.post('/invite', protect, authorize('resident'), [
       flatNo: req.user.flatNo,
       block: req.user.block,
       qrCode: qrCodeString,
+      passId: qrData.visitorId,
       expectedArrival: expectedArrival ? new Date(expectedArrival) : null,
       validForHours: validForHours ? Number(validForHours) : DEFAULT_VALID_HOURS,
       notes,
@@ -163,10 +166,26 @@ router.post('/invite', protect, authorize('resident'), [
       }
     }
 
+    // Send the guest their pass by text message and, if an email was given, by email. This never delays or fails the invitation.
+    // Wait a few seconds at most so the resident can be told what was sent, but never let a slow provider hold the invitation up.
+    let slowTimer;
+    const delivery = await Promise.race([
+      sendPassLink({ visitor, resident: req.user }).catch((e) => {
+        console.error('Pass link failed:', e.message);
+        return { sms: false, email: false };
+      }),
+      new Promise((resolve) => {
+        slowTimer = setTimeout(() => resolve({ sms: false, email: false, slow: true }), 6000);
+      })
+    ]);
+    clearTimeout(slowTimer);
+
     res.status(201).json({
       success: true,
       visitor: {
         ...present(visitor, req.user),
+        passLink: passUrl(qrData.visitorId),
+        delivery,
         qrCodeImage
       },
       message: 'Visitor invitation sent successfully'

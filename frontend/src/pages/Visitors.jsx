@@ -17,7 +17,7 @@ import { clock, clockWithDay, flatText, floorOf, isOverdue, minutesOver, overTex
 import { Avatar, ConfirmDialog, DataList, EmptyState, Field, Modal, PageHeader, Spinner, StatusTag, formatDate, titleCase } from '../components/ui'
 
 const PURPOSES = ['personal', 'business', 'delivery', 'service', 'other']
-const EMPTY_FORM = { name: '', phone: '', purpose: 'personal', numberOfVisitors: 1, vehicleNumber: '', expectedArrival: '', validForHours: 24 }
+const EMPTY_FORM = { name: '', phone: '', email: '', purpose: 'personal', numberOfVisitors: 1, vehicleNumber: '', expectedArrival: '', validForHours: 24 }
 
 const FILTERS = [
   { key: 'all', label: 'All' },
@@ -146,6 +146,7 @@ const Visitors = () => {
     if (!payload.expectedArrival) delete payload.expectedArrival
     else payload.expectedArrival = new Date(payload.expectedArrival).toISOString()
     if (!payload.vehicleNumber) delete payload.vehicleNumber
+    if (!payload.email) delete payload.email
 
     if (editing) {
       const done = await run('invite', () => api.put(`/visitors/${editing._id}`, { ...payload, expectedArrival: payload.expectedArrival || null }), 'Invitation updated')
@@ -156,8 +157,10 @@ const Visitors = () => {
       }
       return
     }
-    const res = await run('invite', () => api.post('/visitors/invite', payload), 'Invitation sent. Your guest can now enter.')
+    const res = await run('invite', () => api.post('/visitors/invite', payload))
     if (res) {
+      const sent = res.data?.visitor?.delivery || {}
+      toast.success(sent.sms && sent.email ? 'Invitation sent. Your guest got the pass by text and email.' : sent.sms ? 'Invitation sent. Your guest got the pass by text message.' : sent.email ? 'Invitation sent. Your guest got the pass by email.' : 'Invitation saved. Share the pass with your guest from Show pass.')
       setInviteOpen(false)
       setForm(EMPTY_FORM)
       setPassFor(res.data.visitor)
@@ -175,6 +178,7 @@ const Visitors = () => {
     setForm({
       name: v.name || '',
       phone: v.phone || '',
+      email: v.email || '',
       purpose: v.purpose || 'personal',
       numberOfVisitors: v.numberOfVisitors || 1,
       vehicleNumber: v.vehicleNumber || '',
@@ -428,6 +432,9 @@ const Visitors = () => {
               <input id="v-when" type="datetime-local" className="input" value={form.expectedArrival} onChange={(e) => setForm({ ...form, expectedArrival: e.target.value })} />
             </Field>
           </div>
+          <Field label="Guest's email" htmlFor="v-email" hint="Optional. We send the pass with its QR code here as well as by text message.">
+            <input id="v-email" type="email" className="input" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
+          </Field>
           <Field label="Invitation valid for" htmlFor="v-valid" hint="After the expected arrival time">
             <select id="v-valid" className="input" value={form.validForHours} onChange={(e) => setForm({ ...form, validForHours: Number(e.target.value) })}>
               {VALID_CHOICES.map((c) => <option key={c.hours} value={c.hours}>{c.label}</option>)}
