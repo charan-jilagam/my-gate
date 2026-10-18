@@ -3,6 +3,7 @@ import { FiArrowLeft, FiCheck, FiClock, FiMapPin, FiPhone, FiShield } from 'reac
 import { useAuth } from '../contexts/AuthContext'
 import useApi from '../hooks/useApi'
 import RequestActions from '../components/RequestActions'
+import ProgressTracker from '../components/ProgressTracker'
 import { Avatar, ErrorState, ListSkeleton, StatusTag, Stars, formatDate } from '../components/ui'
 import { STATUS_LABEL, categoryIcon, dayLabel, rupees, slotLabel } from '../utils/services'
 import { imgSrc } from '../utils/media'
@@ -138,21 +139,27 @@ const ServiceRequestDetail = () => {
 
           <section className="panel" aria-labelledby="tl-h">
             <h2 id="tl-h" className="border-b border-line px-5 py-3.5 text-base font-bold">Progress</h2>
-            <ol className="px-5 py-4">
-              {r.statusHistory.map((h, i) => (
-                <li key={`${h.status}-${i}`} className="relative flex gap-3 pb-4 last:pb-0">
-                  {i < r.statusHistory.length - 1 && <span className="absolute left-[11px] top-6 h-full w-px bg-line" aria-hidden="true" />}
-                  <span className="relative z-10 mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-full bg-ok-soft text-ok">
-                    <FiCheck size={13} />
-                  </span>
-                  <div className="text-sm">
-                    <p className="font-semibold">{STATUS_LABEL[h.status] || h.status}</p>
-                    {h.note && <p className="text-muted">{h.note}</p>}
-                    <p className="text-xs text-muted">{formatDate(h.at, true)}</p>
-                  </div>
-                </li>
-              ))}
-            </ol>
+            <div className="px-3 py-5 sm:px-5">
+              <ProgressTracker status={r.status} history={r.statusHistory || []} />
+            </div>
+            <details className="group border-t border-line px-5 py-3 text-sm">
+              <summary className="cursor-pointer select-none font-semibold text-brand">See all updates</summary>
+              <ol className="mt-3">
+                {(r.statusHistory || []).map((h, i, all) => (
+                  <li key={`${h.status}-${i}`} className="relative flex gap-3 pb-4 last:pb-0">
+                    {i < all.length - 1 && <span className="absolute left-[11px] top-6 h-full w-px bg-line" aria-hidden="true" />}
+                    <span className="relative z-10 mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-full bg-ok-soft text-ok">
+                      <FiCheck size={13} />
+                    </span>
+                    <div>
+                      <p className="font-semibold">{STATUS_LABEL[h.status] || h.status}</p>
+                      {h.note && <p className="text-muted">{h.note}</p>}
+                      <p className="text-xs text-muted">{formatDate(h.at, true)}</p>
+                    </div>
+                  </li>
+                ))}
+              </ol>
+            </details>
           </section>
         </div>
 

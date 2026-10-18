@@ -200,11 +200,12 @@ def guide_in_telugu(page):
     page.goto(smoke.BASE + '/help'); page.wait_for_selector('main')
     page.locator('header select').select_option('te')
     page.wait_for_selector('text=నివాసి గైడ్', state='attached')          # the guide itself is translated
+    before = page.locator('main li button').count()
     page.fill('input[type=search], input[placeholder]', 'చెల్లింపు')       # and can be searched in Telugu
     page.wait_for_timeout(600)
     body = page.inner_text('body')
     assert 'డౌన్‌లోడ్' in body or 'చెల్లింపు' in body
-    assert page.locator('main li button').count() < 6, 'search should narrow the topic list'
+    assert page.locator('main li button').count() < before, 'search should narrow the topic list'
 
 def admin_amenities(page):
     page.goto(smoke.BASE + '/bookings'); page.wait_for_selector('text=Our amenities')
