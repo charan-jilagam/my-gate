@@ -13,7 +13,7 @@ const END_LABEL = { cancelled: 'Cancelled', declined: 'Declined' }
 
 /**
  * A Flipkart-style tracker: dots joined by a line, ticks for what is done, a pulsing dot for where the job is now,
- * greyed dots for what is still to come, and a bar with the percentage underneath.
+ * greyed dots for what is still to come, and a progress bar underneath.
  * `history` is the request's statusHistory: [{ status, at, note }].
  */
 const ProgressTracker = ({ status, history = [] }) => {
@@ -64,10 +64,6 @@ const ProgressTracker = ({ status, history = [] }) => {
         })}
       </ol>
       <div className="mt-5">
-        <div className="mb-1 flex items-center justify-between text-[11px] font-bold uppercase tracking-wider text-muted">
-          <span>Progress</span>
-          <span className={ended ? 'text-danger' : 'text-ok'}>{`${percent}%`}</span>
-        </div>
         <div className="h-2 overflow-hidden rounded-full bg-sunken" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent}>
           <div className={`h-full rounded-full ${barTone} transition-all duration-700 ease-out`} style={{ width: `${percent}%` }} />
         </div>
