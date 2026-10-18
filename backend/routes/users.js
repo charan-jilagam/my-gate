@@ -1,4 +1,5 @@
 const express = require('express');
+const otp = require('../utils/otp');
 const router = express.Router();
 const { body, validationResult } = require('express-validator');
 const User = require('../models/User');
@@ -280,19 +281,34 @@ router.put('/profile', protect, [
       return res.status(400).json({ success: false, errors: errors.array() });
     }
 
+    const phoneChanged = req.body.phone !== undefined && req.body.phone !== req.user.phone;
     const allowedUpdates = ['name', 'phone', 'profilePic'];
     allowedUpdates.forEach(update => {
       if (req.body[update] !== undefined) {
         req.user[update] = req.body[update];
       }
     });
+    // A new number has to be proven again.
+    if (phoneChanged && otp.phoneRequired()) req.user.phoneVerified = false;
 
     await req.user.save();
+
+    let needsVerification = [];
+    if (phoneChanged && otp.phoneRequired()) {
+      needsVerification = ['phone'];
+      try {
+        const withOtp = await User.findById(req.user.id).select('+verifyOtp');
+        await otp.sendCode(withOtp, 'phone');
+      } catch (e) {
+        console.error('Could not send the mobile code:', e.message);
+      }
+    }
 
     res.json({
       success: true,
       user: req.user,
-      message: 'Profile updated successfully'
+      needsVerification,
+      message: needsVerification.length ? 'Profile updated. Enter the code we sent to your new number.' : 'Profile updated successfully'
     });
   } catch (error) {
     res.status(500).json({

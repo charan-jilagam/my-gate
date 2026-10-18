@@ -9,7 +9,8 @@ const { protect, authorize, scopeToSociety } = require('../middleware/auth');
 const { safeNotifyMany } = require('../utils/safeNotify');
 const { DEFAULT_TZ, todayIn, isValidDate } = require('../utils/timezone');
 const rateLimit = require('express-rate-limit');
-const { fail, invalid, serverError, isAdminRole, societyFor, flatLabel, isSafeUrl } = require('../utils/routeKit');
+const { fail, invalid, serverError, societyFor, flatLabel, isSafeUrl } = require('../utils/routeKit');
+const { generateQRCode } = require('../utils/generateQR');
 
 router.param('id', scopeToSociety(DailyHelp));
 
@@ -47,8 +48,8 @@ const present = (help, { today, viewer, attendance } = {}) => {
     flats: help.residents.map((r) => r.flat).filter(Boolean),
     households: help.residents.length
   };
-  // The gate code is for the resident to give the helper; guards type it in but never read it from the list.
-  if (viewer && (isAdminRole(viewer) || (viewer.role === 'resident' && linked(help, viewer.id)))) out.code = help.code;
+  // The gate code is for the households the helper works for to give them. Guards and admins type it in but never read it.
+  if (viewer && viewer.role === 'resident' && linked(help, viewer.id)) out.code = help.code;
   if (attendance) {
     out.today = { status: attendance.checkOut ? 'left' : 'inside', checkIn: attendance.checkIn, checkOut: attendance.checkOut };
   } else if (today) {
@@ -201,9 +202,46 @@ router.get('/:id/attendance', protect, authorize('resident', 'society_admin', 's
   }
 });
 
+// @route   GET /api/daily-help/:id/pass
+// @desc    The QR code a helper shows at the gate, for the households they work for
+router.get('/:id/pass', protect, authorize('resident'), async (req, res) => {
+  try {
+    const help = await DailyHelp.findById(req.params.id);
+    if (!help || !help.isActive) return fail(res, 404, 'Helper not found');
+    if (!linked(help, req.user.id)) return fail(res, 403, 'This helper is not on your list.');
+    const qrCodeImage = await generateQRCode({ type: 'daily_help', code: help.code, societyId: String(help.societyId) });
+    res.json({ success: true, code: help.code, qrCodeImage });
+  } catch (error) {
+    serverError(res, error, 'Helper pass');
+  }
+});
+
+// @route   GET /api/daily-help/lookup/:code
+// @desc    The guard types or scans the helper's code and sees who it is and whether they are inside, before choosing check in or out.
+router.get('/lookup/:code', protect, authorize('security', 'society_admin', 'super_admin'), guessLimiter, async (req, res) => {
+  try {
+    const societyId = societyFor(req);
+    if (!societyId) return fail(res, 400, 'Choose a society first.');
+    if (!/^\d{6}$/.test(req.params.code)) return fail(res, 400, 'The code is 6 digits');
+    const help = await DailyHelp.findOne({ societyId, code: req.params.code, isActive: true });
+    if (!help) return fail(res, 404, 'This code is not valid. Ask the resident to check it.');
+    const fresh = new Date(Date.now() - STALE_HOURS * 3600 * 1000);
+    const open = await HelpAttendance.findOne({ helpId: help._id, open: true, checkIn: { $gte: fresh } }).sort({ checkIn: -1 });
+    res.json({
+      success: true,
+      helper: { ...present(help, { viewer: req.user }), flats: help.residents.map((r) => r.flat).filter(Boolean) },
+      inside: !!open,
+      since: open ? open.checkIn : null,
+      next: open ? 'out' : 'in'
+    });
+  } catch (error) {
+    serverError(res, error, 'Look up daily help');
+  }
+});
+
 // @route   POST /api/daily-help/check
 // @desc    The guard types the code the helper shows. First time of the day checks them in, the next checks them out.
-router.post('/check', protect, authorize('security', 'society_admin', 'super_admin'), guessLimiter, [body('code').trim().matches(/^\d{6}$/).withMessage('The code is 6 digits')], async (req, res) => {
+router.post('/check', protect, authorize('security', 'society_admin', 'super_admin'), guessLimiter, [body('code').trim().matches(/^\d{6}$/).withMessage('The code is 6 digits'), body('action').optional({ checkFalsy: true }).isIn(['in', 'out']).withMessage('Choose check in or check out')], async (req, res) => {
   try {
     if (invalid(req, res)) return undefined;
     const societyId = societyFor(req);
@@ -218,8 +256,15 @@ router.post('/check', protect, authorize('security', 'society_admin', 'super_adm
     await HelpAttendance.updateMany({ helpId: help._id, open: true, checkIn: { $lt: fresh } }, { $set: { open: false } });
 
     let action;
+    const wanted = req.body.action;
     // Check-out is a single conditional update, so a double tap cannot close it twice.
-    const closed = await HelpAttendance.findOneAndUpdate({ helpId: help._id, open: true }, { $set: { checkOut: now, open: false } }, { new: true });
+    const closed = wanted === 'in' ? null : await HelpAttendance.findOneAndUpdate({ helpId: help._id, open: true }, { $set: { checkOut: now, open: false } }, { new: true });
+    if (wanted === 'in' && (await HelpAttendance.exists({ helpId: help._id, open: true }))) {
+      return fail(res, 409, `${help.name} is already inside. Use check out when they leave.`);
+    }
+    if (wanted === 'out' && !closed) {
+      return fail(res, 409, `${help.name} is not inside right now, so there is nothing to check out.`);
+    }
     if (closed) {
       action = 'out';
     } else {

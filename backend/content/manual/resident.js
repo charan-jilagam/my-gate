@@ -8,9 +8,10 @@ module.exports = {
       id: 'start',
       title: 'Getting started',
       covers: ['/register', '/login', '/forgot-password'],
-      summary: 'Create your account, wait for approval, and sign in.',
+      summary: 'Create your account, verify it with a code, wait for approval, and sign in.',
       steps: [
         'Open the app and tap Create account. Choose your society, enter your name, mobile number, email, block or tower, flat number and a password.',
+        'We send a code to your email and another to your mobile number. Enter them on the screen that opens after you sign up. They work for 10 minutes; tap Send the code again if one does not arrive.',
         'Your society office must approve you before you can sign in. You will see a waiting screen until then. Nothing is lost if you close the app.',
         'After approval, sign in with your email and password. Forgot it? Tap Forgot password on the sign-in screen and follow the email link.',
         'On a phone, add the app to your home screen (your browser menu has "Add to home screen") so it opens like any other app.'
@@ -39,8 +40,8 @@ module.exports = {
       summary: 'Invite guests ahead of time, approve walk-ins, and see who is inside.',
       steps: [
         'Tap Invite visitor. Enter their name, phone, purpose, number of people, expected arrival and vehicle number if any, then save.',
-        'On the invitation tap Show pass to see the gate pass with its QR code and pass code. Share it with your guest; the guard scans it or types the code.',
-        'If someone arrives without an invitation, the guard asks you to approve. You get a notification: approve or reject (with a reason).',
+        'On the invitation tap Show pass to see the gate pass with its QR code and pass code. Share it with your guest. They show the QR code or say the pass code to get in, and again to leave. The guard cannot check anyone in or out with a click alone.',
+        'If someone arrives without an invitation, the guard asks you to approve. You get a notification: approve or reject (with a reason). Nobody is let in until you approve.',
         'Use the filters (Needs approval, Expected, Inside, Left) to find a visitor. You can edit or cancel an invitation until the visitor checks in.'
       ],
       tips: ['A pass is for one visit. Invite again for the next visit.', 'Delivery people and daily help have their own screens.']
@@ -79,7 +80,7 @@ module.exports = {
       summary: 'Maids, cooks and drivers get a gate code; you see when they arrive and leave.',
       steps: [
         'Tap Add helper and enter their name, phone and what they do. The app gives them a 6-digit gate code.',
-        'Tell your helper the code. At the gate they say it; the guard types it. The first time in a day is a check-in, the next is a check-out, and you are told each time.',
+        'Tap Show pass on a helper to see their QR code and 6-digit code. They show it to the guard when they arrive and again when they leave, and you are told each time.',
         'Open a helper to see monthly attendance.',
         'If your helper also works in another flat, ask that household to add them using the helper\'s code (Add by code).'
       ],

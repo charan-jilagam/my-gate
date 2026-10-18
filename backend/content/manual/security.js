@@ -8,7 +8,7 @@ module.exports = {
       title: 'How to sign in',
       covers: ['/login', '/forgot-password', '/register'],
       summary: 'Sign in at the start of your shift.',
-      steps: ['Sign in with your email and password. If you just signed up, the society office must approve you first.', 'Forgot your password? Use Forgot password and follow the email link.', 'Keep the app open on the gate phone or tablet; new alerts appear live.'],
+      steps: ['Sign in with your email and password. If you just signed up, enter the codes sent to your email and mobile number, then wait for the society office to approve you.', 'Forgot your password? Use Forgot password and follow the email link.', 'Keep the app open on the gate phone or tablet; new alerts appear live.'],
       tips: []
     },
     {
@@ -28,8 +28,9 @@ module.exports = {
       summary: 'Check people, parcels and vehicles in and out.',
       steps: [
         'The console has three tabs: Visitors, Deliveries and Vehicles.',
-        'Invited visitor: tap Scan and scan the QR on their pass, or type the pass code in "Find an invited visitor by pass code". You see the visitor\'s name, the flat and floor, the resident, and who approved them.',
-        'Tap Check in and choose how long they will stay. The expected exit time is saved, and anyone still inside after it is flagged. Check them out when they leave.',
+        'Invited visitor: tap Scan and scan the QR on their pass, or type the 8-character pass code they tell you in Visitor\'s pass code. You see the visitor\'s name, the flat and floor, the resident, and who approved them.',
+        'Tap Check in and choose how long they will stay. The expected exit time is saved, and anyone still inside after it is flagged. When they leave, ask for their QR code or pass code again and tap Check out with code.',
+        'You cannot check an invited visitor in or out with a click alone, and you never see their code. A walk-in that the resident approved is checked in and out by hand.',
         'Walk-in visitor: tap Log a walk-in visitor, enter name, phone, purpose, block and flat, and Ask resident to approve. The visitor appears under Waiting for the resident; let them in only when approved.',
         'Deliveries: approved deliveries are listed. Check the courier in and mark handed over.',
         'Vehicles: search a registered vehicle by number and log entry or exit. The Inside now list shows who is currently in.'
@@ -68,8 +69,8 @@ module.exports = {
       title: 'Daily help check-in',
       path: '/daily-help',
       covers: ['/daily-help'],
-      summary: 'Maids, cooks and drivers say a 6-digit code; you type it.',
-      steps: ['Open Daily help and type the code the helper tells you.', 'The first entry of the day is a check-in; the next is a check-out. Every household they work for is notified.', 'Too many wrong codes locks you out for 15 minutes. Ask the helper to check their code with the resident.'],
+      summary: 'Maids, cooks and drivers show a QR code or say a 6-digit code, both when they arrive and when they leave.',
+      steps: ['Open Daily help and scan the helper\'s QR code or type the code they tell you, then tap Find.', 'You see who they are and whether they are inside. Tap Check in when they arrive and Check out when they leave. Every household they work for is notified.', 'To check someone out from the Inside now list, tap Check out and enter their code.', 'Too many wrong codes locks you out for 15 minutes. Ask the helper to check their code with the resident.'],
       tips: []
     },
     {

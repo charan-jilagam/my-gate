@@ -6,10 +6,12 @@ import { SocketProvider } from './contexts/SocketContext'
 import { LanguageProvider } from './contexts/LanguageContext'
 import PrivateRoute, { FullPageSpinner } from './components/PrivateRoute'
 import Layout from './components/Layout'
+import ErrorBoundary from './components/ErrorBoundary'
 import './App.css'
 
 const Login = lazy(() => import('./pages/Login'))
 const Register = lazy(() => import('./pages/Register'))
+const VerifyAccount = lazy(() => import('./pages/VerifyAccount'))
 const ForgotPassword = lazy(() => import('./pages/ForgotPassword'))
 const ResetPassword = lazy(() => import('./pages/ResetPassword'))
 const Dashboard = lazy(() => import('./pages/Dashboard'))
@@ -60,10 +62,12 @@ function App() {
     <AuthProvider>
       <SocketProvider>
         <Router>
+          <ErrorBoundary>
           <Suspense fallback={<FullPageSpinner />}>
             <Routes>
               <Route path="/login" element={<GuestOnly><Login /></GuestOnly>} />
               <Route path="/register" element={<GuestOnly><Register /></GuestOnly>} />
+              <Route path="/verify" element={<GuestOnly><VerifyAccount /></GuestOnly>} />
               <Route path="/forgot-password" element={<GuestOnly><ForgotPassword /></GuestOnly>} />
               <Route path="/reset-password/:token" element={<GuestOnly><ResetPassword /></GuestOnly>} />
 
@@ -108,6 +112,7 @@ function App() {
               <Route path="/" element={<Navigate to="/dashboard" replace />} />
             </Routes>
           </Suspense>
+          </ErrorBoundary>
           <Toaster
             position="top-right"
             toastOptions={{

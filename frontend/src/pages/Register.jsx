@@ -70,7 +70,10 @@ const Register = () => {
     const result = await register(payload)
     setLoading(false)
 
-    if (result.success) {
+    if (result.success && result.needsVerification) {
+      toast.success(result.message || 'Account created')
+      navigate('/verify', { replace: true, state: { email: result.email, password: payload.password, channels: result.channels, hints: result.hints, delivery: result.delivery } })
+    } else if (result.success) {
       toast.success(result.message || 'Account created')
       navigate('/dashboard', { replace: true })
     } else {

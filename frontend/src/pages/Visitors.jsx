@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { QRCodeSVG } from 'qrcode.react'
 import { FiCheck, FiCopy, FiEdit2, FiLogIn, FiLogOut, FiPlus, FiShare2, FiUsers, FiX } from 'react-icons/fi'
+import { Link } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import { useAuth } from '../contexts/AuthContext'
 import api from '../services/api'
@@ -10,6 +11,8 @@ import { passCode } from '../utils/pass'
 import ExportButtons from '../components/ExportButtons'
 import CheckInSheet from '../components/CheckInSheet'
 import VisitorCard from '../components/VisitorCard'
+import HelperGate from '../components/HelperGate'
+import HelperPass from '../components/HelperPass'
 import { clock, clockWithDay, flatText, floorOf, isOverdue, minutesOver, overText } from '../utils/gate'
 import { Avatar, ConfirmDialog, DataList, EmptyState, Field, Modal, PageHeader, Spinner, StatusTag, formatDate, titleCase } from '../components/ui'
 
@@ -82,7 +85,7 @@ const GatePass = ({ visitor, host }) => {
           <p className="font-mono text-2xl font-bold tracking-[0.25em]">{code}</p>
         </div>
       </div>
-      <p className="mt-4 text-center text-sm text-muted">Share this with your guest. The guard scans the code or types the pass code.</p>
+      <p className="mt-4 text-center text-sm text-muted">Share this with your guest. They show the QR code or say the pass code to get in, and again to leave.</p>
       <div className="mt-3 flex justify-center gap-2 print:hidden">
         <button className="btn-secondary btn-sm" onClick={copy}><FiCopy size={14} /> Copy code</button>
         <button className="btn-secondary btn-sm" onClick={share}><FiShare2 size={14} /> Share</button>
@@ -107,6 +110,9 @@ const Visitors = () => {
   const [reason, setReason] = useState('')
   const [checkingIn, setCheckingIn] = useState(null)
   const [viewing, setViewing] = useState(null)
+  const [section, setSection] = useState('visitors')
+  const [helperPass, setHelperPass] = useState(null)
+  const help = useApi('/daily-help', { enabled: section === 'help' && !(isSecurity || isAdmin), select: (d) => d.helpers || [] })
 
   const visitors = useMemo(
     () => (filter === 'all' ? data || [] : (data || []).filter((v) => v.status === filter)),
@@ -219,7 +225,7 @@ const Visitors = () => {
         const isBusy = busy === v._id
         return (
           <div className="flex flex-wrap justify-end gap-2">
-            {(isResident || isAdmin) && v.status === 'pending' && (
+            {isResident && v.status === 'pending' && (
               <>
                 <button className="btn-ok btn-sm" disabled={isBusy} onClick={() => run(v._id, () => api.put(`/visitors/${v._id}/approve`), 'Visitor approved')}>
                   <FiCheck size={14} /> Approve
@@ -229,6 +235,7 @@ const Visitors = () => {
                 </button>
               </>
             )}
+            {!isResident && v.status === 'pending' && <span className="text-xs text-muted">Waiting for the resident</span>}
             {isResident && ['pending', 'approved'].includes(v.status) && (
               <>
                 <button className="btn-secondary btn-sm" disabled={isBusy} onClick={() => openEdit(v)}>
@@ -241,17 +248,21 @@ const Visitors = () => {
                 )}
               </>
             )}
-            {isResident && ['approved', 'checked_in'].includes(v.status) && (
+            {isResident && v.requiresCode !== false && ['approved', 'checked_in'].includes(v.status) && (
               <button className="btn-secondary btn-sm" onClick={() => setPassFor(v)}>
-                Show pass
+                {v.status === 'checked_in' ? 'Show pass to leave' : 'Show pass'}
               </button>
             )}
-            {(isSecurity || isAdmin) && v.status === 'approved' && (
+            {/* Invited guests are let in and out at the gate with their code. Only walk-ins the guard logged are handled by hand. */}
+            {(isSecurity || isAdmin) && v.requiresCode !== false && ['approved', 'checked_in'].includes(v.status) && (
+              <Link to="/gate" className="btn-secondary btn-sm">{v.status === 'approved' ? 'Check in at the gate' : 'Check out at the gate'}</Link>
+            )}
+            {(isSecurity || isAdmin) && v.requiresCode === false && v.status === 'approved' && (
               <button className="btn-primary btn-sm" disabled={isBusy} onClick={() => setCheckingIn(v)}>
                 <FiLogIn size={14} /> Check in
               </button>
             )}
-            {(isSecurity || isAdmin) && v.status === 'checked_in' && (
+            {(isSecurity || isAdmin) && v.requiresCode === false && v.status === 'checked_in' && (
               <button className="btn-secondary btn-sm" disabled={isBusy} onClick={() => run(v._id, () => api.put(`/visitors/${v._id}/check-out`), 'Checked out')}>
                 <FiLogOut size={14} /> Check out
               </button>
@@ -283,6 +294,42 @@ const Visitors = () => {
         }
       />
 
+      <div className="mb-5 flex gap-1 rounded-xl bg-sunken p-1" role="tablist" aria-label="Visitors sections">
+        {[['visitors', 'Visitors'], ['help', 'Daily help']].map(([key, label]) => (
+          <button key={key} role="tab" aria-selected={section === key} onClick={() => setSection(key)}
+            className={`flex-1 rounded-lg px-3 py-2 text-sm font-semibold transition-colors ${section === key ? 'bg-surface shadow-sm' : 'text-muted hover:text-ink'}`}>
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {section === 'help' ? (
+        isSecurity || isAdmin ? <HelperGate /> : (
+          <div>
+            <p className="mb-4 max-w-prose text-sm text-muted">Your maid, cook or driver shows a QR code (or says their code) when they arrive and when they leave. Nobody is checked in with a click.</p>
+            {help.loading ? <div className="skeleton h-28" /> : help.error ? <p role="alert" className="text-sm text-danger">{help.error}</p> : !help.data?.length ? (
+              <EmptyState icon={FiUsers} title="No daily help yet" text="Add your maid, cook or driver to get a pass for them." action={<Link to="/daily-help" className="btn-primary">Add daily help</Link>} />
+            ) : (
+              <ul className="grid gap-3 md:grid-cols-2">
+                {help.data.map((h) => (
+                  <li key={h._id} className="panel flex items-center gap-3 p-4">
+                    <Avatar name={h.name} src={h.photo} size={44} />
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate font-semibold">{h.name}</p>
+                      <p className="text-xs text-muted">
+                        {h.today?.status === 'inside' ? `Inside since ${clock(h.today.checkIn)}` : h.today?.status === 'left' ? `Left at ${clock(h.today.checkOut)}` : 'Not arrived today'}
+                      </p>
+                    </div>
+                    <button className="btn-secondary btn-sm" onClick={() => setHelperPass(h)}>{h.today?.status === 'inside' ? 'Show pass to leave' : 'Show pass'}</button>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <p className="mt-4 text-sm"><Link to="/daily-help" className="font-semibold text-brand hover:underline">Manage daily help and attendance</Link></p>
+          </div>
+        )
+      ) : (
+      <>
       <div className="mb-4 flex flex-wrap gap-2" role="tablist" aria-label="Filter visitors">
         {FILTERS.map((f) => (
           <button
@@ -321,6 +368,11 @@ const Visitors = () => {
           />
         }
       />
+
+      </>
+      )}
+
+      <HelperPass helper={helperPass} onClose={() => setHelperPass(null)} />
 
       <Modal
         open={inviteOpen}

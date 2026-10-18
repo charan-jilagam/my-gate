@@ -37,8 +37,8 @@ POST = dict(_id='po1', category='buy_sell', title='Study table', body='Barely us
 WEEK = [dict(day=i, enabled=i != 0, start='09:00', end='18:00') for i in range(7)]
 VISITORS = [
     dict(_id='v1', name='siri', phone='9876543210', purpose='personal', status='checked_out', numberOfVisitors=1, entryTime='2026-10-12T09:37:00Z', exitTime='2026-10-12T11:00:00Z', flatNo='101', block='A', residentId=dict(name='Asha Rao')),
-    dict(_id='v2', name='Ravi Teja', phone='9876500001', purpose='business', status='approved', approved=True, numberOfVisitors=2, flatNo='101', block='A', qrCode='{"visitorId":"abcdef123456"}', approvedBy=dict(_id='u1', name='Asha Rao', role='resident'), residentId=dict(_id='u1', name='Asha Rao', phone='9876543210')),
-    dict(_id='v3', name='Meena Courier', phone='9876500002', purpose='delivery', status='checked_in', approved=True, numberOfVisitors=1, flatNo='101', block='A', entryTime='2026-10-12T09:00:00Z', expectedExit='2026-10-12T09:30:00Z', approvedBy=dict(_id='u1', name='Asha Rao', role='resident'), residentId=dict(_id='u1', name='Asha Rao', phone='9876543210'))
+    dict(_id='v2', name='Ravi Teja', phone='9876500001', purpose='business', status='approved', approved=True, requiresCode=True, numberOfVisitors=2, flatNo='101', block='A', qrCode='{"visitorId":"abcdef123456"}', approvedBy=dict(_id='u1', name='Asha Rao', role='resident'), residentId=dict(_id='u1', name='Asha Rao', phone='9876543210')),
+    dict(_id='v3', name='Meena Courier', phone='9876500002', purpose='delivery', status='checked_in', approved=True, requiresCode=True, numberOfVisitors=1, flatNo='101', block='A', entryTime='2026-10-12T09:00:00Z', expectedExit='2026-10-12T09:30:00Z', approvedBy=dict(_id='u1', name='Asha Rao', role='resident'), residentId=dict(_id='u1', name='Asha Rao', phone='9876543210'))
 ]
 AMEN = dict(_id='am1', name='Clubhouse', capacity=40, hourlyRate=500, openTime='06:00', closeTime='22:00', slotMinutes=60, maxSlotsPerBooking=3, requiresApproval=True, maxAdvanceDays=30)
 
@@ -91,9 +91,13 @@ def api(role, method, path, q):
     if p == '/bookings/availability': return dict(success=True, amenity=AMEN, date=q.get('date'), closed=False, slots=[dict(start=f'{h:02d}:00', end=f'{h+1:02d}:00', available=(h != 18), reason=None if h != 18 else 'booked') for h in range(6, 22)])
     if p == '/bookings': return dict(success=True, bookings=[dict(_id='b1', amenity='Clubhouse', dateStr=d(3), slotDate=NOW, startTime=NOW, endTime=NOW, status='pending', amount=1000, residentId=dict(name='Asha Rao', flatNo='101'))])
     if p == '/notices': return dict(success=True, notices=[dict(_id='nt1', title='Diwali night', content='Join us', type='event', priority='medium', category='general', isPublished=True, eventDate=(datetime.datetime.utcnow() + datetime.timedelta(days=5)).isoformat() + 'Z', eventLocation='Clubhouse lawn', createdBy=dict(name='Admin'), createdAt=NOW, pollOptions=[], rsvp=dict(going=3, people=7, maybe=1, no=0, mine=None))])
-    if p.startswith('/visitors/lookup/'): return dict(success=True, visitor=dict(VISITORS[1], floor='Floor 1', approvedAt=NOW, approvedBy=dict(_id='u1', name='Asha Rao', role='resident'), residentId=dict(_id='u1', name='Asha Rao', phone='9876543210')))
+    if p.startswith('/daily-help/lookup/'): return dict(success=True, helper=dict(_id='h1', name='Lakshmi', kind='maid', flats=['A-101']), inside=False, since=None, next='in')
+    if p.startswith('/daily-help/') and p.endswith('/pass'): return dict(success=True, code='482913', qrCodeImage='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==')
+    if p.startswith('/visitors/lookup/'): return dict(success=True, visitor=dict(VISITORS[1], qrCode=None, floor='Floor 1', approvedAt=NOW, approvedBy=dict(_id='u1', name='Asha Rao', role='resident'), residentId=dict(_id='u1', name='Asha Rao', phone='9876543210')))
     if p == '/visitors':
         rows = VISITORS if q.get('status') is None else [v for v in VISITORS if v['status'] == q['status']]
+        # only the resident who owns an invitation is given its code
+        rows = [v if role == 'resident' else {k: x for k, x in v.items() if k != 'qrCode'} for v in rows]
         return dict(success=True, count=len(rows), visitors=rows)
     if p in ('/deliveries', '/vehicles', '/complaints', '/payments'): return dict(success=True, count=0, **{p[1:]: []})
     if p == '/users/pending-approvals': return dict(success=True, count=0, users=[])
@@ -148,7 +152,7 @@ if __name__ == '__main__':
                    ('/bookings', ['Clubhouse']), ('/notices', ['Diwali night', 'people coming', 'Going']), ('/visitors/abc123', [])],
       'vendor': [('/help', ['Service provider guide', 'My schedule']), ('/dashboard', ['Need your reply', 'Waiting for your reply']), ('/work', ['Waiting for your reply', 'No power in bedroom', 'Accept']), ('/work/setup', ['Working hours', 'Days off', 'Slot length']), ('/services/requests/r1', ['Progress'])],
       'society_admin': [('/help', ['Society admin guide', 'Duty roster']), ('/documents', ['Add document', 'Audit draft', 'Office only']), ('/votes', ['New vote', 'Install solar panels?']), ('/upkeep', ['Add job', 'Clean overhead water tanks']), ('/roster', ['Add shifts', 'Gate Guard', 'overnight']), ('/dashboard', ['Approve people', 'Duty roster']), ('/admin/services', ['Ravi Kumar', 'Verified']), ('/accounts', ['Add expense', 'Lift service']), ('/emergency', ['Medical emergency', 'I am responding']), ('/admin/societies', [])],
-      'security': [('/help', ['Security guard guide', 'Gate console']), ('/my-shifts', ['My shifts', 'Clock in', 'overnight']), ('/upkeep', ['Mark done']), ('/documents', ['Society bylaws 2026']), ('/dashboard', ['Gate console', 'My shifts']), ('/daily-help', ['Gate check']), ('/emergency', ['Medical emergency'])],
+      'security': [('/help', ['Security guard guide', 'Gate console']), ('/my-shifts', ['My shifts', 'Clock in', 'overnight']), ('/upkeep', ['Mark done']), ('/documents', ['Society bylaws 2026']), ('/dashboard', ['Gate console', 'My shifts']), ('/daily-help', ['Daily help at the gate']), ('/emergency', ['Medical emergency'])],
       'staff': [('/dashboard', ['My shifts', 'Upkeep']), ('/my-shifts', ['Clock in']), ('/upkeep', ['Mark done']), ('/help', ['Staff guide']), ('/documents', ['Society bylaws 2026'])],
       'super_admin': [('/help', ['Platform admin guide', 'Societies']), ('/roster', ['Society', 'Green Heights', 'Add shifts']), ('/votes', ['Green Heights', 'New vote']), ('/documents', ['Green Heights', 'Add document']), ('/upkeep', ['Green Heights', 'Add job'])],
     }

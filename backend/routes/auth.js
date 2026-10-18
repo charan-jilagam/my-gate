@@ -9,6 +9,27 @@ const sendEmail = require('../utils/sendEmail');
 const { notifyUser } = require('../utils/notifyUser');
 const crypto = require('crypto');
 const { strongPassword } = require('../utils/passwordRules');
+const otp = require('../utils/otp');
+
+// Send the codes still owed by this account. Never throws: a code that could not go out is reported, not fatal.
+const sendPending = async (user, channels = otp.pendingChannels(user)) => {
+  const result = { sent: {}, errors: {} };
+  for (const channel of channels) {
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      const r = await otp.sendCode(user, channel);
+      result.sent[channel] = r.delivery;
+    } catch (e) {
+      result.errors[channel] = e.message;
+    }
+  }
+  return result;
+};
+
+// Enough of the address and number for the person to recognise where the code went, not enough to reveal them.
+const maskEmail = (e) => String(e || '').replace(/^(.).*(@.*)$/, '$1***$2');
+const maskPhone = (p) => (p ? `******${String(p).slice(-4)}` : '');
+const verifyPayload = (user, extra = {}) => ({ email: user.email, channels: otp.pendingChannels(user), hints: { email: maskEmail(user.email), phone: maskPhone(user.phone) }, ...extra });
 
 // @route   POST /api/auth/register
 // @desc    Register a new user
@@ -30,9 +51,11 @@ router.post('/register', [
 
     const { name, email, password, phone, role, societyId, flatNo, block } = req.body;
 
-    // Check if user already exists
-    const userExists = await User.findOne({ email });
-    if (userExists) {
+    // Check if user already exists. A sign-up that was never verified can be started again
+    // (a wrong phone number should not lock the email address for good).
+    const userExists = await User.findOne({ email }).select('+password +verifyOtp');
+    const retry = userExists && userExists.emailVerified === false && !userExists.lastLogin && !userExists.isApproved;
+    if (userExists && !retry) {
       return res.status(400).json({
         success: false,
         message: 'User already exists with this email'
@@ -48,19 +71,28 @@ router.post('/register', [
       });
     }
 
-    // Create user
-    const user = await User.create({
-      name,
-      email,
-      password,
-      phone,
-      role,
-      societyId,
-      flatNo: flatNo || null,
-      block: block || null,
-      // Everyone who signs up on their own waits for a society admin. Otherwise anyone could register as a guard.
-      isApproved: false
-    });
+    // Create user. Everyone who signs up on their own waits for a society admin, otherwise anyone could register as a guard,
+    // and has to prove the email (and mobile) is theirs with a one-time code.
+    let user;
+    if (retry) {
+      Object.assign(userExists, { name, password, phone, role, societyId, flatNo: flatNo || null, block: block || null, emailVerified: false, phoneVerified: false });
+      userExists.verifyOtp = undefined;
+      user = await userExists.save();
+    } else {
+      user = await User.create({
+        name,
+        email,
+        password,
+        phone,
+        role,
+        societyId,
+        flatNo: flatNo || null,
+        block: block || null,
+        isApproved: false,
+        emailVerified: false,
+        phoneVerified: false
+      });
+    }
 
     // Tell the society's admins someone is waiting. A failed notification must not fail the sign-up.
     try {
@@ -81,20 +113,13 @@ router.post('/register', [
       console.error('Could not notify admins of new sign-up:', notifyError.message);
     }
 
-    // Generate token
-    const token = generateToken(user._id, user.role, user.societyId);
-
+    const delivery = await sendPending(user);
     res.status(201).json({
       success: true,
-      token,
-      user: {
-        id: user._id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-        isApproved: user.isApproved
-      },
-      message: 'Registration successful. Your account is pending admin approval.'
+      needsVerification: true,
+      ...verifyPayload(user),
+      delivery,
+      message: 'Account created. Enter the code we sent to finish signing up.'
     });
   } catch (error) {
     console.error('Registration error:', error);
@@ -161,6 +186,19 @@ router.post('/login', [
         message: user.rejectedAt
           ? `Your registration was not approved${user.rejectedReason ? `: ${user.rejectedReason}` : '.'} Contact your society admin.`
           : 'This account has been deactivated. Contact your society admin.'
+      });
+    }
+
+    // New accounts must prove the email (and mobile) first. Send fresh codes so they can finish right here.
+    if (!otp.isVerified(user)) {
+      const withOtp = await User.findById(user._id).select('+verifyOtp');
+      const delivery = await sendPending(withOtp);
+      return res.status(403).json({
+        success: false,
+        needsVerification: true,
+        ...verifyPayload(user),
+        delivery,
+        message: 'Please verify your email to continue. We sent you a code.'
       });
     }
 
@@ -398,6 +436,98 @@ router.put('/update-password', protect, [
   }
 });
 
+
+// @route   POST /api/auth/otp/send
+// @desc    Ask for a new code for the email or the mobile number of an account that is not verified yet
+// @access  Public. The answer is the same whether or not the account exists.
+router.post('/otp/send', [
+  body('email').isEmail().withMessage('Please provide a valid email'),
+  body('channel').isIn(['email', 'phone']).withMessage('Choose email or phone')
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ success: false, errors: errors.array() });
+    const user = await User.findOne({ email: req.body.email }).select('+verifyOtp');
+    const generic = { success: true, message: 'If this account needs verification, a new code is on its way.' };
+    if (!user || !otp.pendingChannels(user).includes(req.body.channel)) return res.json(generic);
+    try {
+      const r = await otp.sendCode(user, req.body.channel);
+      return res.json({ ...generic, delivery: r.delivery });
+    } catch (e) {
+      return res.status(e.status || 500).json({ success: false, message: e.message || 'Could not send the code.' });
+    }
+  } catch (error) {
+    console.error('OTP send error:', error.message);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// @route   POST /api/auth/otp/verify
+// @desc    Check the codes typed for an account. Works one channel at a time or both together.
+// @access  Public
+router.post('/otp/verify', [
+  body('email').isEmail().withMessage('Please provide a valid email'),
+  body('emailCode').optional({ checkFalsy: true }).matches(/^\d{6}$/).withMessage('The email code is 6 digits'),
+  body('phoneCode').optional({ checkFalsy: true }).matches(/^\d{6}$/).withMessage('The mobile code is 6 digits')
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ success: false, message: errors.array()[0].msg });
+    const user = await User.findOne({ email: req.body.email }).select('+verifyOtp');
+    if (!user) return res.status(400).json({ success: false, message: 'That code is not right.' });
+    if (!req.body.emailCode && !req.body.phoneCode) return res.status(400).json({ success: false, message: 'Enter the code you received.' });
+
+    const failed = {};
+    for (const [field, channel] of [['emailCode', 'email'], ['phoneCode', 'phone']]) {
+      if (!req.body[field] || !otp.pendingChannels(user).includes(channel)) continue;
+      // eslint-disable-next-line no-await-in-loop
+      const r = await otp.checkCode(user, channel, req.body[field]);
+      if (!r.ok) failed[channel] = r.message;
+    }
+    const pending = otp.pendingChannels(user);
+    const bad = Object.values(failed)[0];
+    res.status(bad ? 400 : 200).json({
+      success: !bad,
+      message: bad || (pending.length ? 'Verified. One more code to go.' : 'Verified. You can sign in now.'),
+      failed,
+      pending,
+      done: pending.length === 0
+    });
+  } catch (error) {
+    console.error('OTP verify error:', error.message);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// @route   POST /api/auth/otp/me/send
+// @desc    A signed-in user asks for a code, for example after changing their mobile number
+// @access  Private
+router.post('/otp/me/send', protect, [body('channel').isIn(['email', 'phone'])], async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id).select('+verifyOtp');
+    if (!otp.pendingChannels(user).includes(req.body.channel)) return res.json({ success: true, message: 'Already verified.' });
+    const r = await otp.sendCode(user, req.body.channel);
+    res.json({ success: true, delivery: r.delivery, message: 'Code sent.' });
+  } catch (e) {
+    res.status(e.status || 500).json({ success: false, message: e.status ? e.message : 'Server error' });
+  }
+});
+
+// @route   POST /api/auth/otp/me/verify
+// @access  Private
+router.post('/otp/me/verify', protect, [body('channel').isIn(['email', 'phone']), body('code').matches(/^\d{6}$/).withMessage('The code is 6 digits')], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ success: false, message: errors.array()[0].msg });
+    const user = await User.findById(req.user.id).select('+verifyOtp');
+    const r = await otp.checkCode(user, req.body.channel, req.body.code);
+    if (!r.ok) return res.status(400).json({ success: false, message: r.message });
+    res.json({ success: true, pending: otp.pendingChannels(user), message: 'Verified.' });
+  } catch (error) {
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
 // @route   POST /api/auth/create-admin
 // @desc    Create an admin user
 // @access  Private (Super Admin only). The first super admin is created with `npm run create-admin`.
@@ -447,7 +577,9 @@ const createAdminHandler = async (req, res) => {
       role,
       societyId: role === 'super_admin' ? undefined : societyId,
       isApproved: true,
-      isActive: true
+      isActive: true,
+      emailVerified: false,
+      phoneVerified: false
     });
 
     // Generate token

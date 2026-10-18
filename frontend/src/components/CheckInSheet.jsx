@@ -14,8 +14,8 @@ const STAYS = [
 
 const toLocalInput = (d) => new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16)
 
-/** The guard lets someone in and notes when they are expected to leave. */
-const CheckInSheet = ({ visitor, onClose, onDone }) => {
+/** The guard lets someone in (after their code was checked) and notes when they are expected to leave. */
+const CheckInSheet = ({ visitor, code, onClose, onDone }) => {
   const [stay, setStay] = useState(60)
   const [custom, setCustom] = useState('')
   const [busy, setBusy] = useState(false)
@@ -38,7 +38,7 @@ const CheckInSheet = ({ visitor, onClose, onDone }) => {
     if (leaveAt.getTime() <= Date.now()) return setError('That time has already passed.')
     setBusy(true)
     try {
-      await api.put(`/visitors/${visitor._id}/check-in`, stay === 'custom' ? { expectedExit: leaveAt.toISOString() } : { stayMinutes: stay })
+      await api.put(`/visitors/${visitor._id}/check-in`, { ...(code ? { code } : {}), ...(stay === 'custom' ? { expectedExit: leaveAt.toISOString() } : { stayMinutes: stay }) })
       onDone?.(visitor)
     } catch (err) {
       setError(errorMessage(err, 'Could not check this visitor in.'))

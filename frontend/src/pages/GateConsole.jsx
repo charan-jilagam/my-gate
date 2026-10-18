@@ -5,10 +5,12 @@ import { useAuth } from '../contexts/AuthContext'
 import api from '../services/api'
 import useApi from '../hooks/useApi'
 import useAction from '../hooks/useAction'
-import { passCode } from '../utils/pass'
+import { readScan } from '../utils/pass'
 import QrScanner from '../components/QrScanner'
 import VisitorCard from '../components/VisitorCard'
 import CheckInSheet from '../components/CheckInSheet'
+import CodePrompt from '../components/CodePrompt'
+import HelperGate from '../components/HelperGate'
 import { clock, flatText, isOverdue, minutesOver, overText } from '../utils/gate'
 import { EmptyState, ErrorState, Field, ListSkeleton, Modal, PageHeader, Spinner, StatusTag, errorMessage, formatDate, titleCase } from '../components/ui'
 
@@ -16,6 +18,7 @@ const PURPOSES = ['personal', 'business', 'delivery', 'service', 'other']
 const EMPTY_WALK_IN = { name: '', phone: '', block: '', flatNo: '', purpose: 'personal', numberOfVisitors: 1, vehicleNumber: '' }
 const TABS = [
   { key: 'visitors', label: 'Visitors' },
+  { key: 'help', label: 'Daily help' },
   { key: 'deliveries', label: 'Deliveries' },
   { key: 'vehicles', label: 'Vehicles' }
 ]
@@ -58,7 +61,10 @@ const GateConsole = () => {
   }
   const { busy, run } = useAction(refreshAll)
 
+  // Check-in is two steps: the pass code is proven first, then the guard notes how long the visitor will stay.
   const [checkingIn, setCheckingIn] = useState(null)
+  const [checkCode, setCheckCode] = useState('')
+  const [entering, setEntering] = useState(null) // { visitor, mode: 'in' | 'out' } while the guard enters a code
   const afterCheckIn = async (v) => {
     setCheckingIn(null)
     toast.success(`${v.name} checked in`)
@@ -70,31 +76,32 @@ const GateConsole = () => {
   const [code, setCode] = useState('')
   const [lookup, setLookup] = useState(null)
   const [lookupError, setLookupError] = useState('')
+  const [lookupCode, setLookupCode] = useState('')
   const [looking, setLooking] = useState(false)
 
   const [scanning, setScanning] = useState(false)
   const onScan = (text) => {
     setScanning(false)
-    let value = ''
-    try {
-      value = JSON.parse(text)?.visitorId?.slice(0, 8) || ''
-    } catch (e) {
-      value = String(text).trim()
+    const read = readScan(text)
+    if (read.kind === 'helper') {
+      setTab('help')
+      return toast('That is a daily help code. Use the Daily help tab.')
     }
-    if (!value) return setLookupError('That QR code is not a Nivora visitor pass.')
-    setCode(value.toUpperCase())
-    findPass(null, value)
+    if (read.kind !== 'visitor') return setLookupError('That QR code is not a Nivora visitor pass.')
+    setCode(read.code)
+    findPass(null, read.code)
   }
 
   const findPass = async (e, override) => {
     e?.preventDefault()
-    const query = (override ?? code).trim()
+    const query = (override ?? code).trim().slice(0, 8)
     setLookupError('')
     setLookup(null)
     setLooking(true)
     try {
       const { data } = await api.get(`/visitors/lookup/${encodeURIComponent(query)}`)
       setLookup(data.visitor)
+      setLookupCode(query)
     } catch (err) {
       setLookupError(errorMessage(err, 'Could not look up that code.'))
     } finally {
@@ -104,16 +111,53 @@ const GateConsole = () => {
 
   const refreshLookup = async () => {
     try {
-      const { data } = await api.get(`/visitors/lookup/${encodeURIComponent(passCode(lookup).toLowerCase())}`)
+      const { data } = await api.get(`/visitors/lookup/${encodeURIComponent(lookupCode)}`)
       setLookup(data.visitor)
     } catch (e) {
       setLookup(null)
     }
   }
 
-  const act = async (id, path, message) => {
-    const ok = await run(id, () => api.put(path), message)
+  const act = async (id, path, message, body) => {
+    const ok = await run(id, () => api.put(path, body), message)
     if (ok && lookup?._id === id) await refreshLookup()
+  }
+
+  // The visitor's code is checked against the visitor the guard picked, so a code cannot be used for someone else.
+  const confirmCode = async (value) => {
+    const { visitor: v, mode } = entering
+    try {
+      const { data } = await api.get(`/visitors/lookup/${encodeURIComponent(value.slice(0, 8))}`)
+      if (data.visitor._id !== v._id) return `That code belongs to ${data.visitor.name}, not ${v.name}.`
+    } catch (err) {
+      return errorMessage(err, 'That code is not valid.')
+    }
+    if (mode === 'in') {
+      setEntering(null)
+      setCheckCode(value.slice(0, 8))
+      setCheckingIn(v)
+      return ''
+    }
+    try {
+      await api.put(`/visitors/${v._id}/check-out`, { code: value.slice(0, 8) })
+      toast.success(`${v.name} checked out`)
+      setEntering(null)
+      await refreshAll()
+      return ''
+    } catch (err) {
+      return errorMessage(err, 'Could not check this visitor out.')
+    }
+  }
+
+  const startCheckIn = (v, known) => {
+    if (v.requiresCode === false) { setCheckCode(''); return setCheckingIn(v) }
+    if (known) { setCheckCode(known); return setCheckingIn(v) }
+    return setEntering({ visitor: v, mode: 'in' })
+  }
+  const startCheckOut = (v, known) => {
+    if (v.requiresCode === false) return act(v._id, `/visitors/${v._id}/check-out`, `${v.name} checked out`)
+    if (known) return act(v._id, `/visitors/${v._id}/check-out`, `${v.name} checked out`, { code: known })
+    return setEntering({ visitor: v, mode: 'out' })
   }
 
   // Walk-in
@@ -164,16 +208,17 @@ const GateConsole = () => {
     if (ok) setVehicle({ ...vehicle, isInside: kind === 'entry' })
   }
 
-  const visitorButtons = (v) => (
+  // `known` is the code the guard already used to find this visitor, so it is not asked for twice.
+  const visitorButtons = (v, known) => (
     <>
       {v.status === 'approved' && (
-        <button className="btn-primary btn-sm" disabled={busy === v._id} onClick={() => setCheckingIn(v)}>
-          <FiLogIn size={14} /> Check in
+        <button className="btn-primary btn-sm" disabled={busy === v._id} onClick={() => startCheckIn(v, known)}>
+          <FiLogIn size={14} /> {v.requiresCode === false || known ? 'Check in' : 'Check in with code'}
         </button>
       )}
       {v.status === 'checked_in' && (
-        <button className="btn-secondary btn-sm" disabled={busy === v._id} onClick={() => act(v._id, `/visitors/${v._id}/check-out`, `${v.name} checked out`)}>
-          <FiLogOut size={14} /> Check out
+        <button className="btn-secondary btn-sm" disabled={busy === v._id} onClick={() => startCheckOut(v, known)}>
+          <FiLogOut size={14} /> {v.requiresCode === false || known ? 'Check out' : 'Check out with code'}
         </button>
       )}
     </>
@@ -200,7 +245,16 @@ const GateConsole = () => {
         ))}
       </div>
 
-      <CheckInSheet visitor={checkingIn} onClose={() => setCheckingIn(null)} onDone={afterCheckIn} />
+      <CheckInSheet visitor={checkingIn} code={checkCode} onClose={() => setCheckingIn(null)} onDone={afterCheckIn} />
+
+      <CodePrompt
+        open={!!entering}
+        title={entering?.mode === 'out' ? `Check out ${entering?.visitor.name}` : `Let in ${entering?.visitor.name || ''}`}
+        text={entering?.mode === 'out' ? 'To leave, the visitor shows their QR code or says their pass code.' : 'The visitor shows their QR code or says the pass code from their invitation.'}
+        confirmLabel={entering?.mode === 'out' ? 'Check out' : 'Verify and continue'}
+        onClose={() => setEntering(null)}
+        onSubmit={confirmCode}
+      />
 
       <Modal open={scanning} onClose={() => setScanning(false)} title="Scan visitor pass" size="sm">
         {scanning && <QrScanner onScan={onScan} />}
@@ -222,10 +276,10 @@ const GateConsole = () => {
           </div>
 
           <form onSubmit={findPass} className="panel p-4">
-            <label htmlFor="pass" className="label">Find an invited visitor by pass code</label>
+            <label htmlFor="pass" className="label">Visitor's pass code</label>
             <div className="flex gap-2">
-              <input id="pass" className="input font-mono uppercase tracking-widest" placeholder="A1B2C3D4" maxLength={32} autoComplete="off" value={code} onChange={(e) => setCode(e.target.value)} />
-              <button className="btn-primary" disabled={looking || code.trim().length < 6}>
+              <input id="pass" className="input font-mono uppercase tracking-widest" placeholder="A1B2C3D4" maxLength={8} autoComplete="off" value={code} onChange={(e) => setCode(e.target.value.replace(/[^0-9a-fA-F]/g, ''))} />
+              <button className="btn-primary" disabled={looking || code.trim().length < 8}>
                 {looking ? <Spinner className="h-4 w-4" /> : <FiSearch size={16} />} Find
               </button>
               <button type="button" className="btn-secondary" onClick={() => setScanning(true)} aria-label="Scan QR code with camera">
@@ -235,7 +289,7 @@ const GateConsole = () => {
             {lookupError && <p role="alert" className="mt-2 text-sm font-medium text-danger">{lookupError}</p>}
           </form>
 
-          {lookup && <VisitorCard visitor={lookup} actions={visitorButtons(lookup)} />}
+          {lookup && <VisitorCard visitor={lookup} actions={visitorButtons(lookup, lookupCode)} />}
 
           <Group title="Waiting for the resident" hint="Walk-ins you logged" loading={waiting.loading} error={waiting.error} onRetry={waiting.reload} count={waiting.data?.length} empty="No walk-ins are waiting.">
             {(waiting.data || []).map((v) => (
@@ -245,7 +299,7 @@ const GateConsole = () => {
 
           <Group title="Expected" hint="Approved, not yet in" loading={expected.loading} error={expected.error} onRetry={expected.reload} count={expected.data?.length} empty="No approved visitors are expected.">
             {(expected.data || []).map((v) => (
-              <Row key={v._id} title={v.name} meta={`${flatOf(v)} · ${v.phone} · ${titleCase(v.purpose)}`} status={passCode(v) && <span className="font-mono text-xs text-muted">{passCode(v)}</span>}>
+              <Row key={v._id} title={v.name} meta={`${flatOf(v)} · ${v.phone} · ${titleCase(v.purpose)}`} status={<span className="text-xs text-muted">{v.requiresCode === false ? 'Resident approved' : 'Needs pass code'}</span>}>
                 {visitorButtons(v)}
               </Row>
             ))}
@@ -260,6 +314,8 @@ const GateConsole = () => {
           </Group>
         </div>
       )}
+
+      {tab === 'help' && <HelperGate />}
 
       {tab === 'deliveries' && (
         <div className="space-y-5">

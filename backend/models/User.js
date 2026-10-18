@@ -94,6 +94,11 @@ const userSchema = new mongoose.Schema({
     }],
     select: false
   },
+  // Proof of ownership. No default on purpose: accounts created before this existed have neither flag
+  // and keep working, while every new account is saved with false and has to enter a code.
+  emailVerified: Boolean,
+  phoneVerified: Boolean,
+  verifyOtp: { type: mongoose.Schema.Types.Mixed, select: false },
   loginAttempts: { type: Number, default: 0 },
   lockUntil: Date,
   resetPasswordToken: String,

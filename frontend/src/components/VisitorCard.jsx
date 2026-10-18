@@ -70,7 +70,8 @@ const VisitorCard = ({ visitor: v, actions }) => {
         {v.entryTime && (
           <Fact icon={FiClock} label="Timing">
             {`In at ${clock(v.entryTime)}`}
-            {v.exitTime ? <span className="block font-normal text-muted">{`Left at ${clock(v.exitTime)}`}</span> : v.expectedExit ? <span className={`block font-normal ${over ? 'text-danger' : 'text-muted'}`}>{`Expected out by ${clockWithDay(v.expectedExit)}`}</span> : null}
+            {v.checkInMethod && <span className="block font-normal text-muted">{v.checkInMethod === 'code' ? 'Let in with pass code' : 'Let in by the guard'}</span>}
+            {v.exitTime ? <span className="block font-normal text-muted">{`Left at ${clock(v.exitTime)}${v.checkOutMethod === 'code' ? ' with pass code' : ''}`}</span> : v.expectedExit ? <span className={`block font-normal ${over ? 'text-danger' : 'text-muted'}`}>{`Expected out by ${clockWithDay(v.expectedExit)}`}</span> : null}
           </Fact>
         )}
       </div>

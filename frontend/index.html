@@ -2,6 +2,8 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <!-- The app translates itself (Hindi, Telugu). Browser auto-translate rewrites the page under React and can leave a blank screen. Do not use translate="no" on <html>: the in-app translator skips anything under it. -->
+    <meta name="google" content="notranslate" />
     <link
       rel="icon"
       type="image/svg+xml"

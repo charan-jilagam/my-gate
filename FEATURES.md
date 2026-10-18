@@ -152,3 +152,26 @@ before going live.
 | **Look and feel** | Everyone | Softer cards, sheet-style dialogs, a redesigned guide (search in the header, step timeline, previous and next topic), narrower and calmer post page, readable dropdown lists in dark theme |
 
 Notes: the Hindi and Telugu wording for these screens was written by the assistant and should be reviewed by a native speaker. Floors are a guess from the flat number (210 is floor 2); a society that numbers flats differently would need a floor field on the user.
+
+## Round 5: code-only gate entry, daily help passes, account verification
+
+| Feature | Who | What it does |
+|---|---|---|
+| **No check-in on a click** | Guard | An invited visitor is let in only when the guard scans their QR code or types their 8-character pass code. The server checks the code on `PUT /api/visitors/:id/check-in` and refuses without it (403). The Visitors list no longer has a Check in button for invited guests; it sends the guard to the Gate console |
+| **Check-out needs the code too** | Guard | Leaving needs the same QR or pass code (`PUT /api/visitors/:id/check-out`). The one exception is a **walk-in**: someone the guard logged at the gate and the resident approved. The guard checks those in and out by hand, because they have no pass |
+| **Resident approves walk-ins** | Resident | Only the resident being visited can approve a walk-in. Guards and the office can no longer approve on their behalf. Nobody is let in before that |
+| **Codes stay with the resident** | Everyone | The pass code is returned only to the resident who owns the invitation. Guards and admins never receive it in any list or lookup, so they cannot check someone in without the visitor. Wrong codes are rate limited (30 per 15 minutes) |
+| **One pass, one visit** | Guard | A pass that was already used is refused, and an invitation stops working 24 hours after its expected arrival time |
+| **Daily help in Visitors** | Resident, guard | Visitors has a Daily help tab. Residents see each helper's status today and tap **Show pass** for a QR code and 6-digit code (`GET /api/daily-help/:id/pass`). Guards get the same gate panel as on the Gate console and Daily help page |
+| **Daily help check-in and check-out** | Guard | The guard scans the helper's QR or types the code, sees who it is and whether they are inside (`GET /api/daily-help/lookup/:code`), then taps Check in or Check out. The server now accepts `action` (`in` or `out`) and refuses a mismatch ("already inside", "not inside") instead of silently doing the opposite. The Inside now list has Check out, which asks for the helper's code. The society office can no longer read helper codes |
+| **Email and mobile verification** | Everyone who signs up | Sign-up no longer signs the person in. A 6-digit code goes to their email and, when text messages are set up, to their mobile number. They enter them on the Verify your account screen, then sign in automatically. Signing in with an unverified account sends fresh codes and opens the same screen. Codes work for 10 minutes, five wrong tries lock a code, a new one can be requested every 30 seconds, and only a keyed hash of the code is stored. Changing your mobile number in Profile asks for a new code. Accounts made before this release keep working |
+| **Free OTP, no Twilio** | Operator | Email codes go through any SMTP server (a Gmail app password is free). Text codes go through `SMS_PROVIDER`: `console` (prints the code in the backend terminal, free, for development), `2factor` or `fast2sms` (Indian OTP gateways, need their own API key), or `twilio`. See `backend/.env.example` |
+| **No more blank screens** | Everyone | A screen that fails while drawing now shows "This screen hit a problem" with Try again, and the menu still works. A society time zone that is missing or wrong no longer breaks the booking page. Browser auto-translate is switched off for the app, because it rewrites the page under React |
+
+### Setting up the codes
+
+1. **Email (free).** Turn on 2-step verification on a Gmail account, create an App password, then set `EMAIL_USER` and `EMAIL_PASS` in `backend/.env`. Leave them empty while developing and the code is printed in the backend terminal.
+2. **Mobile.** Leave `SMS_PROVIDER=console` while developing: the code is printed in the backend terminal. For real delivery set `SMS_PROVIDER=2factor` with `TWOFACTOR_API_KEY`, or `fast2sms` with `FAST2SMS_API_KEY`. Check each service for its current free credits and prices; none of them promises unlimited free texts.
+3. In production, email is always required. A mobile code is required only when a real gateway is configured (`OTP_REQUIRE_PHONE=true` or `false` overrides this), so a server without a gateway never locks people out.
+
+Notes: nobody who signed up before this release is asked to verify. The Hindi and Telugu wording for the new screens was written by the assistant and should be reviewed by a native speaker. Visitor records made before this release count as invited visitors (they need the code).

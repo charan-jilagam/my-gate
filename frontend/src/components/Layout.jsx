@@ -1,6 +1,7 @@
 import { imgSrc } from '../utils/media'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
+import ErrorBoundary from './ErrorBoundary'
 import {
   FiAlertTriangle,
   FiBell,
@@ -478,7 +479,7 @@ const Layout = () => {
       </header>
 
       <main id="main" className="mx-auto w-full max-w-6xl px-4 pb-[calc(5.5rem+env(safe-area-inset-bottom))] pt-6 sm:px-6 sm:pt-8 lg:pb-8">
-        <Outlet />
+        <ErrorBoundary resetKey={location.pathname}><Outlet /></ErrorBoundary>
       </main>
 
       {/* Phone navigation: the main places for this role, always one thumb away. */}

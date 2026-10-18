@@ -8,6 +8,61 @@ const { generateQRCode } = require('../utils/generateQR');
 const { notifyUser } = require('../utils/notifyUser');
 const crypto = require('crypto');
 const { floorOf } = require('../utils/routeKit');
+const rateLimit = require('express-rate-limit');
+
+// The pass code is what proves someone holds the invitation, so guessing it has to be slow.
+const guessLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 30,
+  skipSuccessfulRequests: true,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => String(req.user ? req.user.id : req.ip),
+  validate: false,
+  message: { success: false, message: 'Too many wrong codes. Please wait 15 minutes and try again.' }
+});
+
+const INVITE_GRACE_HOURS = 24; // an invitation stops working this long after the time it was meant for
+
+const passId = (v) => {
+  try {
+    return String(JSON.parse(v.qrCode).visitorId || '');
+  } catch (e) {
+    return '';
+  }
+};
+
+// Accepts what a guard types (8 letters and digits) or the whole text read from the QR code.
+const codeOf = (input) => {
+  let text = String(input || '').trim();
+  if (text.startsWith('{')) {
+    try {
+      text = String(JSON.parse(text).visitorId || '');
+    } catch (e) {
+      text = '';
+    }
+  }
+  return text.toLowerCase();
+};
+
+const codeMatches = (v, input) => {
+  const given = codeOf(input);
+  const id = passId(v).toLowerCase();
+  return /^[0-9a-f]{8,32}$/.test(given) && !!id && id.startsWith(given);
+};
+
+// Visitors a resident invited must show the code or QR to get in and again to get out.
+// Walk-ins are logged by the guard and approved by the resident, so the guard handles them by hand.
+const needsCode = (v) => v.source !== 'walk_in';
+
+// Only the resident who owns the invitation may see its code. Guards and admins must be given it by the visitor.
+const present = (v, user) => {
+  const o = typeof v.toObject === 'function' ? v.toObject() : { ...v };
+  const owner = user && user.role === 'resident' && String((o.residentId && o.residentId._id) || o.residentId) === String(user.id);
+  if (!owner) delete o.qrCode;
+  o.requiresCode = needsCode(o);
+  return o;
+};
 
 // @route   POST /api/visitors/invite
 // @desc    Invite a visitor
@@ -154,7 +209,7 @@ router.get('/', protect, async (req, res) => {
     res.json({
       success: true,
       count: visitors.length,
-      visitors
+      visitors: visitors.map((v) => present(v, req.user))
     });
   } catch (error) {
     res.status(500).json({
@@ -191,7 +246,7 @@ router.get('/:id', protect, async (req, res) => {
 
     res.json({
       success: true,
-      visitor
+      visitor: present(visitor, req.user)
     });
   } catch (error) {
     res.status(500).json({
@@ -233,7 +288,7 @@ router.put('/:id', protect, authorize('resident'), [
     }
     await visitor.save();
 
-    res.json({ success: true, visitor, message: 'Invitation updated' });
+    res.json({ success: true, visitor: present(visitor, req.user), message: 'Invitation updated' });
   } catch (error) {
     console.error('Edit visitor error:', error);
     res.status(500).json({ success: false, message: 'Server error' });
@@ -242,8 +297,8 @@ router.put('/:id', protect, authorize('resident'), [
 
 // @route   PUT /api/visitors/:id/approve
 // @desc    Approve visitor
-// @access  Private (Residents, Security, Admins)
-router.put('/:id/approve', protect, authorize('resident', 'security', 'society_admin'), async (req, res) => {
+// @access  Private (the resident being visited; nobody else can let a visitor in on their behalf)
+router.put('/:id/approve', protect, authorize('resident'), async (req, res) => {
   try {
     const visitor = await Visitor.findById(req.params.id);
 
@@ -286,7 +341,7 @@ router.put('/:id/approve', protect, authorize('resident', 'security', 'society_a
 
     res.json({
       success: true,
-      visitor,
+      visitor: present(visitor, req.user),
       message: 'Visitor approved successfully'
     });
   } catch (error) {
@@ -351,7 +406,7 @@ router.put('/:id/reject', protect, authorize('resident', 'security', 'society_ad
 
     res.json({
       success: true,
-      visitor,
+      visitor: present(visitor, req.user),
       message: 'Visitor rejected'
     });
   } catch (error) {
@@ -365,7 +420,8 @@ router.put('/:id/reject', protect, authorize('resident', 'security', 'society_ad
 // @route   PUT /api/visitors/:id/check-in
 // @desc    Check in visitor
 // @access  Private (Security)
-router.put('/:id/check-in', protect, authorize('security', 'society_admin', 'super_admin'), [
+router.put('/:id/check-in', protect, authorize('security', 'society_admin', 'super_admin'), guessLimiter, [
+  body('code').optional({ nullable: true }).isString().isLength({ max: 400 }),
   body('entryPhoto').optional().trim(),
   body('expectedExit').optional({ nullable: true, checkFalsy: true }).isISO8601().withMessage('Pick when the visitor is expected to leave'),
   body('stayMinutes').optional({ nullable: true, checkFalsy: true }).isInt({ min: 5, max: 1440 }).withMessage('The stay must be between 5 minutes and 24 hours')
@@ -382,11 +438,28 @@ router.put('/:id/check-in', protect, authorize('security', 'society_admin', 'sup
       });
     }
 
-    if (!visitor.approved) {
+    if (!visitor.approved || visitor.status === 'rejected') {
       return res.status(400).json({
         success: false,
-        message: 'Visitor must be approved before check-in'
+        message: visitor.status === 'rejected' ? 'This visitor was rejected by the resident.' : 'The resident has not approved this visitor yet.'
       });
+    }
+    if (visitor.status !== 'approved') {
+      return res.status(400).json({
+        success: false,
+        message: visitor.status === 'checked_in' ? 'This visitor is already inside.' : 'This pass was already used. The resident has to invite them again.'
+      });
+    }
+
+    // Nobody is let in on a click alone: the visitor shows the QR or says the code, and the guard enters it.
+    if (needsCode(visitor)) {
+      if (!codeMatches(visitor, req.body.code)) {
+        return res.status(403).json({ success: false, message: req.body.code ? 'That pass code does not match this visitor.' : 'Scan the visitor\'s QR code or enter their pass code to let them in.' });
+      }
+      const until = visitor.expectedArrival ? new Date(visitor.expectedArrival).getTime() + INVITE_GRACE_HOURS * 3600 * 1000 : null;
+      if (until && Date.now() > until) {
+        return res.status(400).json({ success: false, message: 'This invitation has expired. The resident can invite them again.' });
+      }
     }
 
     // The guard always records when this person should be out, so anyone who stays past it can be spotted.
@@ -401,6 +474,7 @@ router.put('/:id/check-in', protect, authorize('security', 'society_admin', 'sup
 
     visitor.entryTime = now;
     visitor.expectedExit = leaveAt;
+    visitor.checkInMethod = needsCode(visitor) ? 'code' : 'manual';
     visitor.status = 'checked_in';
     visitor.loggedBy = req.user.id;
     visitor.entryPhoto = req.body.entryPhoto || '';
@@ -423,7 +497,7 @@ router.put('/:id/check-in', protect, authorize('security', 'society_admin', 'sup
 
     res.json({
       success: true,
-      visitor,
+      visitor: present(visitor, req.user),
       message: 'Visitor checked in successfully'
     });
   } catch (error) {
@@ -437,7 +511,8 @@ router.put('/:id/check-in', protect, authorize('security', 'society_admin', 'sup
 // @route   PUT /api/visitors/:id/check-out
 // @desc    Check out visitor
 // @access  Private (Security)
-router.put('/:id/check-out', protect, authorize('security', 'society_admin', 'super_admin'), [
+router.put('/:id/check-out', protect, authorize('security', 'society_admin', 'super_admin'), guessLimiter, [
+  body('code').optional({ nullable: true }).isString().isLength({ max: 400 }),
   body('exitPhoto').optional().trim()
 ], async (req, res) => {
   try {
@@ -457,7 +532,13 @@ router.put('/:id/check-out', protect, authorize('security', 'society_admin', 'su
       });
     }
 
+    // Leaving needs the same proof as entering. Only walk-ins the guard let in by hand can be checked out by hand.
+    if (needsCode(visitor) && !codeMatches(visitor, req.body.code)) {
+      return res.status(403).json({ success: false, message: req.body.code ? 'That pass code does not match this visitor.' : 'Ask the visitor to show their QR code or say their pass code to check out.' });
+    }
+
     visitor.exitTime = new Date();
+    visitor.checkOutMethod = needsCode(visitor) ? 'code' : 'manual';
     visitor.status = 'checked_out';
     visitor.exitPhoto = req.body.exitPhoto || '';
 
@@ -479,7 +560,7 @@ router.put('/:id/check-out', protect, authorize('security', 'society_admin', 'su
 
     res.json({
       success: true,
-      visitor,
+      visitor: present(visitor, req.user),
       message: 'Visitor checked out successfully'
     });
   } catch (error) {
@@ -516,7 +597,7 @@ router.get('/logs/today', protect, authorize('security', 'society_admin', 'super
     res.json({
       success: true,
       count: visitors.length,
-      visitors
+      visitors: visitors.map((v) => present(v, req.user))
     });
   } catch (error) {
     res.status(500).json({
@@ -578,6 +659,7 @@ router.post('/walk-in', protect, authorize('security', 'society_admin'), [
       block: block || residents[0].block,
       qrCode: qrCodeString,
       loggedBy: req.user.id,
+      source: 'walk_in',
       approved: false,
       status: 'pending'
     });
@@ -599,7 +681,7 @@ router.post('/walk-in', protect, authorize('security', 'society_admin'), [
       }
     }
 
-    res.status(201).json({ success: true, visitor, message: 'Resident has been notified' });
+    res.status(201).json({ success: true, visitor: present(visitor, req.user), message: 'Resident has been notified' });
   } catch (error) {
     console.error('Walk-in visitor error:', error);
     res.status(500).json({ success: false, message: 'Server error' });
@@ -609,11 +691,11 @@ router.post('/walk-in', protect, authorize('security', 'society_admin'), [
 // @route   GET /api/visitors/lookup/:code
 // @desc    Find an invited visitor by the pass code printed under their QR code
 // @access  Private (Security, Admins)
-router.get('/lookup/:code', protect, authorize('security', 'society_admin', 'super_admin'), async (req, res) => {
+router.get('/lookup/:code', protect, authorize('security', 'society_admin', 'super_admin'), guessLimiter, async (req, res) => {
   try {
     const code = String(req.params.code || '').trim().toLowerCase();
-    if (!/^[0-9a-f]{6,32}$/.test(code)) {
-      return res.status(400).json({ success: false, message: 'Pass codes are 6 or more letters and digits (0-9, A-F).' });
+    if (!/^[0-9a-f]{8,32}$/.test(code)) {
+      return res.status(400).json({ success: false, message: 'Pass codes are 8 letters and digits (0-9, A-F).' });
     }
 
     const query = { qrCode: { $regex: `"visitorId":"${code}` } };
@@ -624,7 +706,7 @@ router.get('/lookup/:code', protect, authorize('security', 'society_admin', 'sup
       return res.status(404).json({ success: false, message: 'No visitor found for that pass code' });
     }
 
-    res.json({ success: true, visitor: { ...visitor.toObject(), floor: floorOf(visitor.flatNo) } });
+    res.json({ success: true, visitor: { ...present(visitor, req.user), floor: floorOf(visitor.flatNo) } });
   } catch (error) {
     res.status(500).json({ success: false, message: 'Server error' });
   }

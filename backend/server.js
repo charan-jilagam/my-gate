@@ -87,7 +87,7 @@ const authLimiter = rateLimit({
   skipSuccessfulRequests: true,
   message: { success: false, message: 'Too many attempts. Please wait 15 minutes and try again.' }
 });
-['/api/auth/login', '/api/auth/register', '/api/auth/forgot-password', '/api/auth/reset-password'].forEach((path) => app.use(path, authLimiter));
+['/api/auth/login', '/api/auth/register', '/api/auth/forgot-password', '/api/auth/reset-password', '/api/auth/otp'].forEach((path) => app.use(path, authLimiter));
 
 // Socket.io connection handling
 // Only signed-in users may connect, and each can only join their own room.

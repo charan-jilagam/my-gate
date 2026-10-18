@@ -105,7 +105,15 @@ const visitorSchema = new mongoose.Schema({
   },
   notes: {
     type: String
-  }
+  },
+  // invited: the resident invited them and they show a QR or code. walk_in: the guard logged them at the gate.
+  source: {
+    type: String,
+    enum: ['invited', 'walk_in'],
+    default: 'invited'
+  },
+  checkInMethod: { type: String, enum: ['code', 'manual'] },
+  checkOutMethod: { type: String, enum: ['code', 'manual'] }
 }, {
   timestamps: true
 });

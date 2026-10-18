@@ -21,17 +21,29 @@ const timeRange = (b) => {
   return `${f(b.startTime)} to ${f(b.endTime)}`
 }
 
+// Today's date in the society's time zone. A missing or unknown zone falls back to India time instead of breaking the page.
+const todayIn = (zone) => {
+  for (const tz of [zone, 'Asia/Kolkata']) {
+    try {
+      return new Intl.DateTimeFormat('en-CA', { timeZone: tz || undefined }).format(new Date())
+    } catch (e) {
+      /* try the next zone */
+    }
+  }
+  return new Date().toISOString().slice(0, 10)
+}
+
 const REASON = { past: 'That day has passed', too_far: 'Too far ahead to book', paused: 'Not available', no_slots: 'No slots on this day', invalid_date: 'Pick a valid date', too_soon: 'Too soon', booked: 'Booked' }
 
 /** Day strip + slot grid for one amenity. Slots in a row can be picked together. */
 const SlotGrid = ({ amenity, date, onDate, picked, onPick, today, refreshKey }) => {
   const day = useApi('/bookings/availability', { params: { amenity: amenity.name, date, k: refreshKey }, enabled: !!date, live: false })
-  const strip = Array.from({ length: Math.min(amenity.maxAdvanceDays, 14) + 1 }, (_, i) => {
+  const strip = Array.from({ length: Math.min(Number(amenity.maxAdvanceDays) || 30, 14) + 1 }, (_, i) => {
     const d = new Date(`${today}T00:00:00Z`)
     d.setUTCDate(d.getUTCDate() + i)
     return d.toISOString().slice(0, 10)
   })
-  const max = amenity.maxSlotsPerBooking
+  const max = Number(amenity.maxSlotsPerBooking) || 3
 
   const toggle = (slot) => {
     const has = picked.some((p) => p.start === slot.start)
@@ -112,7 +124,7 @@ const Bookings = () => {
   const startTime = sortedPick[0]?.start
   const endTime = sortedPick[sortedPick.length - 1]?.end
   const price = chosen && sortedPick.length ? (chosen.hourlyRate * sortedPick.length * chosen.slotMinutes) / 60 : 0
-  const todayStr = amenityInfo.data ? new Intl.DateTimeFormat('en-CA', { timeZone: amenityInfo.data.timezone }).format(new Date()) : ''
+  const todayStr = amenityInfo.data ? todayIn(amenityInfo.data.timezone) : ''
 
   const submit = async (e) => {
     e.preventDefault()

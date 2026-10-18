@@ -39,6 +39,8 @@ const vendorUserData = (society, i) => {
     role: 'vendor',
     societyId: society._id,
     isApproved: true,
+      emailVerified: true,
+      phoneVerified: true,
     isActive: true
   };
 };

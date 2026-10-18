@@ -21,6 +21,11 @@ def go(role, fn, init=None):
             if req.method != 'GET': posts.append((req.method, m.group(1), json.loads(req.post_data or '{}')))
             body = smoke.api(role, req.method, m.group(1), q)
             if req.method == 'POST' and m.group(1) == '/service-requests': body = dict(success=True, message='Booked', request=smoke.REQ)
+            if req.method == 'POST' and m.group(1) == '/auth/login':
+                ok = any(p == '/auth/otp/verify' for _, p, _ in posts)
+                body = dict(success=True, token='t', user=dict(id='u1', name='Asha Rao', role='resident')) if ok else dict(success=False, needsVerification=True, email='asha@example.com', channels=['email', 'phone'], hints=dict(email='a***@example.com', phone='******3210'), delivery=dict(sent=dict(email='console', phone='console'), errors={}), message='Please verify your email to continue. We sent you a code.')
+                route.fulfill(status=200 if ok else 403, content_type='application/json', body=json.dumps(body)); return
+            if req.method == 'POST' and m.group(1) == '/auth/otp/verify': body = dict(success=True, pending=[], done=True, message='Verified. You can sign in now.')
             if req.method == 'POST' and m.group(1) == '/daily-help/check': body = dict(success=True, action='in', time='2026-10-19T04:00:00Z', helper=dict(_id='h1', name='Lakshmi', kind='maid', flats=['A-101']))
             if req.method == 'POST' and m.group(1) == '/emergency/sos': body = dict(success=True, message='Alert sent to the gate and the society office.', alert={}, notified=2)
             if req.method == 'POST' and m.group(1) == '/service-requests/r9/pay-online': body = dict(success=True, order=dict(id='order_1', amount=45000, currency='INR'), keyId='rzp_test')
@@ -81,7 +86,10 @@ def notif(page):
 
 def gate_check(page):
     page.goto(smoke.BASE + '/daily-help'); page.wait_for_selector('[aria-label="Helper code"]')
-    page.fill('[aria-label="Helper code"]', '482913'); page.click('button:has-text("Check")'); page.wait_for_selector('text=Lakshmi checked in')
+    page.fill('[aria-label="Helper code"]', '482913'); page.click('button:has-text("Find")'); page.wait_for_selector('text=Not inside right now')
+    page.locator('main button:has-text("Check in")').click(); page.wait_for_timeout(500)
+    sent = [b for m, p, b in posts if m == 'POST' and p == '/daily-help/check']
+    assert sent and sent[-1] == dict(code='482913', action='in'), sent
 
 
 def language(page):
@@ -228,7 +236,7 @@ def gate_scan(page):
     page.click('[role=radio]:has-text("2 hours")'); page.wait_for_selector('text=Expected out by')
     page.click('button:has-text("Let them in")'); page.wait_for_timeout(600)
     sent = [(p, b) for m, p, b in posts if m == 'PUT' and p.endswith('/check-in')]
-    assert sent and sent[-1][1].get('stayMinutes') == 120, sent
+    assert sent and sent[-1][1].get('stayMinutes') == 120 and sent[-1][1].get('code') == 'ABCDEF12', sent
 
 def gate_pass(page):
     page.goto(smoke.BASE + '/visitors'); page.locator('button:has-text("Show pass"):visible').first.wait_for()
@@ -240,15 +248,45 @@ def inside_overdue(page):
     page.goto(smoke.BASE + '/gate'); page.wait_for_selector('text=Inside now')
     page.wait_for_selector('text=over')
 
+def exit_needs_code(page):
+    page.goto(smoke.BASE + '/gate'); page.wait_for_selector('text=Inside now')
+    page.locator('button:has-text("Check out with code")').first.click()
+    page.wait_for_selector('text=shows their QR code or says their pass code')
+    page.fill('#gate-code', 'ABCDEF12'); page.click('button[form="code-form"]')
+    page.wait_for_selector('text=belongs to Ravi Teja, not Meena Courier')           # someone else's code does not work
+    assert not [1 for m, p, b in posts if m == 'PUT' and p.endswith('/check-out')], 'nobody is checked out with the wrong code'
+
+def visitors_no_click_checkin(page):
+    page.goto(smoke.BASE + '/visitors'); page.wait_for_selector('text=Ravi Teja', state='attached')
+    page.wait_for_selector('text=Check in at the gate', state='attached')
+    assert page.locator('button:has-text("Check in")').count() == 0, 'invited visitors cannot be checked in with a click'
+    assert page.locator('button:has-text("Approve")').count() == 0, 'only the resident approves'
+
+def resident_help_pass(page):
+    page.goto(smoke.BASE + '/visitors'); page.wait_for_selector('text=Ravi Teja', state='attached')
+    page.click('[role=tab]:has-text("Daily help")'); page.wait_for_selector('text=Lakshmi')
+    page.locator('button:has-text("Show pass")').first.click()
+    page.wait_for_selector('text=Daily help pass'); assert '482913' in page.inner_text('[role=dialog]')
+
+def verify_flow(page):
+    page.goto(smoke.BASE + '/login'); page.fill('#email', 'asha@example.com'); page.fill('#password', 'Passw0rd123')
+    page.click('button[type=submit]'); page.wait_for_url('**/verify')
+    page.wait_for_selector('text=Verify your account'); body = page.inner_text('main')
+    assert 'a***@example.com' in body and '******3210' in body and 'printed in the backend terminal' in body, body[:500]
+    page.fill('#code-email', '123456'); page.fill('#code-phone', '654321'); page.click('button[type=submit]')
+    page.wait_for_url('**/dashboard')
+    sent = [b for m, p, b in posts if p == '/auth/otp/verify']
+    assert sent and sent[-1] == dict(email='asha@example.com', emailCode='123456', phoneCode='654321'), sent
+
 def main():
   for role, name, fn in [('resident', 'book service', book_service), ('resident', 'amenity booking', amenity), ('resident', 'SOS', sos), ('resident', 'RSVP', rsvp), ('resident', 'notification deep link', notif), ('security', 'gate check', gate_check),
                          ('resident', 'language switch', language), ('resident', 'data and headings translate and restore', translate_data), ('resident', 'guide is role-only and searchable', help_isolation), ('resident', 'guide is translated and searchable in Telugu', guide_in_telugu), ('society_admin', 'admin guide', help_admin),
                          ('resident', 'cast a vote', vote), ('staff', 'mark upkeep done', mark_done), ('society_admin', 'add shifts', add_shift),
                          ('society_admin', 'create a vote', new_vote), ('society_admin', 'add a document', add_document),
                          ('resident', 'pay a service bill online', pay_online), ('super_admin', 'roster as platform admin', super_roster), ('security', 'clock in', clock_in),
-                         ('society_admin', 'admin manages amenities', admin_amenities), ('society_admin', 'admin sees who liked and reported', post_activity), ('society_admin', 'admin sees who voted', voter_list), ('security', 'gate scan and expected exit', gate_scan), ('resident', 'gate pass ticket', gate_pass), ('security', 'overdue visitor is flagged', inside_overdue)]:
+                         ('society_admin', 'admin manages amenities', admin_amenities), ('society_admin', 'admin sees who liked and reported', post_activity), ('society_admin', 'admin sees who voted', voter_list), ('security', 'gate scan and expected exit', gate_scan), ('resident', 'gate pass ticket', gate_pass), ('security', 'overdue visitor is flagged', inside_overdue), ('security', 'exit needs the visitor code', exit_needs_code), ('security', 'no click check-in or approval for staff', visitors_no_click_checkin), ('resident', 'daily help pass from visitors', resident_help_pass), ('resident', 'verify email and mobile with codes', verify_flow)]:
       try:
-          e = go(role, fn, init=RAZORPAY_STUB if name == 'pay a service bill online' else None); print('OK  ' if not e else 'ERR ', name, e or '')
+          e = go(role, fn, init=RAZORPAY_STUB if name == 'pay a service bill online' else ("localStorage.removeItem('token')" if name.startswith('verify') else None)); print('OK  ' if not e else 'ERR ', name, e or '')
       except Exception as ex:
           print('FAIL', name, str(ex)[:300])
   print()

@@ -37,6 +37,8 @@ const createAdmin = async () => {
       phone,
       role,
       isApproved: true,
+      emailVerified: true,
+      phoneVerified: true,
       isActive: true
       // Note: super_admin doesn't need societyId
     });

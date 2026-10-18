@@ -13,6 +13,42 @@ const Profile = () => {
   const [savingProfile, setSavingProfile] = useState(false)
   const [profileError, setProfileError] = useState('')
 
+  // A new mobile number is confirmed with a code sent by text.
+  const [phoneCode, setPhoneCode] = useState('')
+  const [phoneBusy, setPhoneBusy] = useState(false)
+  const [phoneError, setPhoneError] = useState('')
+  const [phoneWait, setPhoneWait] = useState(0)
+  useEffect(() => {
+    if (phoneWait <= 0) return undefined
+    const t = setTimeout(() => setPhoneWait((n) => n - 1), 1000)
+    return () => clearTimeout(t)
+  }, [phoneWait])
+  const resendPhone = async () => {
+    setPhoneError('')
+    try {
+      await api.post('/auth/otp/me/send', { channel: 'phone' })
+      setPhoneWait(30)
+      toast.success('A new code is on its way.')
+    } catch (err) {
+      setPhoneError(errorMessage(err, 'Could not send a code.'))
+    }
+  }
+  const confirmPhone = async (e) => {
+    e.preventDefault()
+    setPhoneError('')
+    setPhoneBusy(true)
+    try {
+      await api.post('/auth/otp/me/verify', { channel: 'phone', code: phoneCode })
+      setPhoneCode('')
+      await refreshUser()
+      toast.success('Mobile number verified')
+    } catch (err) {
+      setPhoneError(errorMessage(err, 'That code did not work.'))
+    } finally {
+      setPhoneBusy(false)
+    }
+  }
+
   const [pw, setPw] = useState({ currentPassword: '', newPassword: '', confirm: '' })
   const [savingPw, setSavingPw] = useState(false)
   const [pwError, setPwError] = useState('')
@@ -75,12 +111,12 @@ const Profile = () => {
     }
   }
   const toggleSms = async () => {
-    const next = !notif.prefs.sms
-    setNotif({ ...notif, prefs: { ...notif.prefs, sms: next } })
+    const next = !notif.prefs?.sms
+    setNotif({ ...notif, prefs: { ...(notif.prefs || {}), sms: next } })
     try {
       await api.put('/push/prefs', { sms: next })
     } catch (err) {
-      setNotif({ ...notif, prefs: { ...notif.prefs, sms: !next } })
+      setNotif({ ...notif, prefs: { ...(notif.prefs || {}), sms: !next } })
       toast.error(errorMessage(err, 'Could not save that.'))
     }
   }
@@ -92,9 +128,10 @@ const Profile = () => {
     if (!/^[0-9]{10}$/.test(profile.phone)) return setProfileError('Enter a 10-digit mobile number.')
     setSavingProfile(true)
     try {
-      await api.put('/users/profile', { name: profile.name.trim(), phone: profile.phone })
+      const { data } = await api.put('/users/profile', { name: profile.name.trim(), phone: profile.phone })
       await refreshUser()
-      toast.success('Profile saved')
+      toast.success(data.message || 'Profile saved')
+      if (data.needsVerification?.includes('phone')) { setPhoneCode(''); setPhoneWait(30) }
     } catch (err) {
       setProfileError(errorMessage(err, 'Could not save your profile.'))
     } finally {
@@ -167,6 +204,18 @@ const Profile = () => {
             <Field label="Mobile number" htmlFor="p-phone">
               <input id="p-phone" type="tel" inputMode="numeric" maxLength={10} className="input" value={profile.phone} onChange={(e) => setProfile({ ...profile, phone: e.target.value })} />
             </Field>
+            {user?.phoneVerified === false && (
+              <div className="rounded-xl border border-line bg-amber-soft px-4 py-3" role="group" aria-label="Verify your mobile number">
+                <p className="text-sm font-semibold">Confirm your mobile number</p>
+                <p className="mb-2 text-xs text-muted">Enter the 6-digit code we texted to {user.phone}.</p>
+                <div className="flex flex-wrap items-center gap-2">
+                  <input aria-label="Mobile code" className="input w-40 font-mono tracking-[0.3em]" inputMode="numeric" maxLength={6} placeholder="000000" value={phoneCode} onChange={(e) => setPhoneCode(e.target.value.replace(/\D/g, ''))} />
+                  <button type="button" className="btn-primary btn-sm" disabled={phoneCode.length !== 6 || phoneBusy} onClick={confirmPhone}>Verify</button>
+                  <button type="button" className="btn-secondary btn-sm" disabled={phoneWait > 0} onClick={resendPhone}>{phoneWait > 0 ? `Send again in ${phoneWait}s` : 'Send a code'}</button>
+                </div>
+                {phoneError && <p role="alert" className="mt-2 text-sm font-medium text-danger">{phoneError}</p>}
+              </div>
+            )}
             {profileError && <p role="alert" className="text-sm font-medium text-danger">{profileError}</p>}
             <button className="btn-primary" disabled={savingProfile}>
               {savingProfile && <Spinner className="h-4 w-4" />}
@@ -204,8 +253,8 @@ const Profile = () => {
                   <span className="block font-semibold">Text messages</span>
                   <span className="text-muted">{notif.smsEnabled ? 'Visitor at the gate, deliveries, dues and approvals.' : 'Not set up on this server yet.'}</span>
                 </span>
-                <button className={notif.prefs.sms ? 'btn-secondary btn-sm' : 'btn-primary btn-sm'} disabled={!notif.smsEnabled} onClick={toggleSms}>
-                  {notif.prefs.sms ? 'Turn off' : 'Turn on'}
+                <button className={notif.prefs?.sms ? 'btn-secondary btn-sm' : 'btn-primary btn-sm'} disabled={!notif.smsEnabled} onClick={toggleSms}>
+                  {notif.prefs?.sms ? 'Turn off' : 'Turn on'}
                 </button>
               </li>
             </ul>

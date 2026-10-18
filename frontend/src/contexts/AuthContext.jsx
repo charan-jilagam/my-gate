@@ -68,6 +68,8 @@ export const AuthProvider = ({ children }) => {
       startSession(response.data.token)
       return { success: true }
     } catch (error) {
+      // A new account has to prove its email (and mobile) before it can sign in.
+      if (error.response?.data?.needsVerification) return { success: false, ...error.response.data }
       return {
         success: false,
         message: error.response?.data?.message || error.response?.data?.errors?.[0]?.msg || 'Could not sign in. Check your connection and try again.'
@@ -78,6 +80,8 @@ export const AuthProvider = ({ children }) => {
   const register = async (userData) => {
     try {
       const response = await api.post('/auth/register', userData)
+      // Registration no longer signs anyone in: the codes sent to their email and mobile come first.
+      if (response.data.needsVerification) return { success: true, ...response.data }
       startSession(response.data.token)
       return { success: true, message: response.data.message }
     } catch (error) {

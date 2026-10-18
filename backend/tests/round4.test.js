@@ -174,7 +174,7 @@ describe('the gate scan and expected exit', () => {
 
   test('check-in needs an expected exit', async () => {
     mockingoose(Visitor).toReturn(invited(), 'findOne');
-    const res = await h.api().put(`/api/visitors/${h.oid()}/check-in`).set(h.auth(guard)).send({});
+    const res = await h.api().put(`/api/visitors/${h.oid()}/check-in`).set(h.auth(guard)).send({ code: 'abcdef12' });
     expect(res.status).toBe(400);
     expect(res.body.message).toMatch(/expected to leave/);
     expect(h.savedDocs(Visitor)).toHaveLength(0);
@@ -182,7 +182,7 @@ describe('the gate scan and expected exit', () => {
 
   test('check-in stores the expected exit from the stay length', async () => {
     mockingoose(Visitor).toReturn(invited(), 'findOne');
-    const res = await h.api().put(`/api/visitors/${h.oid()}/check-in`).set(h.auth(guard)).send({ stayMinutes: 90 });
+    const res = await h.api().put(`/api/visitors/${h.oid()}/check-in`).set(h.auth(guard)).send({ code: 'abcdef12', stayMinutes: 90 });
     expect(res.status).toBe(200);
     const [saved] = h.savedDocs(Visitor);
     expect(saved.status).toBe('checked_in');
@@ -192,7 +192,7 @@ describe('the gate scan and expected exit', () => {
 
   test('an exit time in the past is refused', async () => {
     mockingoose(Visitor).toReturn(invited(), 'findOne');
-    const res = await h.api().put(`/api/visitors/${h.oid()}/check-in`).set(h.auth(guard)).send({ expectedExit: new Date(Date.now() - HOUR).toISOString() });
+    const res = await h.api().put(`/api/visitors/${h.oid()}/check-in`).set(h.auth(guard)).send({ code: 'abcdef12', expectedExit: new Date(Date.now() - HOUR).toISOString() });
     expect(res.status).toBe(400);
   });
 });

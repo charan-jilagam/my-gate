@@ -26,6 +26,9 @@ const Login = () => {
 
     if (result.success) {
       navigate(location.state?.from || '/dashboard', { replace: true })
+    } else if (result.needsVerification) {
+      toast(result.message)
+      navigate('/verify', { replace: true, state: { email: result.email, password: formData.password, channels: result.channels, hints: result.hints, delivery: result.delivery } })
     } else {
       setError(result.message)
       toast.error(result.message)

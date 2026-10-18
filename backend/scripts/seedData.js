@@ -61,6 +61,8 @@ const seedData = async () => {
       phone: '9999999999',
       role: 'super_admin',
       isApproved: true,
+      emailVerified: true,
+      phoneVerified: true,
       isActive: true
     });
     console.log('✅ Super admin created');
@@ -148,6 +150,8 @@ const seedData = async () => {
         role: 'society_admin',
         societyId: societies[i]._id,
         isApproved: true,
+      emailVerified: true,
+      phoneVerified: true,
         isActive: true
       });
       societyAdmins.push(admin);
@@ -193,6 +197,8 @@ const seedData = async () => {
         role: 'security',
         societyId: randomItem(societies)._id,
         isApproved: true,
+      emailVerified: true,
+      phoneVerified: true,
         isActive: true
       });
       securityGuards.push(guard);
@@ -209,6 +215,8 @@ const seedData = async () => {
         role: 'staff',
         societyId: randomItem(societies)._id,
         isApproved: true,
+      emailVerified: true,
+      phoneVerified: true,
         isActive: true
       });
       staff.push(staffMember);

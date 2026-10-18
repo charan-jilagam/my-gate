@@ -11,7 +11,7 @@ module.exports = {
       steps: [
         'Sign in with the admin account the platform owner created for you.',
         'Open Society and check the details and amenities (opening hours, price, slot length, booking rules).',
-        'Open People and approve residents, guards, staff and vendors who have signed up.',
+        'Open People and approve residents, guards, staff and vendors who have signed up. Everyone has already proved their email and mobile number with a code.',
         'Add emergency numbers (Emergency screen) and upload bylaws (Documents).',
         'Create upkeep jobs (Upkeep) and give guards their shifts (Roster).',
         'Post a welcome notice (Notices) so residents know where to find things.'
@@ -47,7 +47,7 @@ module.exports = {
       covers: ['/gate', '/visitors', '/deliveries', '/vehicles'],
       summary: 'Oversee what happens at the gate.',
       steps: [
-        'Gate console works like the guards\' screen: scan passes, log walk-ins, check deliveries and vehicles in and out. Use it when the gate is short-staffed.',
+        'Gate console works like the guards\' screen: scan passes, log walk-ins, check deliveries and vehicles in and out. Use it when the gate is short-staffed. Invited visitors still need their QR code or pass code to get in and out, and only the resident can approve a walk-in.',
         'Visitors, Deliveries and Vehicles show the full logs. Filter by status, and search vehicles by number.',
         'Use these lists to answer questions such as "who entered flat 402 yesterday?"'
       ],
@@ -59,7 +59,7 @@ module.exports = {
       path: '/daily-help',
       covers: ['/daily-help'],
       summary: 'Domestic workers registered by residents.',
-      steps: ['See every helper, who they work for and their attendance for the month.', 'Check a helper in or out with their code, like a guard would.', 'Remove a helper who should no longer enter the society.'],
+      steps: ['See every helper, who they work for and their attendance for the month.', 'Check a helper in or out with their QR code or code, like a guard would. You cannot read the code yourself; only the households they work for can.', 'Remove a helper who should no longer enter the society.'],
       tips: []
     },
     {

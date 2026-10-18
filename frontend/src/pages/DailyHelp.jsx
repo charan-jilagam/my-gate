@@ -1,11 +1,13 @@
 import { useState } from 'react'
-import { FiCheckCircle, FiClock, FiLink, FiPhone, FiPlus, FiTrash2 } from 'react-icons/fi'
+import { FiClock, FiLink, FiPhone, FiPlus, FiTrash2 } from 'react-icons/fi'
 import { useAuth } from '../contexts/AuthContext'
 import api from '../services/api'
 import useApi from '../hooks/useApi'
 import useAction from '../hooks/useAction'
 import { Avatar, ConfirmDialog, EmptyState, ErrorState, Field, ListSkeleton, Modal, PageHeader, Spinner, errorMessage, formatDate } from '../components/ui'
 import { dayLabel } from '../utils/services'
+import HelperGate from '../components/HelperGate'
+import HelperPass from '../components/HelperPass'
 
 const KINDS = [['maid', 'Maid'], ['cook', 'Cook'], ['driver', 'Driver'], ['nanny', 'Nanny'], ['gardener', 'Gardener'], ['cleaner', 'Cleaner'], ['tutor', 'Tutor'], ['other', 'Other']]
 const kindLabel = (k) => KINDS.find((x) => x[0] === k)?.[1] || 'Helper'
@@ -33,9 +35,7 @@ const DailyHelp = () => {
   const [history, setHistory] = useState(null)
   const [month, setMonth] = useState(monthNow())
   const [records, setRecords] = useState(null)
-  const [code, setCode] = useState('')
-  const [result, setResult] = useState(null)
-  const [codeError, setCodeError] = useState('')
+  const [passFor, setPassFor] = useState(null)
 
   const openHistory = async (h, m = monthNow()) => {
     setHistory(h)
@@ -49,29 +49,11 @@ const DailyHelp = () => {
     }
   }
 
-  const check = async (e) => {
-    e.preventDefault()
-    setCodeError('')
-    setResult(null)
-    const ok = await run('check', async () => {
-      try {
-        const res = await api.post('/daily-help/check', { code })
-        setResult(res.data)
-        setCode('')
-        return true
-      } catch (err) {
-        setCodeError(errorMessage(err))
-        throw err
-      }
-    })
-    return ok
-  }
-
   return (
     <>
       <PageHeader
         title="Daily help"
-        subtitle={isResident ? 'Maids, cooks, drivers and others who come to your home. Each gets a code for the gate.' : 'Check household staff in and out at the gate.'}
+        subtitle={isResident ? 'Maids, cooks, drivers and others who come to your home. Each gets a QR code and a code for the gate, for coming in and for leaving.' : 'Household staff are checked in and out with their QR code or gate code.'}
         action={isResident && (
           <div className="flex gap-2">
             <button className="btn-secondary" onClick={() => setLinking(true)}><FiLink size={15} /> Add by code</button>
@@ -80,28 +62,9 @@ const DailyHelp = () => {
         )}
       />
 
-      {isGate && (
-        <section className="panel mb-6 p-5" aria-labelledby="gate-h">
-          <h2 id="gate-h" className="text-base font-bold">Gate check</h2>
-          <p className="mb-3 text-sm text-muted">Type the 6-digit code the helper shows. The first entry of the day checks them in, the next checks them out.</p>
-          <form onSubmit={check} className="flex flex-wrap items-start gap-2">
-            <input className="input w-44 text-center font-display text-xl tracking-[0.3em]" inputMode="numeric" pattern="\d{6}" maxLength={6} placeholder="______" aria-label="Helper code" value={code} onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))} />
-            <button className="btn-primary" type="submit" disabled={code.length !== 6 || busy === 'check'}>{busy === 'check' ? <Spinner className="h-4 w-4" /> : <FiCheckCircle size={16} />} Check</button>
-          </form>
-          {codeError && <p role="alert" className="mt-2 text-sm font-medium text-danger">{codeError}</p>}
-          {result && (
-            <div role="status" className={`mt-3 flex items-center gap-3 rounded-md p-3 ${result.action === 'in' ? 'bg-ok-soft' : 'bg-sunken'}`}>
-              <Avatar name={result.helper.name} src={result.helper.photo} size={44} />
-              <div>
-                <p className="font-bold">{result.helper.name} checked {result.action}</p>
-                <p className="text-sm text-muted">{kindLabel(result.helper.kind)}{result.helper.flats.length ? ` · works at ${result.helper.flats.join(', ')}` : ''} · {time(result.time)}</p>
-              </div>
-            </div>
-          )}
-        </section>
-      )}
+      {isGate && <div className="mb-6"><HelperGate /></div>}
 
-      {loading ? <div className="panel"><ListSkeleton rows={3} /></div> : error ? <div className="panel"><ErrorState message={error} onRetry={reload} /></div> : !data.length ? (
+      {user?.role === 'security' ? null : loading ? <div className="panel"><ListSkeleton rows={3} /></div> : error ? <div className="panel"><ErrorState message={error} onRetry={reload} /></div> : !data.length ? (
         <div className="panel"><EmptyState icon={FiClock} title="No helpers yet" text={isResident ? 'Add your maid, cook or driver. You will see when they arrive and leave, and their monthly attendance.' : 'No household staff are registered.'} action={isResident ? <button className="btn-primary" onClick={() => setForm({ name: '', phone: '', kind: 'maid' })}>Add helper</button> : null} /></div>
       ) : (
         <ul className="grid gap-3 md:grid-cols-2">
@@ -122,6 +85,7 @@ const DailyHelp = () => {
                 )}
               </div>
               <div className="mt-3 flex flex-wrap gap-2 border-t border-line pt-3">
+                {isResident && <button className="btn-primary btn-sm" onClick={() => setPassFor(h)}>{h.today?.status === 'inside' ? 'Show pass to leave' : 'Show pass'}</button>}
                 {h.phone && <a className="btn-secondary btn-sm" href={`tel:${h.phone}`}><FiPhone size={14} /> Call</a>}
                 {(isResident || user?.role !== 'security') && <button className="btn-secondary btn-sm" onClick={() => openHistory(h)}>Attendance</button>}
                 {(isResident || user?.role !== 'security') && <button className="btn-ghost btn-sm text-danger" onClick={() => setRemoving(h)}><FiTrash2 size={14} /> {isResident ? 'Remove' : 'Bar from society'}</button>}
@@ -130,6 +94,8 @@ const DailyHelp = () => {
           ))}
         </ul>
       )}
+
+      <HelperPass helper={passFor} onClose={() => setPassFor(null)} />
 
       <Modal open={!!form} onClose={() => setForm(null)} title="Add a helper" size="sm"
         footer={<>

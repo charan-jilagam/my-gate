@@ -103,6 +103,12 @@ EMAIL_PORT=587
 EMAIL_USER=your_email@gmail.com
 EMAIL_PASS=your_app_password
 
+# Verification codes by text message (no Twilio needed).
+# console prints the code in the backend terminal; 2factor and fast2sms send real texts.
+SMS_PROVIDER=console
+# TWOFACTOR_API_KEY=
+# FAST2SMS_API_KEY=
+
 # Cloudinary (for image uploads)
 CLOUDINARY_CLOUD_NAME=your_cloud_name
 CLOUDINARY_API_KEY=your_api_key
@@ -123,6 +129,8 @@ npm run dev
 ```
 
 The backend will run on `http://localhost:5000`
+
+New accounts verify their email (and mobile number) with a 6-digit code. With no email or SMS set up, the code is printed in this terminal. See [FEATURES.md](FEATURES.md#round-5-code-only-gate-entry-daily-help-passes-account-verification).
 
 ### 3. Frontend Setup
 
@@ -259,7 +267,7 @@ mygate/
 ## 🧪 Testing
 
 ```bash
-# Backend tests (416 tests)
+# Backend tests (461 tests)
 cd backend
 npm test
 
