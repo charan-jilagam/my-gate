@@ -361,7 +361,7 @@ describe('verifying an email and a mobile number', () => {
 });
 
 describe('sending the mobile code', () => {
-  afterEach(() => { delete process.env.SMS_PROVIDER; delete process.env.TWOFACTOR_API_KEY; delete process.env.FAST2SMS_API_KEY; delete process.env.OTP_REQUIRE_PHONE; jest.restoreAllMocks(); delete global.fetch; });
+  afterEach(() => { delete process.env.SMS_PROVIDER; delete process.env.TWOFACTOR_API_KEY; delete process.env.FAST2SMS_API_KEY; delete process.env.TEXTBEE_API_KEY; delete process.env.TEXTBEE_DEVICE_ID; delete process.env.OTP_REQUIRE_PHONE; jest.restoreAllMocks(); delete global.fetch; });
 
   test('without a gateway the code is printed, not sent', async () => {
     const spy = jest.spyOn(console, 'log').mockImplementation(() => {});
@@ -392,6 +392,44 @@ describe('sending the mobile code', () => {
     const [url, init] = global.fetch.mock.calls[0];
     expect(url).toBe('https://www.fast2sms.com/dev/bulkV2');
     expect(JSON.parse(init.body)).toEqual({ route: 'otp', variables_values: '123456', numbers: '9876543210' });
+  });
+
+  test('TextBee sends the code from your own phone', async () => {
+    process.env.SMS_PROVIDER = 'textbee';
+    process.env.TEXTBEE_API_KEY = 'txb_key';
+    global.fetch = jest.fn(async () => ({ ok: true, json: async () => ({ data: { success: true } }) }));
+    expect(await sendOtpSms('9876543210', '123456')).toEqual({ sent: true, via: 'textbee' });
+    const [url, init] = global.fetch.mock.calls[0];
+    expect(url).toBe('https://api.textbee.dev/api/v1/gateway/send-sms');
+    expect(init.headers['x-api-key']).toBe('txb_key');
+    const body = JSON.parse(init.body);
+    expect(body.recipients).toEqual(['+919876543210']);
+    expect(body.message).toContain('123456');
+  });
+
+  test('TextBee uses the chosen device when one is set', async () => {
+    process.env.SMS_PROVIDER = 'textbee';
+    process.env.TEXTBEE_API_KEY = 'txb_key';
+    process.env.TEXTBEE_DEVICE_ID = 'dev123';
+    global.fetch = jest.fn(async () => ({ ok: true, json: async () => ({}) }));
+    await sendOtpSms('9876543210', '123456');
+    expect(global.fetch.mock.calls[0][0]).toBe('https://api.textbee.dev/api/v1/gateway/devices/dev123/send-sms');
+  });
+
+  test('TextBee refusing the message is an error that says why', async () => {
+    process.env.SMS_PROVIDER = 'textbee';
+    process.env.TEXTBEE_API_KEY = 'txb_key';
+    global.fetch = jest.fn(async () => ({ ok: false, status: 400, json: async () => ({ message: 'No enabled device found' }) }));
+    await expect(sendOtpSms('9876543210', '123456')).rejects.toThrow(/No enabled device found/);
+  });
+
+  test('ordinary alerts and pass links also go through TextBee', async () => {
+    process.env.SMS_PROVIDER = 'textbee';
+    process.env.TEXTBEE_API_KEY = 'txb_key';
+    global.fetch = jest.fn(async () => ({ ok: true, json: async () => ({}) }));
+    expect(await require('../utils/sms').sendSms('9876543210', 'Nivora: hello')).toBe(true);
+    expect(JSON.parse(global.fetch.mock.calls[0][1].body).message).toBe('Nivora: hello');
+    expect(require('../utils/sms').isSmsConfigured()).toBe(true);
   });
 
   test('a mobile code is only required in production when a gateway exists', () => {

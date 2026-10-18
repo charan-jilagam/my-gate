@@ -108,6 +108,7 @@ EMAIL_PASS=your_app_password
 SMS_PROVIDER=console
 # TWOFACTOR_API_KEY=
 # FAST2SMS_API_KEY=
+# SMS_PROVIDER=textbee uses your own Android phone (free): TEXTBEE_API_KEY, optional TEXTBEE_DEVICE_ID
 
 # Cloudinary (for image uploads)
 CLOUDINARY_CLOUD_NAME=your_cloud_name
@@ -267,7 +268,7 @@ mygate/
 ## 🧪 Testing
 
 ```bash
-# Backend tests (494 tests)
+# Backend tests (498 tests)
 cd backend
 npm test
 

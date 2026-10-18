@@ -4,12 +4,14 @@
 //  - sign-in codes (OTP), sent through the provider chosen with SMS_PROVIDER, and
 //  - ordinary alerts, which still go through Twilio when it is set up (optional).
 //
-// SMS_PROVIDER: console (default, prints the code in the backend terminal), 2factor, fast2sms or twilio.
+// SMS_PROVIDER: console (default, prints the code in the backend terminal), textbee, 2factor, fast2sms or twilio.
+// textbee (https://textbee.dev) sends the message from an Android phone of yours through its free app, so it needs no gateway account.
 const provider = () => String(process.env.SMS_PROVIDER || '').trim().toLowerCase() || 'console';
 
 const isTwilioConfigured = () => !!(process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN && process.env.TWILIO_FROM);
 // True when ordinary text alerts can really be delivered (Twilio, or Fast2SMS when it is the chosen provider).
-const isSmsConfigured = () => isTwilioConfigured() || (provider() === 'fast2sms' && !!process.env.FAST2SMS_API_KEY);
+const isTextbeeConfigured = () => provider() === 'textbee' && !!process.env.TEXTBEE_API_KEY;
+const isSmsConfigured = () => isTwilioConfigured() || isTextbeeConfigured() || (provider() === 'fast2sms' && !!process.env.FAST2SMS_API_KEY);
 
 const toE164 = (phone) => {
   const digits = String(phone || '').replace(/\D/g, '');
@@ -52,9 +54,36 @@ const sendFast2Sms = async (phone, text) => {
   return true;
 };
 
+// TextBee: the message leaves from the Android phone you registered as a device in the TextBee app.
+// With TEXTBEE_DEVICE_ID set it uses that phone; without it TextBee picks one of your enabled devices.
+const sendTextbee = async (phone, text) => {
+  const to = toE164(phone);
+  if (!to) return false;
+  const base = String(process.env.TEXTBEE_API_URL || 'https://api.textbee.dev/api/v1').replace(/\/+$/, '');
+  const device = String(process.env.TEXTBEE_DEVICE_ID || '').trim();
+  const url = device ? `${base}/gateway/devices/${encodeURIComponent(device)}/send-sms` : `${base}/gateway/send-sms`;
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'x-api-key': process.env.TEXTBEE_API_KEY, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ recipients: [to], message: String(text).slice(0, 450) })
+  });
+  let json = null;
+  try {
+    json = await res.json();
+  } catch (e) {
+    json = null;
+  }
+  if (!res.ok) {
+    const why = json && (json.message || json.error);
+    throw new Error(`TextBee responded ${res.status}${why ? `: ${Array.isArray(why) ? why.join(', ') : why}` : ''}`);
+  }
+  return true;
+};
+
 const sendSms = async (phone, text) => {
   const to = toE164(phone);
   if (!to) return false;
+  if (isTextbeeConfigured()) return sendTextbee(phone, text);
   if (isTwilioConfigured()) return sendTwilio(phone, text);
   if (provider() === 'fast2sms' && process.env.FAST2SMS_API_KEY) return sendFast2Sms(phone, text);
   if (process.env.NODE_ENV !== 'production') console.log(`[dev] SMS to ${to}: ${text}`);
@@ -66,6 +95,7 @@ const isOtpSmsLive = () => {
   const p = provider();
   if (p === '2factor') return !!process.env.TWOFACTOR_API_KEY;
   if (p === 'fast2sms') return !!process.env.FAST2SMS_API_KEY;
+  if (p === 'textbee') return !!process.env.TEXTBEE_API_KEY;
   if (p === 'twilio') return isTwilioConfigured();
   return false;
 };
@@ -106,6 +136,12 @@ const sendOtpSms = async (phone, code, minutes = 10) => {
     const json = await okOrThrow(res, 'Fast2SMS');
     if (json && json.return === false) throw new Error(`Fast2SMS: ${json.message || 'not accepted'}`);
     return { sent: true, via: 'fast2sms' };
+  }
+
+  if (p === 'textbee' && process.env.TEXTBEE_API_KEY) {
+    // The phone running the TextBee app sends it, so it must be online with the app open.
+    await sendTextbee(phone, `Your Nivora code is ${code}. It works for ${minutes} minutes. Do not share it.`);
+    return { sent: true, via: 'textbee' };
   }
 
   if (p === 'twilio' && isTwilioConfigured()) {

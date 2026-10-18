@@ -201,3 +201,20 @@ Notes: helpers made before this release get their first new code the next time a
 | **Choose what you get** | Everyone | Profile has a new **Email** switch beside Text messages and Push (`PUT /api/push/prefs` accepts `email`). Only events that need action or are a record of money or access are sent outside the app; everything else stays in the bell. The text switch now works with Fast2SMS as well as Twilio |
 
 Setup: email uses the same `EMAIL_*` settings as the verification codes. Text messages for pass links and alerts need `SMS_PROVIDER=fast2sms` with `FAST2SMS_API_KEY` (or Twilio); with neither they are printed in the backend terminal while developing. Set `FRONTEND_URL` to the address guests can open, because it is the start of the pass link: `localhost` links only open on your own computer.
+
+
+### Free texts with TextBee (Round 8)
+
+`SMS_PROVIDER=textbee` sends every text (sign-up codes, guest pass links, alerts) from **your own Android phone** through the free TextBee app, so no gateway account or Twilio is needed.
+
+1. Install the TextBee app on an Android phone that has a SIM and mobile data or Wi-Fi.
+2. On https://textbee.dev choose **Add device** and scan the code with the app. Keep the app running with its battery restrictions off, because the phone is the one that sends the message.
+3. Create an API key on the dashboard and put it in `backend/.env`:
+   ```
+   SMS_PROVIDER=textbee
+   TEXTBEE_API_KEY=your_key
+   # optional: TEXTBEE_DEVICE_ID=the_device_id   (otherwise TextBee picks one of your enabled devices)
+   ```
+4. Restart the backend and sign up with a mobile number. The code arrives as a text from your phone's SIM.
+
+Numbers without a country code get `+91`; change it with `SMS_DEFAULT_COUNTRY_CODE`. The free plan has daily and monthly limits that are shown on the TextBee dashboard, and each text uses your SIM's own SMS allowance. If the phone is off or offline the text is not sent, and the person can ask for a new code.
