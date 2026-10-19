@@ -81,7 +81,8 @@ router.put(
     body('lat').isFloat({ min: -90, max: 90 }).withMessage('Latitude must be between -90 and 90'),
     body('lng').isFloat({ min: -180, max: 180 }).withMessage('Longitude must be between -180 and 180'),
     body('radiusMeters').optional().isInt({ min: 50, max: 5000 }).withMessage('The allowed distance must be between 50 and 5000 metres'),
-    body('label').optional({ nullable: true }).isString().isLength({ max: 120 })
+    body('label').optional({ nullable: true }).isString().isLength({ max: 120 }),
+    body('address').optional({ nullable: true }).isString().isLength({ max: 300 }).withMessage('The address must be 300 characters or fewer')
   ],
   async (req, res) => {
     try {
@@ -94,7 +95,8 @@ router.put(
         lat: Number(req.body.lat),
         lng: Number(req.body.lng),
         radiusMeters: req.body.radiusMeters !== undefined ? Number(req.body.radiusMeters) : (society.location && society.location.radiusMeters) || 300,
-        label: (req.body.label || '').trim()
+        label: (req.body.label || '').trim(),
+        address: req.body.address !== undefined ? String(req.body.address || '').trim() : (society.location && society.location.address) || ''
       };
       await society.save();
       res.json({ success: true, location: society.location, message: 'Society location saved' });

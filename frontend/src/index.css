@@ -9,7 +9,7 @@
   --ink: 18 42 41;
   --muted: 91 111 109;
   --line: 205 216 213; /* dividers */
-  --edge: 168 183 179; /* outlines of fields, buttons, chips and cards: strong enough to see on white */
+  --edge: 189 202 198; /* outlines of fields, buttons, chips and cards: strong enough to see on white */
   --brand: 15 76 74;
   --brand-strong: 10 58 57;
   --brand-soft: 222 238 236;
@@ -80,10 +80,10 @@
 
 @layer components {
   .btn {
-    @apply inline-flex min-h-[40px] items-center justify-center gap-2 rounded-lg px-4 active:scale-[0.98] text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50;
+    @apply inline-flex min-h-[42px] items-center justify-center gap-2 rounded-xl px-4 text-sm font-semibold transition duration-150 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50;
   }
   .btn-primary {
-    @apply btn bg-brand text-brand-ink hover:bg-brand-strong;
+    @apply btn bg-brand text-brand-ink shadow-[0_6px_16px_-8px_rgb(var(--brand)/0.7)] hover:bg-brand-strong hover:shadow-[0_8px_20px_-8px_rgb(var(--brand)/0.8)];
   }
   .btn-secondary {
     @apply btn border border-edge bg-surface text-ink hover:bg-sunken;
@@ -102,13 +102,13 @@
   }
   /* 16px on phones: anything smaller makes iOS zoom the page when a field is focused. */
   .input {
-    @apply block min-h-[42px] w-full rounded-lg border border-edge bg-surface px-3 py-2 text-base text-ink sm:text-sm placeholder:text-muted/70 transition-colors focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/25 disabled:bg-sunken;
+    @apply block min-h-[46px] w-full rounded-xl border border-edge bg-surface px-3 py-2 text-base text-ink sm:text-sm placeholder:text-muted/70 transition-colors focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/25 disabled:bg-sunken;
   }
   .label {
     @apply mb-1 block text-sm font-semibold text-ink;
   }
   .panel {
-    @apply rounded-xl border border-edge bg-surface shadow-card dark:shadow-none;
+    @apply rounded-2xl border border-edge/80 bg-surface shadow-card dark:border-edge dark:shadow-none;
   }
   /* A card you can tap: lifts a little on hover. */
   .panel-link {
@@ -119,7 +119,7 @@
     @apply text-xs font-semibold text-muted;
   }
   .tag {
-    @apply inline-flex items-center gap-1 rounded-sm px-2 py-0.5 text-xs font-semibold;
+    @apply inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-semibold;
   }
   .tag-neutral {
     @apply tag bg-sunken text-muted;
@@ -143,23 +143,73 @@
   background-image: repeating-linear-gradient(-45deg, #f5a800 0 10px, #0a3a39 10px 20px);
 }
 
-@keyframes skeleton {
-  0% {
-    background-position: 100% 0;
-  }
-  100% {
-    background-position: -100% 0;
-  }
+@keyframes shimmer {
+  0% { background-position: 150% 0; }
+  100% { background-position: -50% 0; }
 }
 .skeleton {
-  background: linear-gradient(90deg, rgb(var(--sunken)) 30%, rgb(var(--line)) 50%, rgb(var(--sunken)) 70%);
-  background-size: 200% 100%;
-  animation: skeleton 1.4s linear infinite;
-  border-radius: 6px;
+  background: linear-gradient(100deg, rgb(var(--sunken)) 35%, rgb(var(--surface)) 50%, rgb(var(--sunken)) 65%);
+  background-size: 250% 100%;
+  animation: shimmer 1.5s ease-in-out infinite;
+  border-radius: 10px;
+}
+.dark .skeleton {
+  background: linear-gradient(100deg, rgb(var(--sunken)) 35%, rgb(var(--line)) 50%, rgb(var(--sunken)) 65%);
+  background-size: 250% 100%;
 }
 
+/* Round spinner: a faint full ring with a bright arc that turns. Inherits the text colour. */
+.spinner {
+  display: inline-block;
+  border-radius: 9999px;
+  border: 2px solid color-mix(in srgb, currentColor 22%, transparent);
+  border-top-color: currentColor;
+  animation: spin 0.7s cubic-bezier(0.5, 0.1, 0.5, 0.9) infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* Full-screen and in-page loaders */
+@keyframes loader-pulse {
+  0% { transform: scale(0.85); opacity: 0.55; }
+  70%, 100% { transform: scale(1.7); opacity: 0; }
+}
+@keyframes loader-bob {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-5px); }
+}
+@keyframes loader-bar {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(260%); }
+}
+.loader-ring { position: absolute; inset: 0; border-radius: 1.25rem; background: rgb(var(--brand) / 0.35); animation: loader-pulse 1.8s ease-out infinite; }
+.loader-ring.delay { animation-delay: 0.9s; }
+.loader-logo { animation: loader-bob 1.8s ease-in-out infinite; }
+.loader-track { position: relative; height: 4px; width: 9rem; overflow: hidden; border-radius: 9999px; background: rgb(var(--brand) / 0.15); }
+.loader-track::after { content: ''; position: absolute; inset: 0; width: 40%; border-radius: inherit; background: linear-gradient(90deg, rgb(var(--brand)), #16c28a); animation: loader-bar 1.2s ease-in-out infinite; }
+
+/* Pages ease in instead of snapping. */
+@keyframes page-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: none; }
+}
+.page-in { animation: page-in 0.28s cubic-bezier(0.2, 0.8, 0.2, 1); }
+
+/* Sign-in screens */
+.auth-hero {
+  background:
+    radial-gradient(60rem 30rem at 110% -10%, rgb(22 194 138 / 0.28), transparent 60%),
+    radial-gradient(40rem 28rem at -10% 110%, rgb(30 120 230 / 0.30), transparent 60%),
+    linear-gradient(160deg, #0a3a39 0%, #0b2f4a 100%);
+}
+@keyframes float-slow {
+  0%, 100% { transform: translate3d(0, 0, 0); }
+  50% { transform: translate3d(0, -14px, 0); }
+}
+.float-slow { animation: float-slow 9s ease-in-out infinite; }
+.float-slower { animation: float-slow 13s ease-in-out infinite reverse; }
+
 @media (prefers-reduced-motion: reduce) {
-  .skeleton {
+  .skeleton, .spinner, .loader-ring, .loader-logo, .loader-track::after, .page-in, .float-slow, .float-slower {
     animation: none;
   }
   * {

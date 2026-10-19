@@ -233,3 +233,11 @@ Numbers without a country code get `+91`; change it with `SMS_DEFAULT_COUNTRY_CO
 - **Ratings both ways**: residents rate vendors; vendors rate residents. Vendors get Top rated / Recommended badges, "Recommended" sort, and "You booked before".
 - **Notification links**: every notification opens the right screen and flashes the item; notices open at `/notices/:id`.
 - **Profile**: Sign out, and Change password is hidden until opened.
+
+## Branding, approvals and nearby places (added)
+
+- **Logo and look**: the Nivora logo is the app icon, favicon, sign-in logo and header logo. Sign-in is a two-panel page on desktop and a gradient header with an overlapping card on phones. Loaders are a branded full-page loader, a round spinner, shimmer skeletons, and the menu stays in place while a page loads.
+- **Approval email**: the person gets an email the moment they are approved (and a polite one if rejected, with the reason), plus an in-app notice and SMS. A failed email never undoes the approval.
+- **Staff can approve residents** (`/admin/residents`): staff see only waiting residents of their own society and can approve them (not reject, and not guards, staff or vendors). New resident sign-ups notify admins and staff; when staff approve, the admins are told who did it.
+- **Society address and 1 km circle** (`/guard-posts` → Society location): the admin types the apartment address, taps Find on map, and adjusts the pin. A dashed 1 km circle is drawn around it on the admin and guard tracking maps.
+- **Nearby places** (`/nearby`, every role except vendors): supermarkets, hospitals, medical shops, petrol bunks, temples, churches, mosques, gurudwaras, banks and ATMs, food, schools, police and fire, transport, parks and EV charging. Nearest first, 1, 2 or 5 km, from the society or from where the person is, with Walk or Drive directions that open in the phone's maps app and a Call button when a number exists. Place data comes from OpenStreetMap in the browser (no map key needed).

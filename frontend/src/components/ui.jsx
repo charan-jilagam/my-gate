@@ -51,10 +51,27 @@ export const PageHeader = ({ title, subtitle, action }) => {
 
 export const Spinner = ({ className = 'h-5 w-5' }) => (
   <span
-    className={`inline-block animate-spin rounded-full border-2 border-current border-t-transparent ${className}`}
+    className={`spinner ${className}`}
     role="status"
     aria-label="Loading"
   />
+)
+
+/** The loader shown while the app or a page starts: the logo breathes inside soft rings, with a sliding bar. */
+export const BrandLoader = ({ text = 'Getting things ready…', compact = false }) => (
+  <div className={`grid place-items-center ${compact ? 'min-h-[50vh]' : 'min-h-screen'}`} role="status" aria-live="polite">
+    <div className="flex flex-col items-center gap-6">
+      <div className="relative h-20 w-20">
+        <span className="loader-ring" aria-hidden="true" />
+        <span className="loader-ring delay" aria-hidden="true" />
+        <span className="loader-logo relative grid h-20 w-20 place-items-center rounded-[1.25rem] bg-white shadow-pop ring-1 ring-black/5">
+          <img src="/logo-mark.png" alt="" className="h-14 w-14 object-contain" draggable="false" />
+        </span>
+      </div>
+      <div className="loader-track" aria-hidden="true" />
+      <p className="text-sm font-medium text-muted">{text}</p>
+    </div>
+  </div>
 )
 
 export const EmptyState = ({ icon: Icon = FiInbox, title, text, action }) => {

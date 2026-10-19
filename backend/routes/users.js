@@ -7,6 +7,9 @@ const Notification = require('../models/Notification');
 const { protect, authorize } = require('../middleware/auth');
 const { notifyUser } = require('../utils/notifyUser');
 const { isSafeUrl } = require('../utils/imageUrl');
+const { safeNotifyMany } = require('../utils/safeNotify');
+const { sendApprovedEmail, sendRejectedEmail } = require('../utils/accountMail');
+const Society = require('../models/Society');
 
 // @route   GET /api/users/notifications
 // @desc    Get user notifications
@@ -131,6 +134,7 @@ router.put('/reject/:id', protect, authorize('society_admin', 'super_admin'), [
     user.rejectedAt = new Date();
     user.rejectedReason = req.body.reason || undefined;
     await user.save({ validateBeforeSave: false });
+    sendRejectedEmail({ user, reason: user.rejectedReason });
 
     res.json({ success: true, message: 'Sign-up rejected' });
   } catch (error) {
@@ -140,9 +144,9 @@ router.put('/reject/:id', protect, authorize('society_admin', 'super_admin'), [
 });
 
 // @route   PUT /api/users/approve/:id
-// @desc    Approve a resident, guard, staff member or vendor
-// @access  Private (Admins)
-router.put('/approve/:id', protect, authorize('society_admin', 'super_admin'), async (req, res) => {
+// @desc    Approve a resident, guard, staff member or vendor. Staff may approve residents of their own society.
+// @access  Private (Admins, and staff for residents)
+router.put('/approve/:id', protect, authorize('society_admin', 'super_admin', 'staff'), async (req, res) => {
   try {
     const user = await User.findById(req.params.id);
 
@@ -161,11 +165,17 @@ router.put('/approve/:id', protect, authorize('society_admin', 'super_admin'), a
     }
 
     // Check access
-    if (req.user.role === 'society_admin' && user.societyId?.toString() !== req.user.societyId?.toString()) {
+    if (['society_admin', 'staff'].includes(req.user.role) && user.societyId?.toString() !== req.user.societyId?.toString()) {
       return res.status(403).json({
         success: false,
         message: 'Not authorized'
       });
+    }
+    if (req.user.role === 'staff' && user.role !== 'resident') {
+      return res.status(403).json({ success: false, message: 'Staff can approve residents. Guards, staff and vendors are approved by the society admin.' });
+    }
+    if (user.isApproved) {
+      return res.status(409).json({ success: false, message: 'This person is already approved.' });
     }
 
     user.isApproved = true;
@@ -176,17 +186,44 @@ router.put('/approve/:id', protect, authorize('society_admin', 'super_admin'), a
     user.rejectedReason = undefined;
     await user.save();
 
-    // Notify user
+    // Tell the person: in the app, by text and by email, straight away. None of these may fail the approval.
     const io = req.app.get('io');
-    if (io) {
+    const byStaff = req.user.role === 'staff';
+    const approverName = req.user.name;
+    try {
       await notifyUser(io, user._id, {
         societyId: user.societyId,
         type: 'general',
         title: 'Account Approved',
         sms: true,
-        message: 'Your account has been approved by the admin',
+        message: `Your account has been approved${byStaff ? ' by the society staff' : ' by the admin'}. You can sign in now.`,
         priority: 'high'
       });
+    } catch (notifyError) {
+      console.error('Could not notify approved user:', notifyError.message);
+    }
+    try {
+      const society = user.societyId ? await Society.findById(user.societyId).select('name') : null;
+      await sendApprovedEmail({ user, societyName: society && society.name, approvedByName: approverName });
+    } catch (mailError) {
+      console.error('Approval email failed:', mailError.message);
+    }
+
+    // When staff approved, the admins are told who was approved and by whom.
+    if (byStaff) {
+      try {
+        const admins = await User.find({ societyId: user.societyId, role: 'society_admin', isActive: true }).select('_id');
+        await safeNotifyMany(io, (admins || []).map((a) => a._id), {
+          societyId: user.societyId,
+          type: 'general',
+          title: 'Resident approved by staff',
+          message: `${approverName} approved ${user.name}${user.flatNo ? ` (flat ${user.block ? `${user.block}-` : ''}${user.flatNo})` : ''}.`,
+          priority: 'low',
+          actionUrl: '/admin/residents'
+        });
+      } catch (adminNotifyError) {
+        console.error('Could not notify admins of staff approval:', adminNotifyError.message);
+      }
     }
 
     res.json({
@@ -238,15 +275,15 @@ router.put('/:id/active', protect, authorize('society_admin', 'super_admin'), [
 // @route   GET /api/users/pending-approvals
 // @desc    Get pending approvals
 // @access  Private (Admins)
-router.get('/pending-approvals', protect, authorize('society_admin', 'super_admin'), async (req, res) => {
+router.get('/pending-approvals', protect, authorize('society_admin', 'super_admin', 'staff'), async (req, res) => {
   try {
     let query = {
-      role: { $in: APPROVABLE_ROLES },
+      role: { $in: req.user.role === 'staff' ? ['resident'] : APPROVABLE_ROLES },
       isApproved: false,
       isActive: true
     };
 
-    if (req.user.role === 'society_admin') {
+    if (['society_admin', 'staff'].includes(req.user.role)) {
       query.societyId = req.user.societyId;
     }
 

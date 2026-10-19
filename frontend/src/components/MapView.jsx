@@ -5,7 +5,7 @@ import 'leaflet/dist/leaflet.css'
 // A small map (OpenStreetMap) that works on a phone: drag to move, pinch to zoom.
 //
 // markers: [{ id, lat, lng, label, tone: 'brand' | 'warn' | 'danger' | 'muted', title }]
-// circles: [{ lat, lng, radius, label }]            areas such as "allowed distance from the gate"
+// circles: [{ lat, lng, radius, label, tone, dashed }]  areas such as "allowed distance from the gate" or a 1 km ring
 // line:    [[lat, lng], ...]                        a guard's recent path
 // onPick:  ({ lat, lng }) => void                   when set, tapping the map picks a point (used to set a location)
 // pick:    { lat, lng }                             the point that was picked
@@ -59,8 +59,13 @@ const MapView = ({ markers = [], circles = [], line, pick, onPick, height = 320,
     const points = []
     circles.forEach((c) => {
       if (c.lat == null || c.lng == null) return
-      L.circle([c.lat, c.lng], { radius: c.radius || 100, color: '#0f4c4a', weight: 1.5, fillColor: '#0f4c4a', fillOpacity: 0.08 }).addTo(g)
-      points.push([c.lat, c.lng])
+      const colour = TONES[c.tone] || TONES.brand
+      const ring = L.circle([c.lat, c.lng], { radius: c.radius || 100, color: colour, weight: c.dashed ? 2 : 1.5, dashArray: c.dashed ? '8 6' : undefined, fillColor: colour, fillOpacity: c.dashed ? 0.03 : 0.08, interactive: !!c.label }).addTo(g)
+      if (c.label) ring.bindTooltip(esc(c.label), { sticky: true })
+      // Fit the whole ring in view, not only its centre (unless noFit: a big backdrop ring should not zoom the map out).
+      const b = ring.getBounds()
+      if (!c.noFit) points.push([b.getNorth(), b.getEast()], [b.getSouth(), b.getWest()])
+      else points.push([c.lat, c.lng])
     })
     if (line && line.length > 1) {
       L.polyline(line, { color: '#0f4c4a', weight: 3, opacity: 0.7, dashArray: '6 6' }).addTo(g)

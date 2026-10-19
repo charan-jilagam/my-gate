@@ -1,5 +1,5 @@
 import { imgSrc } from '../utils/media'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { Suspense, useCallback, useEffect, useRef, useState } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import ErrorBoundary from './ErrorBoundary'
 import {
@@ -22,6 +22,7 @@ import {
   FiMoon,
   FiMoreHorizontal,
   FiMapPin,
+  FiCompass,
   FiRepeat,
   FiNavigation,
   FiPackage,
@@ -38,7 +39,7 @@ import {
 import { useAuth } from '../contexts/AuthContext'
 import { useSocket } from '../contexts/SocketContext'
 import api from '../services/api'
-import { formatDate } from './ui'
+import { BrandLoader, formatDate } from './ui'
 import { useT } from '../contexts/LanguageContext'
 import { LANGUAGES } from '../i18n/translations'
 import DutyTracker from './DutyTracker'
@@ -71,6 +72,7 @@ const I = {
   swaps: { to: '/swaps', icon: FiRepeat, label: 'Shift swaps' },
   attendance: { to: '/attendance', icon: FiCheckCircle, label: 'Attendance' },
   live: { to: '/live', icon: FiNavigation, label: 'Guard tracking' },
+  nearby: { to: '/nearby', icon: FiCompass, label: 'Nearby places' },
   posts: { to: '/guard-posts', icon: FiMapPin, label: 'Guard posts' },
   guide: { to: '/help', icon: FiBookOpen, label: 'User guide' }
 }
@@ -80,27 +82,27 @@ const NAV = {
   resident: [
     { items: [I.home] },
     { title: 'At the gate', items: [I.visitors, I.deliveries, I.vehicles, I.help] },
-    { title: 'Home and community', items: [I.services, I.bookings, I.community, I.notices, I.votes, I.documents] },
+    { title: 'Home and community', items: [I.services, I.bookings, I.community, I.nearby, I.notices, I.votes, I.documents] },
     { title: 'Money and help', items: [I.payments, I.accounts, I.complaints, I.upkeep, I.emergency] },
     { items: [I.guide] }
   ],
   security: [
     { items: [I.home, I.gate, I.shifts, I.swaps] },
     { title: 'Gate', items: [I.visitors, I.deliveries, I.vehicles, I.help] },
-    { title: 'Society', items: [I.notices, I.emergency, I.upkeep, I.documents] },
+    { title: 'Society', items: [I.notices, I.nearby, I.emergency, I.upkeep, I.documents] },
     { items: [I.guide] }
   ],
   guard_admin: [
     { items: [I.home, I.gate, I.shifts, I.swaps] },
     { title: 'Guards', items: [I.roster, I.attendance, I.live, I.posts] },
     { title: 'Gate', items: [I.visitors, I.deliveries, I.vehicles, I.help] },
-    { title: 'Society', items: [I.notices, I.emergency, I.upkeep, I.documents] },
+    { title: 'Society', items: [I.notices, I.nearby, I.emergency, I.upkeep, I.documents] },
     { items: [I.guide] }
   ],
   society_admin: [
     { items: [I.home, I.people] },
     { title: 'Gate', items: [I.gate, I.visitors, I.deliveries, I.vehicles, I.help] },
-    { title: 'Society', items: [I.notices, I.votes, I.complaints, I.community, I.bookings, I.adminServices, I.emergency] },
+    { title: 'Society', items: [I.notices, I.nearby, I.votes, I.complaints, I.community, I.bookings, I.adminServices, I.emergency] },
     { title: 'Guards', items: [I.roster, I.attendance, I.live, I.swaps, I.posts] },
     { title: 'Operations', items: [I.upkeep, I.documents] },
     { title: 'Money', items: [I.payments, I.accounts] },
@@ -110,14 +112,14 @@ const NAV = {
   super_admin: [
     { items: [I.home, I.societies, I.people] },
     { title: 'Gate', items: [I.visitors, I.deliveries, I.vehicles, I.help] },
-    { title: 'Society', items: [I.notices, I.votes, I.complaints, I.community, I.bookings, I.adminServices, I.emergency] },
+    { title: 'Society', items: [I.notices, I.nearby, I.votes, I.complaints, I.community, I.bookings, I.adminServices, I.emergency] },
     { title: 'Guards', items: [I.roster, I.attendance, I.live, I.swaps, I.posts] },
     { title: 'Operations', items: [I.upkeep, I.documents] },
     { title: 'Money', items: [I.payments, I.accounts] },
     { items: [I.guide] }
   ],
   staff: [
-    { items: [I.home, I.shifts, I.swaps, I.upkeep, I.complaints, I.notices, I.documents] },
+    { items: [I.home, I.people, I.shifts, I.swaps, I.upkeep, I.complaints, I.notices, I.nearby, I.documents] },
     { items: [I.guide] }
   ],
   vendor: [
@@ -133,7 +135,7 @@ const TABS = {
   guard_admin: [I.home, I.gate, I.live, I.roster],
   society_admin: [I.home, I.people, I.visitors, I.complaints],
   super_admin: [I.home, I.societies, I.people, I.complaints],
-  staff: [I.home, I.shifts, I.upkeep, I.complaints],
+  staff: [I.home, I.people, I.shifts, I.complaints],
   vendor: [I.jobs, I.schedule, I.notices]
 }
 
@@ -158,13 +160,16 @@ const ROLE_LABEL = {
   vendor: 'Vendor'
 }
 
-export const Logo = ({ className = '' }) => (
+// The Nivora mark sits on a white tile so it looks the same on the dark sidebar, the light pages and the sign-in screen.
+export const LogoMark = ({ size = 36, className = '' }) => (
+  <span className={`inline-grid shrink-0 place-items-center rounded-xl bg-white shadow-sm ring-1 ring-black/5 ${className}`} style={{ width: size, height: size }}>
+    <img src="/logo-mark.png" alt="" width={size} height={size} style={{ width: size * 0.82, height: size * 0.82 }} className="object-contain" draggable="false" />
+  </span>
+)
+
+export const Logo = ({ className = '', size = 36 }) => (
   <span className={`inline-flex items-center gap-2.5 ${className}`}>
-    <svg width="30" height="30" viewBox="0 0 32 32" aria-hidden="true">
-      <rect width="32" height="32" rx="7" className="fill-brand" />
-      <path d="M7 24V12l9-6 9 6v12" fill="none" stroke="#F5A800" strokeWidth="2.4" strokeLinejoin="round" />
-      <path d="M12 24v-7h8v7" fill="none" className="stroke-brand-ink" strokeWidth="2.4" />
-    </svg>
+    <LogoMark size={size} />
     <span className="font-display text-xl font-extrabold tracking-tight">Nivora</span>
   </span>
 )
@@ -501,7 +506,11 @@ const Layout = () => {
 
       <main id="main" className="mx-auto w-full max-w-6xl px-4 pb-[calc(5.5rem+env(safe-area-inset-bottom))] pt-6 sm:px-6 sm:pt-8 lg:pb-8">
         {['security', 'guard_admin', 'staff'].includes(user?.role) && <DutyTracker />}
-        <ErrorBoundary resetKey={location.pathname}><Outlet /></ErrorBoundary>
+        <ErrorBoundary resetKey={location.pathname}>
+          <Suspense fallback={<BrandLoader compact text="Loading…" />}>
+            <div key={location.pathname} className="page-in"><Outlet /></div>
+          </Suspense>
+        </ErrorBoundary>
       </main>
 
       {/* Phone navigation: the main places for this role, always one thumb away. */}

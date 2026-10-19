@@ -52,7 +52,9 @@ const societySchema = new mongoose.Schema({
     lat: { type: Number, min: -90, max: 90 },
     lng: { type: Number, min: -180, max: 180 },
     radiusMeters: { type: Number, min: 50, max: 5000, default: 300 },
-    label: { type: String, trim: true, maxlength: 120, default: '' }
+    label: { type: String, trim: true, maxlength: 120, default: '' },
+    // The street address of the apartment, as the admin typed it. Shown to everyone as a reference.
+    address: { type: String, trim: true, maxlength: 300, default: '' }
   },
   settings: {
     visitorApprovalRequired: { type: Boolean, default: true },

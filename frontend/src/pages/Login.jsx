@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
-import { FiEye, FiEyeOff } from 'react-icons/fi'
+import { FiEye, FiEyeOff, FiLock, FiMail } from 'react-icons/fi'
 import toast from 'react-hot-toast'
 import { useAuth } from '../contexts/AuthContext'
 import AuthShell from '../components/AuthShell'
@@ -50,28 +50,32 @@ const Login = () => {
     >
       <form className="space-y-5" onSubmit={handleSubmit} noValidate>
         <Field label="Email" htmlFor="email">
-          <input
-            id="email"
-            name="email"
-            type="email"
-            autoComplete="email"
-            required
-            className="input"
-            placeholder="you@example.com"
-            value={formData.email}
-            onChange={handleChange}
-          />
+          <div className="relative">
+            <FiMail className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-muted" size={17} aria-hidden="true" />
+            <input
+              id="email"
+              name="email"
+              type="email"
+              autoComplete="email"
+              required
+              className="input pl-10"
+              placeholder="you@example.com"
+              value={formData.email}
+              onChange={handleChange}
+            />
+          </div>
         </Field>
 
         <Field label="Password" htmlFor="password">
           <div className="relative">
+            <FiLock className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-muted" size={17} aria-hidden="true" />
             <input
               id="password"
               name="password"
               type={showPassword ? 'text' : 'password'}
               autoComplete="current-password"
               required
-              className="input pr-11"
+              className="input pl-10 pr-11"
               value={formData.password}
               onChange={handleChange}
             />
@@ -98,7 +102,7 @@ const Login = () => {
           </Link>
         </div>
 
-        <button type="submit" disabled={loading || !formData.email || !formData.password} className="btn-primary w-full">
+        <button type="submit" disabled={loading || !formData.email || !formData.password} className="btn-primary min-h-[48px] w-full text-base">
           {loading && <Spinner className="h-4 w-4" />}
           {loading ? 'Signing in' : 'Sign in'}
         </button>

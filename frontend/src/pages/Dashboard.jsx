@@ -1,5 +1,5 @@
 import { Link, Navigate } from 'react-router-dom'
-import { FiAlertTriangle, FiArrowRight, FiMapPin, FiPhone, FiRepeat, FiNavigation, FiBell, FiCalendar, FiCheckCircle, FiClipboard, FiClock, FiCreditCard, FiFileText, FiFolder, FiMessageSquare, FiPackage, FiPieChart, FiShield, FiThumbsUp, FiTool, FiUserPlus, FiUsers } from 'react-icons/fi'
+import { FiAlertTriangle, FiArrowRight, FiCompass, FiMapPin, FiPhone, FiRepeat, FiNavigation, FiBell, FiCalendar, FiCheckCircle, FiClipboard, FiClock, FiCreditCard, FiFileText, FiFolder, FiMessageSquare, FiPackage, FiPieChart, FiShield, FiThumbsUp, FiTool, FiUserPlus, FiUsers } from 'react-icons/fi'
 import { useAuth } from '../contexts/AuthContext'
 import { useT } from '../contexts/LanguageContext'
 import useApi from '../hooks/useApi'
@@ -22,6 +22,7 @@ const QUICK = {
     { to: '/complaints', icon: FiFileText, label: 'Raise a complaint' },
     { to: '/daily-help', icon: FiClock, label: 'Daily help' },
     { to: '/community', icon: FiMessageSquare, label: 'Community' },
+    { to: '/nearby', icon: FiCompass, label: 'Nearby places' },
     { to: '/votes', icon: FiThumbsUp, label: 'Votes' },
     { to: '/documents', icon: FiFolder, label: 'Documents' },
     { to: '/emergency', icon: FiAlertTriangle, label: 'SOS', danger: true }
@@ -85,7 +86,7 @@ const Dashboard = () => {
   const vehiclesInside = useApi('/vehicles', { params: { isInside: true }, enabled: sees('security', 'society_admin', 'super_admin') })
   const complaintsOpen = useApi('/complaints', { params: { status: 'open', limit: 100 }, enabled: sees('resident', 'society_admin', 'super_admin', 'staff') })
   const paymentsPending = useApi('/payments', { params: { status: 'pending', limit: 100 }, enabled: sees('resident', 'society_admin', 'super_admin') })
-  const approvals = useApi('/users/pending-approvals', { enabled: isAdmin })
+  const approvals = useApi('/users/pending-approvals', { enabled: isAdmin || user?.role === 'staff' })
   const services = useApi('/service-requests', { params: { scope: 'upcoming', limit: 3 }, enabled: isResident, select: (d) => d.requests || [] })
   const sosOpen = useApi('/emergency/alerts', { params: { status: 'open', limit: 20 }, enabled: sees('security', 'society_admin', 'super_admin'), select: (d) => (d.alerts || []).filter((a) => a.status !== 'resolved') })
   const votes = useApi('/elections', { enabled: isResident, select: (d) => d.elections || [] })
@@ -99,7 +100,7 @@ const Dashboard = () => {
 
   // Things the person can act on right now. Zero-count items are hidden so the list stays short.
   const attention = [
-    isAdmin && { n: count(approvals.data, 'users'), label: 'residents waiting for approval', to: '/admin/residents', cta: 'Review' },
+    (isAdmin || user?.role === 'staff') && { n: count(approvals.data, 'users'), label: 'residents waiting for approval', to: '/admin/residents', cta: 'Review' },
     sees('resident', 'society_admin', 'super_admin') && {
       n: count(visitorsPending.data, 'visitors'),
       label: isResident ? 'visitors at the gate waiting for you' : 'visitors waiting for a decision',

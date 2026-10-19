@@ -97,7 +97,8 @@ router.post('/register', [
     // Tell the society's admins someone is waiting. A failed notification must not fail the sign-up.
     try {
       const io = req.app.get('io');
-      const admins = await User.find({ societyId, role: 'society_admin', isActive: true });
+      // Staff can approve residents too, so they hear about new resident sign-ups as well.
+      const admins = await User.find({ societyId, role: { $in: role === 'resident' ? ['society_admin', 'staff'] : ['society_admin'] }, isActive: true });
       const roleLabel = { resident: 'resident', security: 'guard', staff: 'staff member', vendor: 'vendor' }[role] || role;
       for (const admin of admins) {
         await notifyUser(io, admin._id, {

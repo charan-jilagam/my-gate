@@ -171,4 +171,33 @@ const openLinks = {
   tips: []
 };
 
-module.exports = { swaps, availability, clockLocation, roster, attendance, live, posts, head, onDuty, rateResident, ratings, openLinks };
+const nearby = {
+  id: 'nearby',
+  title: 'Finding places near you',
+  path: '/nearby',
+  covers: ['/nearby'],
+  summary: 'Shops, hospitals, petrol bunks, temples and more, with directions.',
+  steps: [
+    'Open Nearby places. Pick a kind of place, such as Hospitals, Petrol or Temples.',
+    'The map shows a dashed circle 1 km around your society. The list shows the nearest places first, with the distance.',
+    "Tap Directions to open turn by turn directions in your phone's maps app. Tap Call when a phone number is shown.",
+    'Use 2 km or 5 km to look further, or From where I am to search around you instead of the society.'
+  ],
+  tips: ['Places come from OpenStreetMap, so a new shop may be missing. Call ahead for timings.']
+};
+
+const societyAddress = {
+  id: 'society-address',
+  title: 'Society address and map pin',
+  path: '/guard-posts',
+  covers: [],
+  summary: 'Tell the app exactly where your apartment is.',
+  steps: [
+    'Open Guard posts. In Society location, type the full apartment address and tap Find on map.',
+    'Check the pin. Tap the map or use Use my current location to move it, then Save location.',
+    'The address is shown to everyone in Nearby places. The dashed circle on the maps is 1 km around the pin, and guards are checked against the inner circle you set.'
+  ],
+  tips: ['Pin the main gate for the most accurate guard tracking.']
+};
+
+module.exports = { nearby, societyAddress, swaps, availability, clockLocation, roster, attendance, live, posts, head, onDuty, rateResident, ratings, openLinks };

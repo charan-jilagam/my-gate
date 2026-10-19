@@ -2,13 +2,9 @@ import { Navigate, useLocation } from 'react-router-dom'
 import { FiClock, FiLogOut, FiRefreshCw } from 'react-icons/fi'
 import { useAuth } from '../contexts/AuthContext'
 import { Logo } from './Layout'
-import { Spinner } from './ui'
+import { BrandLoader, Spinner } from './ui'
 
-export const FullPageSpinner = () => (
-  <div className="grid min-h-screen place-items-center text-brand">
-    <Spinner className="h-8 w-8" />
-  </div>
-)
+export const FullPageSpinner = () => <BrandLoader />
 
 const PendingApproval = () => {
   const { logout, refreshUser } = useAuth()

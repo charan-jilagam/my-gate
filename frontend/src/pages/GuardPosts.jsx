@@ -1,19 +1,20 @@
 import { useEffect, useState } from 'react'
 import toast from 'react-hot-toast'
-import { FiMapPin, FiPlus, FiTrash2, FiEdit2, FiCrosshair } from 'react-icons/fi'
+import { FiMapPin, FiPlus, FiTrash2, FiEdit2, FiCrosshair, FiSearch } from 'react-icons/fi'
 import { useT } from '../contexts/LanguageContext'
 import api from '../services/api'
 import useApi from '../hooks/useApi'
 import MapView from '../components/MapView'
 import { EmptyState, ErrorState, ListSkeleton, Modal, PageHeader, Field, ConfirmDialog, Spinner, errorMessage } from '../components/ui'
 import { getPosition } from '../utils/location'
+import { geocode } from '../utils/places'
 import { timeLabel } from '../utils/services'
 
 export const POST_KINDS = { main_gate: 'Main gate', tower_gate: 'Tower gate', patrol: 'Patrol', control_room: 'Control room', housekeeping: 'Housekeeping', garden: 'Garden', maintenance: 'Maintenance', other: 'Other' }
 const blankSlot = (start = '06:00', end = '14:00') => ({ label: '', start, end, guards: 1 })
 
 // Pick a point on the map, or use the phone's current position.
-const PlacePicker = ({ value, onChange, center }) => {
+const PlacePicker = ({ value, onChange, center, circles }) => {
   const { t } = useT()
   const [busy, setBusy] = useState(false)
   const here = async () => {
@@ -23,7 +24,7 @@ const PlacePicker = ({ value, onChange, center }) => {
   return (
     <div className="space-y-2">
       <button type="button" className="btn-secondary w-full" onClick={here} disabled={busy}>{busy ? <Spinner className="h-4 w-4" /> : <FiCrosshair />} {t('Use my current location')}</button>
-      <MapView height={240} pick={value} center={value || center} onPick={(p) => onChange(p)} />
+      <MapView height={240} pick={value} center={value || center} circles={circles} onPick={(p) => onChange(p)} />
       <p className="text-xs text-muted">{value ? t('Pin placed. Tap the map to move it.') : t('Tap the map to place the pin.')}</p>
     </div>
   )
@@ -34,12 +35,23 @@ const SocietyLocation = ({ info, reload }) => {
   const [pick, setPick] = useState(info?.location ? { lat: info.location.lat, lng: info.location.lng } : null)
   const [radius, setRadius] = useState(info?.location?.radiusMeters || 300)
   const [label, setLabel] = useState(info?.location?.label || '')
+  const [address, setAddress] = useState(info?.location?.address || '')
+  const [finding, setFinding] = useState(false)
   const [busy, setBusy] = useState(false)
   const [open, setOpen] = useState(!info?.location)
   const save = async () => {
     if (!pick) return toast.error(t('Place the pin first.'))
     setBusy(true)
-    try { await api.put('/guards/location', { ...pick, radiusMeters: Number(radius), label }); toast.success(t('Society location saved')); setOpen(false); reload() } catch (e) { toast.error(errorMessage(e)) } finally { setBusy(false) }
+    try { await api.put('/guards/location', { ...pick, radiusMeters: Number(radius), label, address }); toast.success(t('Society location saved')); setOpen(false); reload() } catch (e) { toast.error(errorMessage(e)) } finally { setBusy(false) }
+  }
+  // Look the typed address up on the map and drop the pin there. The admin can still move the pin by tapping the map.
+  const findAddress = async () => {
+    setFinding(true)
+    try {
+      const hit = await geocode(address)
+      if (!hit) toast.error(t('We could not find that address. Add the area and city, or tap the map to place the pin.'))
+      else { setPick({ lat: hit.lat, lng: hit.lng }); toast.success(t('Pin placed at that address. Check it and move it if needed.')) }
+    } catch (e) { toast.error(e.message) } finally { setFinding(false) }
   }
   return (
     <section className="panel mb-5 p-4">
@@ -47,13 +59,17 @@ const SocietyLocation = ({ info, reload }) => {
         <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-brand-soft text-brand"><FiMapPin /></span>
         <div className="min-w-0 flex-1">
           <h2 className="font-display text-lg font-bold">{t('Society location')}</h2>
-          <p className="text-sm text-muted">{info?.location ? `${info.location.label || info.name || ''} · ${t('guards are counted at post within')} ${info.location.radiusMeters} m` : t('Set where your society is, so we can tell if a guard is at the gate when they clock in.')}</p>
+          <p className="text-sm text-muted">{info?.location ? `${info.location.label || info.name || ''}${info.location.address ? ` · ${info.location.address}` : ''} · ${t('guards are counted at post within')} ${info.location.radiusMeters} m` : t('Set where your society is, so we can tell if a guard is at the gate when they clock in.')}</p>
         </div>
         {!open && <button className="btn-secondary btn-sm" onClick={() => setOpen(true)}><FiEdit2 size={14} /> {t('Change')}</button>}
       </div>
       {open && (
         <div className="mt-4 space-y-3">
-          <PlacePicker value={pick} onChange={setPick} />
+          <Field label="Apartment address" hint="Type the full address, then tap Find on map. Everyone in the society sees this address, and Nearby places starts from it.">
+            <textarea className="input min-h-[72px]" maxLength={300} value={address} onChange={(e) => setAddress(e.target.value)} placeholder="Sunrise Apartments, 12 MG Road, Madhapur, Hyderabad 500081" />
+          </Field>
+          <button type="button" className="btn-secondary w-full" onClick={findAddress} disabled={finding || address.trim().length < 4}>{finding ? <Spinner className="h-4 w-4" /> : <FiSearch />} {t('Find on map')}</button>
+          <PlacePicker value={pick} onChange={setPick} circles={pick ? [{ lat: pick.lat, lng: pick.lng, radius: 1000, dashed: true, noFit: true, label: '1 km' }, { lat: pick.lat, lng: pick.lng, radius: Number(radius) || 300, tone: 'warn' }] : []} />
           <Field label="Name of the place (optional)"><input className="input" maxLength={120} value={label} onChange={(e) => setLabel(e.target.value)} placeholder="Sunrise Apartments, main gate" /></Field>
           <Field label="How far from here is still “at the society”? (metres)" hint="300 is right for most societies.">
             <input className="input" type="number" inputMode="numeric" min={50} max={5000} value={radius} onChange={(e) => setRadius(e.target.value)} />

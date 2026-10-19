@@ -25,7 +25,7 @@ const LiveGuards = () => {
     ;(data?.posts || []).forEach((p) => m.push({ id: `p${p._id}`, lat: p.lat, lng: p.lng, label: 'P', tone: 'warn', title: p.name, detail: 'Guard post' }))
     return m
   }, [data, guards])
-  const circles = useMemo(() => (data?.location ? [{ lat: data.location.lat, lng: data.location.lng, radius: data.location.radiusMeters || 300 }] : []), [data])
+  const circles = useMemo(() => (data?.location ? [{ lat: data.location.lat, lng: data.location.lng, radius: data.location.radiusMeters || 300, label: 'At the society' }, { lat: data.location.lat, lng: data.location.lng, radius: 1000, dashed: true, noFit: true, tone: 'muted', label: '1 km around the society' }] : []), [data])
   const center = focus || data?.location
 
   return (

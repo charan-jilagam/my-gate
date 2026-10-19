@@ -15,8 +15,9 @@ const stateOf = (u) => (!u.isApproved ? (u.rejectedAt ? 'rejected' : 'pending') 
 const flatOf = (u) => `${u.block ? `${u.block}-` : ''}${u.flatNo || '-'}`
 
 const AdminResidents = () => {
-  const { user, isSuperAdmin } = useAuth()
+  const { user, isSuperAdmin, isStaff } = useAuth()
   const [tab, setTab] = useState('pending')
+  // Staff can approve new residents, nothing else. The office is told when they do.
   const [query, setQuery] = useState('')
   const [societyId, setSocietyId] = useState('')
 
@@ -24,7 +25,7 @@ const AdminResidents = () => {
   const activeSociety = isSuperAdmin ? societyId || societies?.[0]?._id : user?.societyId?._id || user?.societyId
 
   const pending = useApi('/users/pending-approvals', { select: (d) => d.users || [] })
-  const all = useApi(`/societies/${activeSociety}/residents`, { enabled: tab === 'all' && !!activeSociety, select: (d) => d.residents || [] })
+  const all = useApi(`/societies/${activeSociety}/residents`, { enabled: tab === 'all' && !!activeSociety && !isStaff, select: (d) => d.residents || [] })
   const { busy, run } = useAction(async () => {
     await Promise.all([pending.reload(), tab === 'all' && all.reload()].filter(Boolean))
   })
@@ -71,9 +72,11 @@ const AdminResidents = () => {
               <button className="btn-ok btn-sm" disabled={busy === u._id} onClick={() => approve(u)}>
                 <FiCheck size={14} /> Approve
               </button>
-              <button className="btn-secondary btn-sm" disabled={busy === u._id} onClick={() => setRejecting(u)}>
-                <FiX size={14} /> Reject
-              </button>
+              {!isStaff && (
+                <button className="btn-secondary btn-sm" disabled={busy === u._id} onClick={() => setRejecting(u)}>
+                  <FiX size={14} /> Reject
+                </button>
+              )}
             </div>
           )
         if (state === 'rejected')
@@ -133,7 +136,7 @@ const AdminResidents = () => {
         <div className="flex gap-1 rounded-lg bg-sunken p-1" role="tablist" aria-label="Resident lists">
           {[
             { key: 'pending', label: `Waiting for approval${pending.data?.length ? ` (${pending.data.length})` : ''}` },
-            { key: 'all', label: 'Everyone' }
+            ...(isStaff ? [] : [{ key: 'all', label: 'Everyone' }])
           ].map((t) => (
             <button key={t.key} role="tab" aria-selected={tab === t.key} onClick={() => setTab(t.key)}
               className={`rounded-md px-3 py-1.5 text-sm font-semibold transition-colors ${tab === t.key ? 'bg-surface shadow-sm' : 'text-muted hover:text-ink'}`}>
@@ -164,7 +167,7 @@ const AdminResidents = () => {
           <EmptyState
             icon={FiUsers}
             title={query ? 'No one matches that search' : tab === 'pending' ? 'No one is waiting for approval' : 'No residents yet'}
-            text={tab === 'pending' && !query ? 'Residents, guards and staff who sign up will appear here for you to approve.' : undefined}
+            text={tab === 'pending' && !query ? (isStaff ? 'New residents who sign up will appear here for you to approve.' : 'Residents, guards and staff who sign up will appear here for you to approve.') : undefined}
           />
         }
       />

@@ -8,7 +8,7 @@ module.exports = {
       title: 'How to sign in',
       covers: ['/login', '/forgot-password', '/register'],
       summary: 'Sign in and find your way around.',
-      steps: ['Sign in with your email and password. A new account must be approved by the society office first.', 'Use Forgot password if you cannot remember it.', 'The menu shows only what you can use: Home, My shifts, Upkeep, Complaints, Notices and Documents.'],
+      steps: ['Sign in with your email and password. A new account must be approved by the society office first.', 'Use Forgot password if you cannot remember it.', 'The menu shows only what you can use: Home, People, My shifts, Upkeep, Complaints, Notices and Documents.'],
       tips: []
     },
     {
@@ -19,6 +19,15 @@ module.exports = {
       summary: 'What needs you today.',
       steps: ['Needs your attention shows open complaints.', 'Tap the bell for new assignments and notices.'],
       tips: []
+    },
+    {
+      id: 'approve-residents',
+      title: 'Approving new residents',
+      path: '/admin/residents',
+      covers: ['/admin/residents'],
+      summary: 'Let new residents in as soon as you know them.',
+      steps: ['Open People. New residents who signed up are listed with their flat and phone number.', 'Tap Approve once you know the person. They get an email at once and can sign in.', 'The admin is told that you approved them. Guards, staff and vendors, and rejections, are for the admin only.'],
+      tips: ['If you do not recognise someone, leave them for the admin.']
     },
     {
       id: 'shifts',

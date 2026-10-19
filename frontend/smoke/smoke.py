@@ -75,6 +75,7 @@ def api(role, method, path, q):
              dict(_id='f2', name='Service the lifts', category='lift', intervalDays=30, nextDue=d(5), lastDone=d(-25), active=True, status='due_soon', daysLeft=5, history=[], canComplete=role in OFFICE + STAFFY, canManage=role in OFFICE),
              dict(_id='f3', name='Fire extinguisher check', category='fire_safety', intervalDays=180, nextDue=d(100), active=True, status='ok', daysLeft=100, history=[], canComplete=role in OFFICE + STAFFY, canManage=role in OFFICE)]
         return dict(success=True, today=d(0), tasks=t, counts=dict(overdue=1, due_soon=1, ok=1))
+    if p == '/nearby/home': return dict(success=True, areaMeters=1000, home=dict(name='Green Heights', label='Green Heights main gate', address='12 MG Road, Madhapur, Hyderabad', lat=17.385, lng=78.4867))
     if p == '/roster/people': return dict(success=True, people=[dict(_id='u4', name='Gate Guard', role='security'), dict(_id='u5', name='Sunil Staff', role='staff')])
     if p == '/roster/mine': return dict(success=True, today=d(0), shifts=[dict(_id='s1', userId='u4', date=d(0), startTime='08:00', endTime='16:00', overnight=False, post='main_gate', note='', phase='scheduled', canClockIn=True, canClockOut=False), dict(_id='s2', userId='u4', date=d(1), startTime='22:00', endTime='06:00', overnight=True, post='patrol', note='', phase='scheduled', canClockIn=False, canClockOut=False)])
     if p == '/roster': return dict(success=True, from_=d(0), today=d(0), shifts=[dict(_id='s1', userId='u4', person=dict(name='Gate Guard', role='security'), date=d(0), startTime='08:00', endTime='16:00', overnight=False, post='main_gate', phase='on_duty', clockInAt=NOW), dict(_id='s3', userId='u5', person=dict(name='Sunil Staff', role='staff'), date=d(1), startTime='22:00', endTime='06:00', overnight=True, post='housekeeping', phase='scheduled')])
@@ -120,6 +121,10 @@ def run(role, pages, mobile=True):
             route.fulfill(status=200, content_type='application/json', body=json.dumps(body))
         ctx.route('**/api/**', handler)
         ctx.route('**/socket.io/**', lambda r: r.abort())
+        # Nearby places: a fake map service answer, so no outside network is needed.
+        OVERPASS = dict(elements=[dict(type='node', id=1, lat=17.3862, lon=78.4871, tags=dict(name='City Care Hospital', phone='+91 40 1234 5678', opening_hours='24/7')), dict(type='way', id=2, center=dict(lat=17.392, lon=78.49), tags=dict(name='Sri Ganesh Temple'))])
+        ctx.route('**/overpass**/**', lambda r: r.fulfill(status=200, content_type='application/json', body=json.dumps(OVERPASS)))
+        ctx.route('**/tile.openstreetmap.org/**', lambda r: r.abort())
         for path, expect in pages:
             page = ctx.new_page()
             page.on('pageerror', lambda e, path=path: errors.append(f'{role} {path}: PAGEERROR {e}'))
@@ -145,15 +150,15 @@ def run(role, pages, mobile=True):
 if __name__ == '__main__':
     allerr = []
     plans = {
-      'resident': [('/documents', ['Society bylaws 2026', 'Bylaws and rules']), ('/votes', ['Install solar panels?', 'Open now']), ('/upkeep', ['Clean overhead water tanks', 'Overdue']), ('/help', ['Resident guide', 'How to use this guide', 'Getting started']), ('/dashboard', ['Pre-approve a visitor', 'Your home services', 'Leaking kitchen tap']), ('/services', ['Home services', 'Ravi Kumar', 'Next free']),
+      'resident': [('/nearby', ['Nearby places', 'City Care Hospital', 'Walking directions']), ('/documents', ['Society bylaws 2026', 'Bylaws and rules']), ('/votes', ['Install solar panels?', 'Open now']), ('/upkeep', ['Clean overhead water tanks', 'Overdue']), ('/help', ['Resident guide', 'How to use this guide', 'Getting started']), ('/dashboard', ['Pre-approve a visitor', 'Your home services', 'Leaking kitchen tap']), ('/services', ['Home services', 'Ravi Kumar', 'Next free']),
                    ('/services/providers/p1', ['Choose a time', 'Fifteen years', 'Verified']), ('/services/requests', ['My bookings', 'Leaking kitchen tap']),
                    ('/services/requests/r1', ['4821', 'Progress', 'Cancel']), ('/community', ['Study table', 'Pinned']), ('/community/po1', ['Is it still available?']),
                    ('/emergency', ['SOS', 'City Police']), ('/daily-help', ['Lakshmi', '482913', 'Inside since']), ('/accounts', ['Collected', 'Where the money went', 'Security']),
                    ('/bookings', ['Clubhouse']), ('/notices', ['Diwali night', 'people coming', 'Going']), ('/visitors/abc123', [])],
       'vendor': [('/help', ['Service provider guide', 'My schedule']), ('/dashboard', ['Need your reply', 'Waiting for your reply']), ('/work', ['Waiting for your reply', 'No power in bedroom', 'Accept']), ('/work/setup', ['Working hours', 'Days off', 'Slot length']), ('/services/requests/r1', ['Progress'])],
-      'society_admin': [('/help', ['Society admin guide', 'Duty roster']), ('/documents', ['Add document', 'Audit draft', 'Office only']), ('/votes', ['New vote', 'Install solar panels?']), ('/upkeep', ['Add job', 'Clean overhead water tanks']), ('/roster', ['Add shifts', 'Gate Guard', 'overnight']), ('/dashboard', ['Approve people', 'Duty roster']), ('/admin/services', ['Ravi Kumar', 'Verified']), ('/accounts', ['Add expense', 'Lift service']), ('/emergency', ['Medical emergency', 'I am responding']), ('/admin/societies', [])],
+      'society_admin': [('/help', ['Society admin guide', 'Duty roster']), ('/documents', ['Add document', 'Audit draft', 'Office only']), ('/votes', ['New vote', 'Install solar panels?']), ('/upkeep', ['Add job', 'Clean overhead water tanks']), ('/roster', ['Add shifts', 'Gate Guard', 'overnight']), ('/dashboard', ['Approve people', 'Duty roster']), ('/nearby', ['Nearby places', 'Green Heights main gate']), ('/admin/services', ['Ravi Kumar', 'Verified']), ('/accounts', ['Add expense', 'Lift service']), ('/emergency', ['Medical emergency', 'I am responding']), ('/admin/societies', [])],
       'security': [('/help', ['Security guard guide', 'Gate console']), ('/my-shifts', ['My shifts', 'Clock in', 'overnight']), ('/upkeep', ['Mark done']), ('/documents', ['Society bylaws 2026']), ('/dashboard', ['Gate console', 'My shifts']), ('/daily-help', ['Daily help at the gate']), ('/emergency', ['Medical emergency'])],
-      'staff': [('/dashboard', ['My shifts', 'Upkeep']), ('/my-shifts', ['Clock in']), ('/upkeep', ['Mark done']), ('/help', ['Staff guide']), ('/documents', ['Society bylaws 2026'])],
+      'staff': [('/dashboard', ['My shifts', 'Upkeep']), ('/admin/residents', ['Waiting for approval']), ('/nearby', ['Nearby places']), ('/my-shifts', ['Clock in']), ('/upkeep', ['Mark done']), ('/help', ['Staff guide']), ('/documents', ['Society bylaws 2026'])],
       'super_admin': [('/help', ['Platform admin guide', 'Societies']), ('/roster', ['Society', 'Green Heights', 'Add shifts']), ('/votes', ['Green Heights', 'New vote']), ('/documents', ['Green Heights', 'Add document']), ('/upkeep', ['Green Heights', 'Add job'])],
     }
     for role, pages in plans.items():

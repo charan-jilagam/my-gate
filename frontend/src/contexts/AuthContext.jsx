@@ -105,6 +105,7 @@ export const AuthProvider = ({ children }) => {
       isResident: user?.role === 'resident',
       isSuperAdmin: user?.role === 'super_admin',
       isAdmin: ['society_admin', 'super_admin'].includes(user?.role),
+      isStaff: user?.role === 'staff',
       isSecurity: ['security', 'guard_admin'].includes(user?.role),
       isGuardHead: user?.role === 'guard_admin',
       isOffice: ['society_admin', 'super_admin', 'guard_admin'].includes(user?.role)
