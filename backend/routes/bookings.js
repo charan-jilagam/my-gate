@@ -4,6 +4,7 @@ const { body, query } = require('express-validator');
 const Booking = require('../models/Booking');
 const Society = require('../models/Society');
 const User = require('../models/User');
+const Payment = require('../models/Payment');
 const { protect, authorize, scopeToSociety } = require('../middleware/auth');
 const { safeNotify, safeNotifyMany } = require('../utils/safeNotify');
 const { DEFAULT_TZ, isValidDate, isValidTime, zonedToUtc, todayIn, addDays, toMinutes } = require('../utils/timezone');
@@ -14,6 +15,8 @@ router.param('id', scopeToSociety(Booking));
 
 const ACTIVE = ['pending', 'approved'];
 const MEMBERS = ['resident', 'society_admin', 'super_admin'];
+// Staff can see booking requests and approve or reject them, like the admin.
+const DECIDERS = ['society_admin', 'super_admin', 'staff'];
 
 // An amenity as a slot-engine "provider": open every day between its hours, nothing to wait for.
 const asSchedule = (a) => ({
@@ -281,7 +284,7 @@ router.post(
         throw e;
       }
 
-      const admins = await User.find({ societyId: req.user.societyId, role: 'society_admin', isActive: true }).select('_id');
+      const admins = await User.find({ societyId: req.user.societyId, role: { $in: auto ? ['society_admin'] : ['society_admin', 'staff'] }, isActive: true }).select('_id');
       await safeNotifyMany(req.app.get('io'), admins.map((a) => a._id), {
         societyId: req.user.societyId,
         type: 'booking_request',
@@ -296,14 +299,14 @@ router.post(
         email: !auto
       });
       // The resident gets a receipt of what they booked.
-      await tell(req, booking, auto
-        ? { type: 'booking_approved', title: 'Amenity booked', message: `${amenity.name} on ${date}, ${startTime} to ${endTime} is confirmed.`, email: true }
-        : { type: 'booking_request', title: 'Booking request sent', message: `${amenity.name} on ${date}, ${startTime} to ${endTime} is waiting for the office. You will be told when it is decided.`, email: true });
+      if (auto) await confirmToResident(req, booking, `${amenity.name} on ${date}, ${startTime} to ${endTime} is confirmed.`, 'Amenity booked');
+      else await tell(req, booking,
+        { type: 'booking_request', title: 'Booking request sent', message: `${amenity.name} on ${date}, ${startTime} to ${endTime} is waiting for the office. You will be told when it is decided.`, email: true });
 
       res.status(201).json({
         success: true,
         booking,
-        message: auto ? 'Booked. Your slot is confirmed.' : 'Request sent. You will be told when the office approves it.'
+        message: auto ? (booking.amount > 0 ? `Booked. Your slot is confirmed. Please pay ${rupees(booking.amount)} in Payments.` : 'Booked. Your slot is confirmed.') : 'Request sent. You will be told when the office approves it.'
       });
     } catch (error) {
       if (error.name === 'ValidationError') return fail(res, 400, Object.values(error.errors)[0].message);
@@ -313,7 +316,7 @@ router.post(
 );
 
 // @route   GET /api/bookings
-router.get('/', protect, authorize(...MEMBERS, 'security', 'guard_admin'), async (req, res) => {
+router.get('/', protect, authorize(...MEMBERS, 'staff', 'security', 'guard_admin'), async (req, res) => {
   try {
     const filter = {};
     if (req.user.role === 'resident') filter.residentId = req.user.id;
@@ -328,6 +331,7 @@ router.get('/', protect, authorize(...MEMBERS, 'security', 'guard_admin'), async
     const bookings = await Booking.find(filter)
       .populate('residentId', 'name flatNo block')
       .populate('approvedBy', 'name')
+      .populate('paymentId', 'status amount')
       .sort({ slotDate: -1, startTime: -1 })
       .limit(paging(req, { max: 500, fallback: 200 }).limit)
       .skip(paging(req).skip);
@@ -347,6 +351,68 @@ const tell = (req, booking, data) =>
     ...data
   });
 
+const rupees = (n) => `₹${Number(n).toLocaleString('en-IN')}`;
+
+// When a booking with a price is confirmed, the resident owes it: add it to their Payments and tell them to pay.
+// Safe to call twice: a booking only ever gets one bill.
+const raiseBill = async (req, booking, society) => {
+  if (!booking.amount || booking.amount <= 0 || booking.paymentId) return null;
+  try {
+    const when = `${booking.dateStr || ''}`.trim();
+    const payment = await Payment.create({
+      residentId: booking.residentId,
+      societyId: booking.societyId,
+      amount: booking.amount,
+      type: 'amenity_booking',
+      description: `${booking.amenity}${when ? ` on ${when}` : ''}`,
+      status: 'pending',
+      dueDate: booking.startTime,
+      flatNo: booking.flatNo,
+      block: booking.block,
+      notes: `Booking ${booking._id}`
+    });
+    await Booking.updateOne({ _id: booking._id }, { $set: { paymentId: payment._id } });
+    booking.paymentId = payment._id;
+    return payment;
+  } catch (e) {
+    console.error('Raise booking bill failed:', e.message);
+    return null;
+  }
+};
+
+// Tell the resident their booking is confirmed, and to pay if it has a price.
+const confirmToResident = async (req, booking, intro, plainTitle = 'Booking approved') => {
+  const bill = await raiseBill(req, booking);
+  if (bill) {
+    return tell(req, booking, {
+      type: 'booking_approved',
+      title: `Booking approved: please pay ${rupees(booking.amount)}`,
+      message: `${intro} Please pay ${rupees(booking.amount)} for ${booking.amenity}. You can pay online in Payments.`,
+      relatedId: bill._id,
+      relatedModel: 'Payment',
+      actionUrl: `/payments?highlight=${bill._id}`,
+      priority: 'high',
+      sms: true,
+      email: true
+    });
+  }
+  return tell(req, booking, { type: 'booking_approved', title: plainTitle, message: intro, email: true });
+};
+
+// A booking that is cancelled or rejected must not leave a bill behind. Unpaid bills are removed; a paid one is marked refunded.
+const settleBill = async (booking) => {
+  if (!booking.paymentId) return null;
+  try {
+    const removed = await Payment.findOneAndDelete({ _id: booking.paymentId, status: 'pending' });
+    if (removed) return 'removed';
+    const paid = await Payment.findOneAndUpdate({ _id: booking.paymentId, status: 'completed' }, { $set: { status: 'refunded' } }, { new: true });
+    return paid ? 'refund' : null;
+  } catch (e) {
+    console.error('Settle booking bill failed:', e.message);
+    return null;
+  }
+};
+
 // Each decision is one conditional update: it only applies if the booking is still in the state we expect,
 // so an approval and a cancellation arriving together cannot both win.
 const decide = (id, from, change) => Booking.findOneAndUpdate({ _id: id, status: { $in: from } }, { $set: change }, { new: true });
@@ -358,7 +424,7 @@ const notFoundOrDecided = async (res, id) => {
 };
 
 // @route   PUT /api/bookings/:id/approve
-router.put('/:id/approve', protect, authorize('society_admin', 'super_admin'), async (req, res) => {
+router.put('/:id/approve', protect, authorize(...DECIDERS), async (req, res) => {
   try {
     const current = await Booking.findById(req.params.id);
     if (!current) return fail(res, 404, 'Booking not found');
@@ -372,20 +438,35 @@ router.put('/:id/approve', protect, authorize('society_admin', 'super_admin'), a
     const booking = await decide(current._id, ['pending'], { status: 'approved', approvedBy: req.user.id, approvedAt: new Date() });
     if (!booking) return notFoundOrDecided(res, current._id);
 
-    await tell(req, booking, { type: 'booking_approved', title: 'Booking approved', message: `Your ${booking.amenity} booking is confirmed.`, email: true });
-    res.json({ success: true, booking, message: 'Booking approved' });
+    await confirmToResident(req, booking, `Your ${booking.amenity} booking on ${booking.dateStr || 'the chosen day'} is confirmed.`);
+    // When staff decide, the admin is told who did it.
+    if (req.user.role === 'staff') {
+      const admins = await User.find({ societyId: booking.societyId, role: 'society_admin', isActive: true }).select('_id');
+      await safeNotifyMany(req.app.get('io'), admins.map((a) => a._id), {
+        societyId: booking.societyId,
+        type: 'booking_request',
+        title: 'Booking approved by staff',
+        message: `${req.user.name} approved ${booking.amenity} on ${booking.dateStr || ''}`.trim(),
+        relatedId: booking._id,
+        relatedModel: 'Booking',
+        actionUrl: '/bookings',
+        priority: 'low'
+      });
+    }
+    res.json({ success: true, booking, message: booking.amount > 0 ? `Booking approved. ${rupees(booking.amount)} added to the resident's payments.` : 'Booking approved' });
   } catch (error) {
     serverError(res, error, 'Approve booking');
   }
 });
 
 // @route   PUT /api/bookings/:id/reject
-router.put('/:id/reject', protect, authorize('society_admin', 'super_admin'), [body('reason').optional().isString().isLength({ max: 200 })], async (req, res) => {
+router.put('/:id/reject', protect, authorize(...DECIDERS), [body('reason').optional().isString().isLength({ max: 200 })], async (req, res) => {
   try {
     if (invalid(req, res)) return undefined;
     const reason = (req.body.reason || '').trim() || 'No reason given';
     const booking = await decide(req.params.id, ACTIVE, { status: 'rejected', rejectedReason: reason, slotKeys: [] });
     if (!booking) return notFoundOrDecided(res, req.params.id);
+    await settleBill(booking);
 
     await tell(req, booking, { type: 'booking_rejected', title: 'Booking not approved', message: `Your ${booking.amenity} booking was not approved: ${reason}`, priority: 'high', sms: true, email: true });
     res.json({ success: true, booking, message: 'Booking rejected' });
@@ -409,9 +490,10 @@ router.put('/:id/cancel', protect, authorize('resident', 'society_admin', 'super
     const reason = (req.body.reason || '').trim() || (byAdmin ? 'Cancelled by the society office' : 'Cancelled by resident');
     const booking = await decide(current._id, ACTIVE, { status: 'cancelled', cancellationReason: reason, cancelledAt: new Date(), slotKeys: [] });
     if (!booking) return notFoundOrDecided(res, current._id);
+    const settled = await settleBill(booking);
 
     if (byAdmin) {
-      await tell(req, booking, { type: 'booking_rejected', title: 'Booking cancelled', message: `Your ${booking.amenity} booking was cancelled: ${reason}`, priority: 'high', sms: true, email: true });
+      await tell(req, booking, { type: 'booking_rejected', title: 'Booking cancelled', message: `Your ${booking.amenity} booking was cancelled: ${reason}${settled === 'refund' ? ' The office will return your payment.' : ''}`, priority: 'high', sms: true, email: true });
     } else {
       const admins = await User.find({ societyId: booking.societyId, role: 'society_admin', isActive: true }).select('_id');
       await safeNotifyMany(req.app.get('io'), admins.map((a) => a._id), {
@@ -425,7 +507,7 @@ router.put('/:id/cancel', protect, authorize('resident', 'society_admin', 'super
         priority: 'low'
       });
     }
-    res.json({ success: true, booking, message: 'Booking cancelled' });
+    res.json({ success: true, booking, message: settled === 'refund' ? 'Booking cancelled. The payment is marked refunded; the office will return it.' : 'Booking cancelled' });
   } catch (error) {
     serverError(res, error, 'Cancel booking');
   }

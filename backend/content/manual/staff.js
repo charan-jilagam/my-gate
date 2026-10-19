@@ -8,7 +8,7 @@ module.exports = {
       title: 'How to sign in',
       covers: ['/login', '/forgot-password', '/register'],
       summary: 'Sign in and find your way around.',
-      steps: ['Sign in with your email and password. A new account must be approved by the society office first.', 'Use Forgot password if you cannot remember it.', 'The menu shows only what you can use: Home, People, My shifts, Upkeep, Complaints, Notices and Documents.'],
+      steps: ['Sign in with your email and password. A new account must be approved by the society office first.', 'Use Forgot password if you cannot remember it.', 'The menu shows only what you can use: Home, People, Amenities, My shifts, Upkeep, Complaints, Notices and Documents.'],
       tips: []
     },
     {
@@ -28,6 +28,15 @@ module.exports = {
       summary: 'Let new residents in as soon as you know them.',
       steps: ['Open People. New residents who signed up are listed with their flat and phone number.', 'Tap Approve once you know the person. They get an email at once and can sign in.', 'The admin is told that you approved them. Guards, staff and vendors, and rejections, are for the admin only.'],
       tips: ['If you do not recognise someone, leave them for the admin.']
+    },
+    {
+      id: 'amenity-requests',
+      title: 'Amenity booking requests',
+      path: '/bookings',
+      covers: ['/bookings'],
+      summary: 'Approve or reject requests for shared spaces.',
+      steps: ['Open Amenities. Waiting requests show the amenity, day, time, resident and amount.', 'Tap Approve, or Reject and give a reason. The resident is told at once.', 'When you approve a booking that has a price, the amount is added to the resident\'s Payments and they are told to pay. The admin is told that you approved it.'],
+      tips: ['If two requests clash, approve one and reject the other.']
     },
     {
       id: 'shifts',

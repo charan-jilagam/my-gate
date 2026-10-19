@@ -3,6 +3,8 @@
 // so the server never needs a paid map key. Everything here fails soft: a slow or blocked service gives a clear
 // message and a retry, never a broken page.
 
+import api from '../services/api'
+
 // One entry per kind of place. `match` is a list of OpenStreetMap tag filters; a place is included when any one fits.
 export const CATEGORIES = [
   { key: 'supermarket', label: 'Supermarkets', short: 'Shops', emoji: '🛒', tone: 'brand', match: ['["shop"="supermarket"]', '["shop"="convenience"]', '["shop"="grocery"]', '["shop"="mall"]', '["shop"="department_store"]'] },
@@ -78,10 +80,26 @@ export const parsePlaces = (elements, category, centre) => {
 const cache = new Map()
 const TTL = 10 * 60 * 1000
 
+// Ask our own server first: it asks several free map services for us and remembers answers, so it is quicker and
+// far more reliable than a phone talking to one busy public server. If our server cannot, try the public one directly.
+const viaServer = async (category, centre, radius, signal) => {
+  const { data } = await api.get('/nearby/places', { params: { category: category.key, lat: centre.lat, lng: centre.lng, radius }, signal, timeout: 40000 })
+  return (data.places || []).map((p) => ({ ...p, open24: /^24\/7$/.test(p.hours || '') }))
+}
+
 export const findPlaces = async (category, centre, radius, { signal } = {}) => {
   const key = `${category.key}|${centre.lat.toFixed(4)}|${centre.lng.toFixed(4)}|${radius}`
   const hit = cache.get(key)
   if (hit && Date.now() - hit.at < TTL) return hit.places
+  try {
+    const places = await viaServer(category, centre, radius, signal)
+    cache.set(key, { at: Date.now(), places })
+    return places
+  } catch (e) {
+    if (e.code === 'ERR_CANCELED' || e.name === 'AbortError') throw e
+    // The society has no pin yet, or the request itself was wrong: asking elsewhere will not help.
+    if ([400, 401, 403, 409].includes(e.response?.status)) throw new Error(e.response.data?.message || 'Could not load places.')
+  }
   const body = `data=${encodeURIComponent(buildQuery(category, centre, radius))}`
   let lastError
   for (const url of ENDPOINTS) {

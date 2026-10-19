@@ -271,3 +271,82 @@ describe('approving, rejecting and cancelling', () => {
     expect(String(h.savedDocs(Notification)[0].userId)).toBe(String(resident._id));
   });
 });
+
+describe('paying for an approved booking, and staff deciding', () => {
+  const Payment = h.models.Payment || require('../models/Payment');
+  let staff;
+  const makeBooking = (over = {}) =>
+    new Booking({ _id: h.oid(), residentId: resident._id, societyId: h.SOCIETY_ID, amenity: 'Clubhouse', dateStr: day(), slotDate: new Date(), startTime: new Date(Date.now() + 2 * 864e5), endTime: new Date(Date.now() + 2 * 864e5 + 36e5), flatNo: '101', amount: 1000, status: 'pending', ...over });
+  const knowBooking = (b) => {
+    let n = 0;
+    mockingoose(Booking).toReturn(() => (n++ < 2 ? b : null), 'findOne');
+    mockingoose(Booking).toReturn(makeBooking({ _id: b._id, status: 'approved', amount: b.amount }), 'findOneAndUpdate');
+  };
+
+  beforeEach(() => {
+    staff = h.makeUser({ role: 'staff', name: 'Sunil Staff', flatNo: undefined, block: undefined });
+    h.knowUsers(resident, admin, staff);
+  });
+
+  test('approval adds the amount to the resident\'s payments and tells them to pay', async () => {
+    const b = makeBooking();
+    knowBooking(b);
+    const res = await h.api().put(`/api/bookings/${b._id}/approve`).set(h.auth(admin));
+    expect(res.status).toBe(200);
+    expect(res.body.message).toMatch(/₹1,000/);
+    const [bill] = h.savedDocs(Payment);
+    expect(bill).toMatchObject({ amount: 1000, type: 'amenity_booking', status: 'pending' });
+    expect(String(bill.residentId)).toBe(String(resident._id));
+    expect(bill.description).toMatch(/Clubhouse/);
+    const note = h.savedDocs(Notification).find((n) => String(n.userId) === String(resident._id));
+    expect(note).toMatchObject({ type: 'booking_approved', relatedModel: 'Payment', priority: 'high' });
+    expect(note.title).toMatch(/pay ₹1,000/);
+    expect(note.actionUrl).toBe(`/payments?highlight=${bill._id}`);
+  });
+
+  test('a free booking creates no bill', async () => {
+    const b = makeBooking({ amount: 0 });
+    knowBooking(b);
+    await h.api().put(`/api/bookings/${b._id}/approve`).set(h.auth(admin));
+    expect(h.savedDocs(Payment)).toHaveLength(0);
+    expect(h.savedDocs(Notification).find((n) => String(n.userId) === String(resident._id)).actionUrl).toBe('/bookings');
+  });
+
+  test('an instant booking is billed straight away', async () => {
+    knowAmenities(amenity({ requiresApproval: false }));
+    const res = await h.api().post('/api/bookings').set(h.auth(resident)).send({ amenity: 'Clubhouse', date: day(), startTime: '18:00', endTime: '20:00' });
+    expect(res.status).toBe(201);
+    expect(h.savedDocs(Payment)[0]).toMatchObject({ amount: 1000, type: 'amenity_booking' });
+    expect(res.body.message).toMatch(/pay ₹1,000/i);
+  });
+
+  test('staff can approve a booking, and the admin is told', async () => {
+    const b = makeBooking();
+    knowBooking(b);
+    const res = await h.api().put(`/api/bookings/${b._id}/approve`).set(h.auth(staff));
+    expect(res.status).toBe(200);
+    const toAdmin = h.savedDocs(Notification).find((n) => String(n.userId) === String(admin._id));
+    expect(toAdmin).toMatchObject({ title: 'Booking approved by staff' });
+    expect(toAdmin.message).toMatch(/Sunil Staff/);
+    expect(h.savedDocs(Payment)).toHaveLength(1);
+  });
+
+  test('staff can reject, and see the requests', async () => {
+    const b = makeBooking();
+    mockingoose(Booking).toReturn(makeBooking({ _id: b._id, status: 'rejected' }), 'findOneAndUpdate');
+    expect((await h.api().put(`/api/bookings/${b._id}/reject`).set(h.auth(staff)).send({ reason: 'Event' })).status).toBe(200);
+    mockingoose(Booking).toReturn([b], 'find');
+    expect((await h.api().get('/api/bookings').set(h.auth(staff))).status).toBe(200);
+  });
+
+  test('guards cannot approve bookings', async () => {
+    const guard = h.makeUser({ role: 'security', flatNo: undefined, block: undefined });
+    h.knowUsers(guard);
+    expect((await h.api().put(`/api/bookings/${h.oid()}/approve`).set(h.auth(guard))).status).toBe(403);
+  });
+
+  test('new booking requests reach staff as well as the admin', () => {
+    const src = require('fs').readFileSync(require('path').join(__dirname, '../routes/bookings.js'), 'utf8');
+    expect(src).toMatch(/\['society_admin', 'staff'\]/);
+  });
+});

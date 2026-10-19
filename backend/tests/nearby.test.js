@@ -47,3 +47,77 @@ describe('society address and 1 km area', () => {
     expect((await h.api().get('/api/nearby/home')).status).toBe(401);
   });
 });
+
+describe('finding places nearby', () => {
+  const { clearCache } = require('../utils/nearbyPlaces');
+  const real = global.fetch;
+  const overpass = (elements) => ({ ok: true, status: 200, json: async () => ({ elements }) });
+  const nominatim = (list) => ({ ok: true, status: 200, json: async () => list });
+  const pumps = [
+    { type: 'node', id: 2, lat: 17.395, lon: 78.4867, tags: { name: 'Far Petrol', opening_hours: '24/7' } },
+    { type: 'node', id: 1, lat: 17.386, lon: 78.4867, tags: { name: 'Near Petrol', phone: '+91 40 1111 2222', 'addr:street': 'MG Road' } },
+    { type: 'way', id: 3, center: { lat: 17.386, lon: 78.4868 }, tags: {} }
+  ];
+  const get = (qs, who = 'resident') => h.api().get(`/api/nearby/places?${qs}`).set(h.auth(as(who)));
+
+  beforeEach(() => {
+    clearCache();
+    h.knowSociety({ name: 'Sunrise', location: { lat: 17.385, lng: 78.4867, radiusMeters: 300 } });
+  });
+  afterEach(() => { global.fetch = real; });
+
+  test('lists the nearest places first, from the society pin', async () => {
+    global.fetch = jest.fn().mockResolvedValue(overpass(pumps));
+    const res = await get('category=fuel&radius=2000');
+    expect(res.status).toBe(200);
+    expect(res.body.places.map((p) => p.name)).toEqual(['Near Petrol', 'Petrol bunk (no name on map)', 'Far Petrol']);
+    expect(res.body.places[0]).toMatchObject({ name: 'Near Petrol', address: 'MG Road', phone: '+91 40 1111 2222' });
+    expect(res.body.places[0].distanceM).toBeLessThan(res.body.places[2].distanceM);
+    const query = decodeURIComponent(global.fetch.mock.calls[0][1].body);
+    expect(query).toContain('"amenity"="fuel"');
+    expect(query).toContain('around:2000,17.385,78.4867');
+  });
+
+  test('tries the next map server when the first fails', async () => {
+    global.fetch = jest.fn().mockRejectedValueOnce(new Error('timeout')).mockResolvedValue(overpass(pumps));
+    const res = await get('category=fuel');
+    expect(res.status).toBe(200);
+    expect(global.fetch).toHaveBeenCalledTimes(2);
+    expect(res.body.count).toBeGreaterThan(0);
+  });
+
+  test('falls back to the address search when every map server fails', async () => {
+    global.fetch = jest.fn().mockImplementation(async (url) => (String(url).includes('nominatim') ? nominatim([{ osm_type: 'node', osm_id: 9, lat: '17.386', lon: '78.4867', name: 'Shell Petrol Pump', display_name: 'Shell Petrol Pump, Madhapur, Hyderabad' }]) : { ok: false, status: 504 }));
+    const res = await get('category=fuel');
+    expect(res.status).toBe(200);
+    expect(res.body.places[0].name).toBe('Shell Petrol Pump');
+  });
+
+  test('says so plainly when nothing answers', async () => {
+    global.fetch = jest.fn().mockResolvedValue({ ok: false, status: 504 });
+    const res = await get('category=fuel');
+    expect(res.status).toBe(502);
+    expect(res.body.message).toMatch(/busy/i);
+  });
+
+  test('remembers the answer, and measures from the exact point asked', async () => {
+    global.fetch = jest.fn().mockResolvedValue(overpass(pumps));
+    await get('category=fuel&lat=17.3850&lng=78.4867');
+    const again = await get('category=fuel&lat=17.3853&lng=78.4867');
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    expect(again.body.places[0].name).toBe('Near Petrol');
+  });
+
+  test('refuses an unknown kind of place, and a society with no pin', async () => {
+    expect((await get('category=casino')).status).toBe(400);
+    h.knowSociety({ name: 'Sunrise' });
+    expect((await get('category=fuel')).status).toBe(409);
+  });
+
+  test('works for guards and staff, and needs a sign-in', async () => {
+    global.fetch = jest.fn().mockResolvedValue(overpass(pumps));
+    expect((await get('category=fuel', 'security')).status).toBe(200);
+    expect((await get('category=hospital', 'staff')).status).toBe(200);
+    expect((await h.api().get('/api/nearby/places?category=fuel')).status).toBe(401);
+  });
+});

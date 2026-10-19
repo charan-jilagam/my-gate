@@ -1,4 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
+import { clearApiCache } from '../utils/apiCache'
 import api from '../services/api'
 
 const AuthContext = createContext()
@@ -21,6 +22,7 @@ export const AuthProvider = ({ children }) => {
   const [token, setToken] = useState(localStorage.getItem('token'))
 
   const clearSession = useCallback(() => {
+    clearApiCache()
     localStorage.removeItem('token')
     setToken(null)
     setUser(null)
@@ -59,6 +61,7 @@ export const AuthProvider = ({ children }) => {
   const startSession = (newToken) => {
     localStorage.setItem('token', newToken)
     setLoading(true)
+    clearApiCache()
     setToken(newToken)
   }
 

@@ -84,7 +84,7 @@ def notif(page):
     page.goto(smoke.BASE + '/dashboard'); page.wait_for_selector('main')
     page.click('[aria-label^="Notifications"]')
     page.click('text=Raj is at the gate')
-    page.wait_for_url('**/visitors')
+    page.wait_for_url('**/visitors?highlight=abc123')   # the list opens and the item is flashed
 
 def gate_check(page):
     page.goto(smoke.BASE + '/daily-help'); page.wait_for_selector('[aria-label="Helper code"]')
@@ -296,8 +296,20 @@ def verify_flow(page):
     sent = [b for m, p, b in posts if p == '/auth/otp/verify']
     assert sent and sent[-1] == dict(email='asha@example.com', emailCode='123456', phoneCode='654321'), sent
 
+def no_flash(page):
+    # Visit two screens once, then switch back and forth: nothing that is already known may flash a loader.
+    page.goto(smoke.BASE + '/dashboard'); page.wait_for_selector('main'); page.wait_for_timeout(1500)
+    nav = lambda href: page.locator(f'a[href="{href}"]:visible').first
+    nav('/payments').click(); page.wait_for_url('**/payments'); page.wait_for_timeout(800)
+    nav('/dashboard').click(); page.wait_for_url('**/dashboard'); page.wait_for_timeout(800)
+    page.evaluate("""() => { window.__flash = 0; new MutationObserver((ms) => { for (const m of ms) for (const n of m.addedNodes) if (n.nodeType === 1 && (n.matches?.('.skeleton, .loader-ring, .spinner') || n.querySelector?.('.skeleton, .loader-ring, .spinner'))) window.__flash++ }).observe(document.body, { childList: true, subtree: true }) }""")
+    for href in ['/payments', '/dashboard', '/payments', '/dashboard']:
+        nav(href).click(); page.wait_for_url('**' + href); page.wait_for_timeout(300)
+    flashes = page.evaluate('window.__flash')
+    assert flashes == 0, f'a loader flashed {flashes} times while switching between screens already visited'
+
 def main():
-  for role, name, fn in [('resident', 'book service', book_service), ('resident', 'amenity booking', amenity), ('resident', 'SOS', sos), ('resident', 'RSVP', rsvp), ('resident', 'notification deep link', notif), ('security', 'gate check', gate_check),
+  for role, name, fn in [('resident', 'book service', book_service), ('resident', 'amenity booking', amenity), ('resident', 'SOS', sos), ('resident', 'RSVP', rsvp), ('resident', 'notification deep link', notif), ('resident', 'switching screens does not flash a loader', no_flash), ('security', 'gate check', gate_check),
                          ('resident', 'language switch', language), ('resident', 'data and headings translate and restore', translate_data), ('resident', 'guide is role-only and searchable', help_isolation), ('resident', 'guide is translated and searchable in Telugu', guide_in_telugu), ('society_admin', 'admin guide', help_admin),
                          ('resident', 'cast a vote', vote), ('staff', 'mark upkeep done', mark_done), ('society_admin', 'add shifts', add_shift),
                          ('society_admin', 'create a vote', new_vote), ('society_admin', 'add a document', add_document),

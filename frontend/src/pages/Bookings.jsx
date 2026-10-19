@@ -1,6 +1,8 @@
 import { useMemo, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { FiCalendar, FiCheck, FiPlus, FiX } from 'react-icons/fi'
 import { useAuth } from '../contexts/AuthContext'
+import { useT } from '../contexts/LanguageContext'
 import api from '../services/api'
 import useApi from '../hooks/useApi'
 import useAction from '../hooks/useAction'
@@ -101,7 +103,10 @@ const SlotGrid = ({ amenity, date, onDate, picked, onPick, today, refreshKey }) 
 }
 
 const Bookings = () => {
-  const { user, isResident, isAdmin } = useAuth()
+  const { t } = useT()
+  const { user, isResident, isAdmin: isOfficeAdmin } = useAuth()
+  // Staff can approve and reject booking requests too. Only the admin sets up the amenities.
+  const isAdmin = isOfficeAdmin || user?.role === 'staff'
   const canManage = user?.role === 'society_admin'
   const [view, setView] = useState('bookings')
   const { data, loading, error, reload } = useApi('/bookings', { params: { limit: 100 }, select: (d) => d.bookings || [] })
@@ -158,6 +163,22 @@ const Bookings = () => {
     { key: 'time', header: 'Time', render: timeRange },
     { key: 'amount', header: 'Amount', render: (b) => (b.amount ? formatINR(b.amount) : 'No charge') },
     { key: 'status', header: 'Status', render: (b) => <StatusTag status={b.status} /> },
+    ...(isResident || isAdmin ? [{
+      key: 'pay',
+      header: 'Payment',
+      render: (b) => {
+        if (!b.amount) return <span className="text-muted">-</span>
+        const st = b.paymentId?.status
+        if (st === 'completed') return <StatusTag status="completed" label="Paid" />
+        if (st === 'refunded') return <StatusTag status="refunded" label="Refunded" />
+        if (st === 'pending' || st === 'processing') {
+          return isResident
+            ? <Link className="btn-primary btn-sm" to={`/payments?highlight=${b.paymentId._id || b.paymentId}`}>{t('Pay')} {formatINR(b.amount)}</Link>
+            : <StatusTag status="pending" label="Waiting for payment" />
+        }
+        return <span className="text-sm text-muted">{b.status === 'pending' ? 'Due after approval' : '-'}</span>
+      }
+    }] : []),
     {
       key: 'actions',
       header: 'Actions',

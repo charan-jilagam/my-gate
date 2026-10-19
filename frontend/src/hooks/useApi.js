@@ -1,31 +1,40 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import api from '../services/api'
 import { useSocket } from '../contexts/SocketContext'
+import { remember, remembered } from '../utils/apiCache'
 
 /**
  * GET data with loading and error state.
+ * - Shows the last known data straight away (and refreshes it in the background), so moving between screens does not flash.
  * - Keeps showing the old data while reloading, so lists do not flash.
  * - Reloads when a live notification arrives, so pages update without a manual refresh.
  */
 const useApi = (path, { params, select = (d) => d, enabled = true, live = true } = {}) => {
   const { lastNotification } = useSocket()
-  const [data, setData] = useState(null)
-  const [loading, setLoading] = useState(enabled)
-  const [error, setError] = useState('')
   const selectRef = useRef(select)
   selectRef.current = select
   const paramsKey = JSON.stringify(params || {})
+  const resourceKey = `${path}?${paramsKey}`
+
+  const [data, setData] = useState(() => {
+    const hit = remembered(resourceKey, enabled)
+    return hit ? select(hit.raw) : null
+  })
+  const [loading, setLoading] = useState(() => enabled && !remembered(resourceKey, enabled))
+  const [error, setError] = useState('')
 
   // Switching to a different resource (say, opening another complaint) must not show the previous one's data.
-  const resourceKey = `${path}?${paramsKey}`
   const lastResource = useRef(resourceKey)
   // React re-renders right after a state update made while rendering, but this pass still runs to the end.
   // So this pass must also *return* the reset values, or a caller could read old data (or null) with a stale loading flag.
   const switched = lastResource.current !== resourceKey
+  let fresh = null
   if (switched) {
     lastResource.current = resourceKey
-    setData(null)
-    setLoading(enabled)
+    const hit = remembered(resourceKey, enabled)
+    fresh = { data: hit ? select(hit.raw) : null, loading: enabled && !hit }
+    setData(fresh.data)
+    setLoading(fresh.loading)
     setError('')
   }
 
@@ -33,6 +42,7 @@ const useApi = (path, { params, select = (d) => d, enabled = true, live = true }
     async (signal) => {
       try {
         const res = await api.get(path, { params: JSON.parse(paramsKey), signal })
+        remember(`${path}?${paramsKey}`, res.data)
         setData(selectRef.current(res.data))
         setError('')
       } catch (err) {
@@ -53,7 +63,7 @@ const useApi = (path, { params, select = (d) => d, enabled = true, live = true }
   }, [load, enabled, live ? lastNotification : null])
 
   const reload = useCallback(() => load(), [load])
-  return switched ? { data: null, loading: enabled, error: '', reload, setData } : { data, loading, error, reload, setData }
+  return switched ? { data: fresh.data, loading: fresh.loading, error: '', reload, setData } : { data, loading, error, reload, setData }
 }
 
 export default useApi

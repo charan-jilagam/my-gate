@@ -114,7 +114,8 @@ module.exports = {
         'Tap Book amenity, choose the amenity and a day. Free slots appear; tap one or several in a row (up to the limit shown).',
         'The price is worked out for you. Add the number of guests and any notes, then confirm.',
         'Some amenities confirm instantly; others wait for the office to approve. You are notified either way.',
-        'Use the filters to see your pending or approved bookings, and Cancel to release a slot you no longer need.'
+        'Use the filters to see your pending or approved bookings, and Cancel to release a slot you no longer need.',
+        'When a booking with a price is approved, the amount is added to Payments and you get a notification to pay. Tap Pay in the Payment column, or open Payments, and pay online.'
       ],
       tips: ['Greyed-out slots are taken, outside opening hours, or too far ahead. Hover or tap to see why.']
     },

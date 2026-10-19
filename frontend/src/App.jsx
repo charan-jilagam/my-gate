@@ -88,7 +88,7 @@ function App() {
                 <Route path="/notices/:id" element={<Notices />} />
                 <Route path="/complaints" element={<Complaints />} />
                 <Route path="/payments" element={<PrivateRoute roles={['resident', ...ADMINS]}><Payments /></PrivateRoute>} />
-                <Route path="/bookings" element={<PrivateRoute roles={['resident', ...ADMINS]}><Bookings /></PrivateRoute>} />
+                <Route path="/bookings" element={<PrivateRoute roles={['resident', 'staff', ...ADMINS]}><Bookings /></PrivateRoute>} />
                 <Route path="/services" element={<PrivateRoute roles={['resident', ...ADMINS]}><Services /></PrivateRoute>} />
                 <Route path="/services/providers/:id" element={<PrivateRoute roles={['resident', ...ADMINS]}><ServiceProvider /></PrivateRoute>} />
                 <Route path="/services/requests" element={<PrivateRoute roles={['resident', 'vendor', ...ADMINS]}><ServiceRequests /></PrivateRoute>} />

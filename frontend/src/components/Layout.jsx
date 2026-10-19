@@ -1,5 +1,6 @@
 import { imgSrc } from '../utils/media'
 import { Suspense, useCallback, useEffect, useRef, useState } from 'react'
+import { preloadPages } from '../preload'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import ErrorBoundary from './ErrorBoundary'
 import {
@@ -119,7 +120,7 @@ const NAV = {
     { items: [I.guide] }
   ],
   staff: [
-    { items: [I.home, I.people, I.shifts, I.swaps, I.upkeep, I.complaints, I.notices, I.nearby, I.documents] },
+    { items: [I.home, I.people, I.bookings, I.shifts, I.swaps, I.upkeep, I.complaints, I.notices, I.nearby, I.documents] },
     { items: [I.guide] }
   ],
   vendor: [
@@ -135,7 +136,7 @@ const TABS = {
   guard_admin: [I.home, I.gate, I.live, I.roster],
   society_admin: [I.home, I.people, I.visitors, I.complaints],
   super_admin: [I.home, I.societies, I.people, I.complaints],
-  staff: [I.home, I.people, I.shifts, I.complaints],
+  staff: [I.home, I.people, I.bookings, I.shifts],
   vendor: [I.jobs, I.schedule, I.notices]
 }
 
@@ -359,6 +360,17 @@ const Notifications = () => {
   )
 }
 
+// A screen's code normally arrives instantly (it is loaded ahead of time). If it is slow, wait a moment before
+// showing a loader, so a quick switch never flashes one.
+const DelayedLoader = () => {
+  const [show, setShow] = useState(false)
+  useEffect(() => {
+    const t = setTimeout(() => setShow(true), 350)
+    return () => clearTimeout(t)
+  }, [])
+  return show ? <BrandLoader compact text="Loading…" /> : <div className="min-h-[50vh]" aria-hidden="true" />
+}
+
 const Layout = () => {
   const { user, logout } = useAuth()
   const navigate = useNavigate()
@@ -368,6 +380,7 @@ const Layout = () => {
   const { t, lang, setLang } = useT()
 
   useEffect(() => setDrawer(false), [location.pathname])
+  useEffect(() => { preloadPages() }, [])
 
   const groups = NAV[user?.role] || [{ items: [I.home] }]
   const tabs = TABS[user?.role] || [I.home]
@@ -507,7 +520,7 @@ const Layout = () => {
       <main id="main" className="mx-auto w-full max-w-6xl px-4 pb-[calc(5.5rem+env(safe-area-inset-bottom))] pt-6 sm:px-6 sm:pt-8 lg:pb-8">
         {['security', 'guard_admin', 'staff'].includes(user?.role) && <DutyTracker />}
         <ErrorBoundary resetKey={location.pathname}>
-          <Suspense fallback={<BrandLoader compact text="Loading…" />}>
+          <Suspense fallback={<DelayedLoader />}>
             <div key={location.pathname} className="page-in"><Outlet /></div>
           </Suspense>
         </ErrorBoundary>

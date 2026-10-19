@@ -116,7 +116,7 @@ module.exports = {
       path: '/bookings',
       covers: ['/bookings'],
       summary: 'Approve or reject requests for shared spaces.',
-      steps: ['Pending bookings show amenity, date, time, guests and the amount. Approve or Reject (give a reason).', 'The system refuses overlapping bookings, also when you approve. A booking that needs your decision reaches you by text message and email, so you can answer quickly.', 'Open Our amenities, next to Booking requests, to add a space, change its hours, price, slot length or approval rule, close it for booking, or remove it. Every society has its own list.'],
+      steps: ['Pending bookings show amenity, date, time, guests and the amount. Approve or Reject (give a reason).', 'The system refuses overlapping bookings, also when you approve. A booking that needs your decision reaches you by text message and email, so you can answer quickly.', 'Open Our amenities, next to Booking requests, to add a space, change its hours, price, slot length or approval rule, close it for booking, or remove it. Every society has its own list.', 'When you approve a booking that has a price, the amount is added to the resident\'s Payments and they are told to pay. Staff can approve or reject requests too, and you are told when they do.'],
       tips: []
     },
     {
