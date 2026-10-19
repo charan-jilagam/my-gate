@@ -3,7 +3,7 @@ const path = require('path');
 const h = require('./helpers/harness');
 const { manuals } = require('../content/manual');
 
-const ROLES = ['resident', 'security', 'staff', 'vendor', 'society_admin', 'super_admin'];
+const ROLES = ['resident', 'security', 'guard_admin', 'staff', 'vendor', 'society_admin', 'super_admin'];
 
 beforeEach(() => h.reset());
 
@@ -87,7 +87,7 @@ describe('manual covers every screen in the menu', () => {
 
 describe('guide translations', () => {
   // The guide text is translated on screen from frontend/src/i18n/rows5.js, rows6.js and rows7.js; a new or reworded sentence without a row would silently stay English.
-  const rows = ['rows5.js', 'rows6.js', 'rows7.js'].map((f) => require('fs').readFileSync(require('path').join(__dirname, '../../frontend/src/i18n', f), 'utf8')).join('\n');
+  const rows = ['rows5.js', 'rows6.js', 'rows7.js', 'rows8.js'].map((f) => require('fs').readFileSync(require('path').join(__dirname, '../../frontend/src/i18n', f), 'utf8')).join('\n');
   const strings = new Set();
   const walk = (o) => {
     if (typeof o === 'string') strings.add(o.trim());

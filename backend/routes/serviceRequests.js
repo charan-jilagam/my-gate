@@ -1,4 +1,5 @@
 const express = require('express');
+const mongoose = require('mongoose');
 const router = express.Router();
 const { body, query, validationResult } = require('express-validator');
 const Society = require('../models/Society');
@@ -77,8 +78,29 @@ const tell = (req, userId, request, { title, message, priority = 'medium', sms =
     email
   });
 
-const respond = (res, req, request, message, status = 200) =>
-  res.status(status).json({ success: true, message, request: presentRequest(request, { id: req.user.id, role: req.user.role }) });
+// How vendors have rated each of these residents: { residentId: { avg, count } }. Never fails the request it decorates.
+const residentScores = async (ids) => {
+  try {
+    const unique = [...new Set(ids.filter(Boolean).map(String))].filter((id) => mongoose.Types.ObjectId.isValid(id));
+    if (!unique.length) return {};
+    const rows = (await ServiceRequest.aggregate([
+      { $match: { residentId: { $in: unique.map((id) => new mongoose.Types.ObjectId(id)) }, residentRating: { $exists: true } } },
+      { $group: { _id: '$residentId', avg: { $avg: '$residentRating' }, n: { $sum: 1 } } }
+    ])) || [];
+    return Object.fromEntries(rows.map((r) => [String(r._id), { avg: roundRating(r.avg), count: r.n }]));
+  } catch (e) {
+    return {};
+  }
+};
+
+const respond = async (res, req, request, message, status = 200) => {
+  const scores = await residentScores([idOf(request.residentId)]);
+  return res.status(status).json({
+    success: true,
+    message,
+    request: presentRequest(request, { id: req.user.id, role: req.user.role }, { residentScore: scores[idOf(request.residentId)] })
+  });
+};
 
 // ---------------------------------------------------------------------------------------------
 // Create
@@ -183,7 +205,7 @@ router.post(
 
       // The creator needs the start code, which the schema hides by default.
       const full = await loadRequest(request._id, { withOtp: true });
-      respond(res, req, full, autoAccept ? 'Booked. Your vendor is confirmed.' : 'Request sent. You will be told when the vendor confirms.', 201);
+      await respond(res, req, full, autoAccept ? 'Booked. Your vendor is confirmed.' : 'Request sent. You will be told when the vendor confirms.', 201);
       return undefined;
     } catch (error) {
       return serverError(res, error, 'Create service request');
@@ -231,7 +253,8 @@ router.get(
         .limit(limit);
 
       const viewer = { id: req.user.id, role: req.user.role };
-      res.json({ success: true, count: requests.length, requests: requests.map((r) => presentRequest(r, viewer)) });
+      const scores = await residentScores(requests.map((r) => idOf(r.residentId)));
+      res.json({ success: true, count: requests.length, requests: requests.map((r) => presentRequest(r, viewer, { residentScore: scores[idOf(r.residentId)] })) });
     } catch (error) {
       serverError(res, error, 'List service requests');
     }
@@ -244,7 +267,8 @@ router.get('/:id', protect, authorize('resident', 'vendor', 'society_admin', 'su
     const request = await loadRequest(req.params.id, { withOtp: true });
     if (!request) return fail(res, 404, 'Request not found');
     if (!actorOf(req.user, request)) return fail(res, 403, 'This is not your request.');
-    res.json({ success: true, request: presentRequest(request, { id: req.user.id, role: req.user.role }) });
+    const scores = await residentScores([idOf(request.residentId)]);
+    res.json({ success: true, request: presentRequest(request, { id: req.user.id, role: req.user.role }, { residentScore: scores[idOf(request.residentId)] }) });
     return undefined;
   } catch (error) {
     return serverError(res, error, 'Get service request');
@@ -282,7 +306,7 @@ const step = ({ path, to, roles, validators = [], withOtp = false, apply, after,
       await request.save();
 
       if (after) await after(ctx);
-      respond(res, req, request, typeof message === 'function' ? message(ctx) : message);
+      await respond(res, req, request, typeof message === 'function' ? message(ctx) : message);
       return undefined;
     } catch (error) {
       if (error && error.name === 'ValidationError') return fail(res, 400, Object.values(error.errors)[0].message);
@@ -504,7 +528,7 @@ router.put(
         sms: needsReconfirm, // only a booking that needs the vendor to confirm again is worth a text
         email: true
       });
-      respond(res, req, request, needsReconfirm ? 'Moved. The vendor needs to confirm the new time.' : 'Moved to the new time.');
+      await respond(res, req, request, needsReconfirm ? 'Moved. The vendor needs to confirm the new time.' : 'Moved to the new time.');
       return undefined;
     } catch (error) {
       return serverError(res, error, 'Reschedule service request');
@@ -538,7 +562,7 @@ router.put(
         message: `${request.providerUserId.name} marked ₹${request.finalAmount || 0} as paid (${req.body.paymentMethod}).`,
         email: true
       });
-      respond(res, req, request, 'Marked as paid.');
+      await respond(res, req, request, 'Marked as paid.');
       return undefined;
     } catch (error) {
       return serverError(res, error, 'Mark service request paid');
@@ -604,7 +628,7 @@ router.post(
 
       const fresh = await loadRequest(request._id);
       await tell(req, fresh.providerUserId, fresh, { title: 'Paid online', message: `${fresh.residentId.name} paid ₹${fresh.finalAmount || 0} online for ${fresh.title}.`, sms: true, email: true });
-      respond(res, req, fresh, 'Payment received. Thank you!');
+      await respond(res, req, fresh, 'Payment received. Thank you!');
       return undefined;
     } catch (error) {
       return serverError(res, error, 'Verify service payment');
@@ -652,10 +676,51 @@ router.put(
         relatedModel: 'ServiceRequest',
         actionUrl: link(request)
       });
-      respond(res, req, request, 'Thanks for rating.');
+      await respond(res, req, request, 'Thanks for rating.');
       return undefined;
     } catch (error) {
       return serverError(res, error, 'Review service request');
+    }
+  }
+);
+
+// @route   PUT /api/service-requests/:id/rate-resident
+// @desc    The vendor rates the resident after a completed job (once). Other vendors and the office can see the score.
+router.put(
+  '/:id/rate-resident',
+  protect,
+  authorize('vendor'),
+  [
+    body('rating').isInt({ min: 1, max: 5 }).withMessage('Choose between 1 and 5 stars'),
+    body('review').optional({ nullable: true }).isString().isLength({ max: 300 }).withMessage('Keep the comment under 300 characters')
+  ],
+  async (req, res) => {
+    try {
+      if (invalid(req, res)) return undefined;
+      const request = await loadRequest(req.params.id);
+      if (!request) return fail(res, 404, 'Request not found');
+      if (idOf(request.providerUserId) !== String(req.user.id)) return fail(res, 403, 'This is not your job.');
+      if (request.status !== 'completed') return fail(res, 409, 'You can rate the resident once the job is completed.');
+      if (request.residentRating) return fail(res, 409, 'You have already rated this resident.');
+
+      request.residentRating = Number(req.body.rating);
+      request.residentReview = (req.body.review || '').trim() || undefined;
+      request.residentRatedAt = new Date();
+      await request.save();
+
+      await safeNotify(req.app.get('io'), idOf(request.residentId), {
+        societyId: request.societyId,
+        type: 'service_review',
+        title: `${firstName(request.providerUserId.name)} rated you ${request.residentRating} ${request.residentRating === 1 ? 'star' : 'stars'}`,
+        message: `For ${request.title}${request.residentReview ? `: "${request.residentReview.slice(0, 80)}"` : '.'}`,
+        relatedId: request._id,
+        relatedModel: 'ServiceRequest',
+        actionUrl: link(request)
+      });
+      await respond(res, req, request, 'Thanks for rating.');
+      return undefined;
+    } catch (error) {
+      return serverError(res, error, 'Rate resident');
     }
   }
 );

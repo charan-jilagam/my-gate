@@ -21,6 +21,9 @@ import {
   FiMessageSquare,
   FiMoon,
   FiMoreHorizontal,
+  FiMapPin,
+  FiRepeat,
+  FiNavigation,
   FiPackage,
   FiPieChart,
   FiShield,
@@ -38,6 +41,7 @@ import api from '../services/api'
 import { formatDate } from './ui'
 import { useT } from '../contexts/LanguageContext'
 import { LANGUAGES } from '../i18n/translations'
+import DutyTracker from './DutyTracker'
 
 const I = {
   home: { to: '/dashboard', icon: FiGrid, label: 'Home' },
@@ -64,6 +68,10 @@ const I = {
   upkeep: { to: '/upkeep', icon: FiTool, label: 'Upkeep' },
   roster: { to: '/roster', icon: FiClipboard, label: 'Duty roster' },
   shifts: { to: '/my-shifts', icon: FiClock, label: 'My shifts' },
+  swaps: { to: '/swaps', icon: FiRepeat, label: 'Shift swaps' },
+  attendance: { to: '/attendance', icon: FiCheckCircle, label: 'Attendance' },
+  live: { to: '/live', icon: FiNavigation, label: 'Guard tracking' },
+  posts: { to: '/guard-posts', icon: FiMapPin, label: 'Guard posts' },
   guide: { to: '/help', icon: FiBookOpen, label: 'User guide' }
 }
 
@@ -77,7 +85,14 @@ const NAV = {
     { items: [I.guide] }
   ],
   security: [
-    { items: [I.home, I.gate, I.shifts] },
+    { items: [I.home, I.gate, I.shifts, I.swaps] },
+    { title: 'Gate', items: [I.visitors, I.deliveries, I.vehicles, I.help] },
+    { title: 'Society', items: [I.notices, I.emergency, I.upkeep, I.documents] },
+    { items: [I.guide] }
+  ],
+  guard_admin: [
+    { items: [I.home, I.gate, I.shifts, I.swaps] },
+    { title: 'Guards', items: [I.roster, I.attendance, I.live, I.posts] },
     { title: 'Gate', items: [I.visitors, I.deliveries, I.vehicles, I.help] },
     { title: 'Society', items: [I.notices, I.emergency, I.upkeep, I.documents] },
     { items: [I.guide] }
@@ -86,7 +101,8 @@ const NAV = {
     { items: [I.home, I.people] },
     { title: 'Gate', items: [I.gate, I.visitors, I.deliveries, I.vehicles, I.help] },
     { title: 'Society', items: [I.notices, I.votes, I.complaints, I.community, I.bookings, I.adminServices, I.emergency] },
-    { title: 'Operations', items: [I.roster, I.upkeep, I.documents] },
+    { title: 'Guards', items: [I.roster, I.attendance, I.live, I.swaps, I.posts] },
+    { title: 'Operations', items: [I.upkeep, I.documents] },
     { title: 'Money', items: [I.payments, I.accounts] },
     { title: 'Setup', items: [I.societies] },
     { items: [I.guide] }
@@ -95,12 +111,13 @@ const NAV = {
     { items: [I.home, I.societies, I.people] },
     { title: 'Gate', items: [I.visitors, I.deliveries, I.vehicles, I.help] },
     { title: 'Society', items: [I.notices, I.votes, I.complaints, I.community, I.bookings, I.adminServices, I.emergency] },
-    { title: 'Operations', items: [I.roster, I.upkeep, I.documents] },
+    { title: 'Guards', items: [I.roster, I.attendance, I.live, I.swaps, I.posts] },
+    { title: 'Operations', items: [I.upkeep, I.documents] },
     { title: 'Money', items: [I.payments, I.accounts] },
     { items: [I.guide] }
   ],
   staff: [
-    { items: [I.home, I.shifts, I.upkeep, I.complaints, I.notices, I.documents] },
+    { items: [I.home, I.shifts, I.swaps, I.upkeep, I.complaints, I.notices, I.documents] },
     { items: [I.guide] }
   ],
   vendor: [
@@ -113,18 +130,21 @@ const NAV = {
 const TABS = {
   resident: [I.home, I.visitors, I.services, I.community],
   security: [I.home, I.gate, I.visitors, I.shifts],
+  guard_admin: [I.home, I.gate, I.live, I.roster],
   society_admin: [I.home, I.people, I.visitors, I.complaints],
   super_admin: [I.home, I.societies, I.people, I.complaints],
   staff: [I.home, I.shifts, I.upkeep, I.complaints],
   vendor: [I.jobs, I.schedule, I.notices]
 }
 
-// Notifications may carry a link to one record (/visitors/abc). Those pages are lists, so open the list.
-const LIST_PAGES = ['visitors', 'deliveries', 'vehicles', 'notices', 'complaints', 'payments', 'bookings', 'documents']
+// Notifications may carry a link to one record (/visitors/abc). Those pages are lists, so open the list and
+// highlight that record (?highlight=abc), so the person lands exactly on what the message was about.
+// A notice has its own page (/notices/abc), which opens that notice.
+const LIST_PAGES = ['visitors', 'deliveries', 'vehicles', 'complaints', 'payments', 'bookings', 'documents']
 export const resolveActionUrl = (url) => {
   if (!url || !url.startsWith('/')) return null
   const [, first, second] = url.split('?')[0].split('/')
-  if (LIST_PAGES.includes(first) && second) return `/${first}`
+  if (LIST_PAGES.includes(first) && second) return `/${first}?highlight=${encodeURIComponent(second)}`
   return url
 }
 
@@ -133,6 +153,7 @@ const ROLE_LABEL = {
   society_admin: 'Society admin',
   resident: 'Resident',
   security: 'Security',
+  guard_admin: 'Guard head',
   staff: 'Staff',
   vendor: 'Vendor'
 }
@@ -175,7 +196,7 @@ const NOTE_STYLE = {
   booking_request: [FiCalendar, 'brand'], booking_approved: [FiCheckCircle, 'good'], booking_rejected: [FiX, 'danger'],
   service_request: [FiTool, 'brand'], service_update: [FiTool, 'brand'], service_review: [FiTool, 'good'],
   daily_help: [FiUsers, 'brand'], election: [FiThumbsUp, 'brand'], document: [FiFolder, 'brand'],
-  facility: [FiClipboard, 'brand'], shift: [FiClock, 'brand']
+  facility: [FiClipboard, 'brand'], shift: [FiClock, 'brand'], shift_swap: [FiRepeat, 'brand'], attendance: [FiMapPin, 'amber']
 }
 const TONE = {
   brand: 'bg-brand-soft text-brand',
@@ -479,6 +500,7 @@ const Layout = () => {
       </header>
 
       <main id="main" className="mx-auto w-full max-w-6xl px-4 pb-[calc(5.5rem+env(safe-area-inset-bottom))] pt-6 sm:px-6 sm:pt-8 lg:pb-8">
+        {['security', 'guard_admin', 'staff'].includes(user?.role) && <DutyTracker />}
         <ErrorBoundary resetKey={location.pathname}><Outlet /></ErrorBoundary>
       </main>
 

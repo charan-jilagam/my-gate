@@ -4,7 +4,7 @@ const { body, validationResult } = require('express-validator');
 const Notice = require('../models/Notice');
 const { protect, authorize, checkSocietyAccess , scopeToSociety } = require('../middleware/auth');
 router.param('id', scopeToSociety(require('../models/Notice')));
-const { notifyUsers } = require('../utils/notifyUser');
+const { safeNotifyMany } = require('../utils/safeNotify');
 const User = require('../models/User');
 
 // A flat can be written as "101" or "A-101"; both match a resident in block A, flat 101.
@@ -122,17 +122,25 @@ router.post('/', protect, authorize('society_admin', 'super_admin'), [
         targetUsers = targetUsers.filter((u) => matchesFlat(u, flats));
       }
 
-      const userIds = targetUsers.map(u => u._id);
-      await notifyUsers(io, userIds, {
+      const note = {
         societyId,
         type: 'notice_published',
         title: `New ${type}: ${title}`,
-        message: content.substring(0, 100) + '...',
+        message: content.length > 100 ? `${content.substring(0, 100)}...` : content,
         relatedId: notice._id,
         relatedModel: 'Notice',
         actionUrl: `/notices/${notice._id}`,
         priority: priority || 'medium'
-      });
+      };
+      // A notification must never turn a notice that was saved into an error, so these are best effort.
+      await safeNotifyMany(io, targetUsers.map(u => u._id), note);
+
+      // Notices addressed to everyone also reach the guards, the guard head and staff, who read them on the same page.
+      // A notice for certain blocks or flats is only for those residents.
+      if (!targetAudience || targetAudience === 'all') {
+        const crew = await User.find({ societyId, role: { $in: ['security', 'guard_admin', 'staff'] }, isApproved: true, isActive: true }).select('_id');
+        await safeNotifyMany(io, (crew || []).map(u => u._id), note);
+      }
     }
 
     res.status(201).json({

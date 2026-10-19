@@ -14,9 +14,21 @@ const schema = new mongoose.Schema(
     startAt: { type: Date, required: true },
     endAt: { type: Date, required: true },
     post: { type: String, enum: POSTS, default: 'main_gate' },
+    // The guard post (a place the admin set up) this shift covers, when it came from one.
+    postId: { type: mongoose.Schema.Types.ObjectId, ref: 'GuardPost' },
+    postName: { type: String, trim: true, maxlength: 60 },
+    // Made by the auto-allocator rather than typed in by the office.
+    autoAllocated: { type: Boolean, default: false },
     note: { type: String, trim: true, maxlength: 200, default: '' },
     clockInAt: Date,
     clockOutAt: Date,
+    // Where the guard was when they started and finished, and how far that is from the post (or the society).
+    clockInLocation: { lat: Number, lng: Number, accuracy: Number, distanceM: Number, outside: Boolean },
+    clockOutLocation: { lat: Number, lng: Number, accuracy: Number, distanceM: Number, outside: Boolean },
+    // The newest GPS point while on duty, so the live map does not need to search the whole trail.
+    lastLocation: { lat: Number, lng: Number, accuracy: Number, at: Date },
+    // Set when the shift moved to another guard through an accepted swap.
+    swappedAt: Date,
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true }
   },
   { timestamps: true }
@@ -25,6 +37,7 @@ const schema = new mongoose.Schema(
 // The same person cannot be given the same start twice.
 schema.index({ userId: 1, date: 1, startTime: 1 }, { unique: true });
 schema.index({ societyId: 1, date: 1 });
+schema.index({ societyId: 1, startAt: 1, endAt: 1 });
 
 // scheduled / on_duty / completed / missed, from the clock and the punches.
 schema.methods.phase = function phase(now = new Date()) {

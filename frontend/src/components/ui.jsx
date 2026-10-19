@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
+import { useLocation } from 'react-router-dom'
 import { FiX, FiAlertCircle, FiInbox } from 'react-icons/fi'
+import { flashItem } from '../hooks/useHighlight'
 import { FaRegStar, FaStar } from 'react-icons/fa'
 import { imgSrc } from '../utils/media'
 import { useT } from '../contexts/LanguageContext'
@@ -248,6 +250,22 @@ export const DataList = ({ columns, rows, rowKey = (r) => r._id, loading, error,
   }, [page, pages])
   const shown = pageSize ? (rows || []).slice((page - 1) * pageSize, page * pageSize) : rows
 
+  // Opened from a notification (?highlight=<id>): go to the page that holds that record, scroll to it and flash it.
+  const { search } = useLocation()
+  const target = new URLSearchParams(search).get('highlight')
+  const targetIndex = target && rows ? rows.findIndex((r) => String(rowKey(r)) === target) : -1
+  useEffect(() => {
+    if (targetIndex < 0) return undefined
+    const want = pageSize ? Math.floor(targetIndex / pageSize) + 1 : 1
+    if (page !== want) {
+      setPage(want)
+      return undefined
+    }
+    const timer = setTimeout(() => flashItem(target), 150)
+    return () => clearTimeout(timer)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [targetIndex, target, page])
+
   if (loading) return <div className="panel"><ListSkeleton /></div>
   if (error) return <div className="panel"><ErrorState message={error} onRetry={onRetry} /></div>
   if (!rows?.length) return <div className="panel">{empty}</div>
@@ -266,7 +284,7 @@ export const DataList = ({ columns, rows, rowKey = (r) => r._id, loading, error,
         </thead>
         <tbody className="divide-y divide-line">
           {shown.map((row) => (
-            <tr key={rowKey(row)} className="align-middle transition-colors hover:bg-sunken/60">
+            <tr key={rowKey(row)} data-item-id={rowKey(row)} className="align-middle transition-colors hover:bg-sunken/60">
               {columns.map((c) => (
                 <td key={c.key} className={`px-4 py-3.5 text-sm ${c.className || ''}`}>
                   {c.render ? c.render(row) : row[c.key]}
@@ -279,7 +297,7 @@ export const DataList = ({ columns, rows, rowKey = (r) => r._id, loading, error,
 
       <ul className="divide-y divide-line md:hidden">
         {shown.map((row) => (
-          <li key={rowKey(row)} className="space-y-2 px-4 py-3.5">
+          <li key={rowKey(row)} data-item-id={rowKey(row)} className="space-y-2 px-4 py-3.5">
             {columns.map((c) => (
               <div key={c.key} className="flex items-start justify-between gap-4 text-sm">
                 <span className="shrink-0 text-muted">{c.header}</span>

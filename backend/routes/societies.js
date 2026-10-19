@@ -184,7 +184,7 @@ router.get('/:id/residents', protect, authorize('society_admin', 'super_admin'),
 
     const residents = await User.find({
       societyId: req.params.id,
-      role: { $in: ['resident', 'security', 'staff', 'vendor'] }
+      role: { $in: ['resident', 'security', 'guard_admin', 'staff', 'vendor'] }
     })
       .select('name email phone role flatNo block isApproved isActive rejectedAt createdAt')
       .sort({ role: 1, flatNo: 1 });

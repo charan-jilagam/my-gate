@@ -10,7 +10,7 @@ const dir = mkdtempSync(join(tmpdir(), 'i18n-'))
 const out = join(dir, 'bundle.mjs')
 await build({ entryPoints: ['src/i18n/translations.js'], bundle: true, format: 'esm', platform: 'node', outfile: out, logLevel: 'error' })
 const { DICTIONARIES, TEMPLATES } = await import(pathToFileURL(out).href)
-const rowFiles = await Promise.all(['rows1', 'rows2', 'rows3', 'rows4', 'rows5', 'rows6', 'rows7'].map(async (n) => {
+const rowFiles = await Promise.all(['rows1', 'rows2', 'rows3', 'rows4', 'rows5', 'rows6', 'rows7', 'rows8'].map(async (n) => {
   const f = join(dir, `${n}.mjs`)
   await build({ entryPoints: [`src/i18n/${n}.js`], bundle: true, format: 'esm', platform: 'node', outfile: f, logLevel: 'error' })
   return (await import(pathToFileURL(f).href)).default

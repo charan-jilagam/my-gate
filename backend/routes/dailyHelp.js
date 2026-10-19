@@ -106,7 +106,7 @@ const todaysRows = async (helpIds, date) => {
 
 // @route   GET /api/daily-help
 // @desc    Residents see the helpers who work for them; admins and guards see everyone in the society.
-router.get('/', protect, authorize('resident', 'society_admin', 'super_admin', 'security'), async (req, res) => {
+router.get('/', protect, authorize('resident', 'society_admin', 'super_admin', 'security', 'guard_admin'), async (req, res) => {
   try {
     const societyId = societyFor(req);
     if (!societyId) return res.json({ success: true, helpers: [] });
@@ -261,7 +261,7 @@ router.get('/:id/pass', protect, authorize('resident'), async (req, res) => {
 
 // @route   GET /api/daily-help/lookup/:code
 // @desc    The guard types or scans the helper's code and sees who it is and whether they are inside, before choosing check in or out.
-router.get('/lookup/:code', protect, authorize('security', 'society_admin', 'super_admin'), guessLimiter, async (req, res) => {
+router.get('/lookup/:code', protect, authorize('security', 'guard_admin', 'society_admin', 'super_admin'), guessLimiter, async (req, res) => {
   try {
     const societyId = societyFor(req);
     if (!societyId) return fail(res, 400, 'Choose a society first.');
@@ -285,7 +285,7 @@ router.get('/lookup/:code', protect, authorize('security', 'society_admin', 'sup
 
 // @route   POST /api/daily-help/check
 // @desc    The guard types the code the helper shows. First time of the day checks them in, the next checks them out.
-router.post('/check', protect, authorize('security', 'society_admin', 'super_admin'), guessLimiter, [body('code').trim().matches(/^\d{6}$/).withMessage('The code is 6 digits'), body('action').optional({ checkFalsy: true }).isIn(['in', 'out']).withMessage('Choose check in or check out')], async (req, res) => {
+router.post('/check', protect, authorize('security', 'guard_admin', 'society_admin', 'super_admin'), guessLimiter, [body('code').trim().matches(/^\d{6}$/).withMessage('The code is 6 digits'), body('action').optional({ checkFalsy: true }).isIn(['in', 'out']).withMessage('Choose check in or check out')], async (req, res) => {
   try {
     if (invalid(req, res)) return undefined;
     const societyId = societyFor(req);

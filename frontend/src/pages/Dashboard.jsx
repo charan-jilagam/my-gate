@@ -1,5 +1,5 @@
 import { Link, Navigate } from 'react-router-dom'
-import { FiAlertTriangle, FiArrowRight, FiBell, FiCalendar, FiCheckCircle, FiClipboard, FiClock, FiCreditCard, FiFileText, FiFolder, FiMessageSquare, FiPackage, FiPieChart, FiShield, FiThumbsUp, FiTool, FiUserPlus, FiUsers } from 'react-icons/fi'
+import { FiAlertTriangle, FiArrowRight, FiMapPin, FiPhone, FiRepeat, FiNavigation, FiBell, FiCalendar, FiCheckCircle, FiClipboard, FiClock, FiCreditCard, FiFileText, FiFolder, FiMessageSquare, FiPackage, FiPieChart, FiShield, FiThumbsUp, FiTool, FiUserPlus, FiUsers } from 'react-icons/fi'
 import { useAuth } from '../contexts/AuthContext'
 import { useT } from '../contexts/LanguageContext'
 import useApi from '../hooks/useApi'
@@ -55,6 +55,19 @@ const QUICK = {
   ]
 }
 QUICK.super_admin = QUICK.society_admin
+QUICK.guard_admin = [
+  { to: '/live', icon: FiNavigation, label: 'Where are my guards?' },
+  { to: '/roster', icon: FiClipboard, label: 'Duty roster' },
+  { to: '/attendance', icon: FiCheckCircle, label: 'Attendance' },
+  { to: '/swaps', icon: FiRepeat, label: 'Shift swaps' },
+  { to: '/gate', icon: FiShield, label: 'Gate console' },
+  { to: '/my-shifts', icon: FiClock, label: 'My shifts' },
+  { to: '/guard-posts', icon: FiMapPin, label: 'Guard posts' },
+  { to: '/emergency', icon: FiAlertTriangle, label: 'Alerts', danger: true }
+]
+QUICK.society_admin = [...QUICK.society_admin.slice(0, 7), { to: '/live', icon: FiNavigation, label: 'Guard tracking' }, ...QUICK.society_admin.slice(7)]
+QUICK.super_admin = QUICK.society_admin
+QUICK.security = [...QUICK.security.slice(0, 5), { to: '/swaps', icon: FiRepeat, label: 'Swap a shift' }, ...QUICK.security.slice(5)]
 
 const count = (d, key) => d?.count ?? d?.[key]?.length ?? 0
 
@@ -62,7 +75,8 @@ const Dashboard = () => {
   const { user, isResident, isAdmin, isSecurity } = useAuth()
   const { t } = useT()
   const role = user?.role
-  const sees = (...roles) => roles.includes(role)
+  // The guard head can do everything a guard can.
+  const sees = (...roles) => roles.includes(role) || (role === 'guard_admin' && roles.includes('security'))
 
   const visitorsPending = useApi('/visitors', { params: { status: 'pending', limit: 100 }, enabled: sees('resident', 'society_admin', 'super_admin') })
   const visitorsInside = useApi('/visitors', { params: { status: 'checked_in', limit: 100 }, enabled: sees('security', 'society_admin', 'super_admin') })
@@ -77,6 +91,8 @@ const Dashboard = () => {
   const votes = useApi('/elections', { enabled: isResident, select: (d) => d.elections || [] })
   const upkeep = useApi('/facility', { enabled: sees('society_admin', 'security', 'staff') })
   const shifts = useApi('/roster/mine', { enabled: sees('security', 'staff') })
+  const onDuty = useApi('/guards/on-duty', { enabled: isResident, select: (d) => d })
+  const swapsToAnswer = useApi('/guards/swaps', { enabled: sees('security', 'staff'), select: (d) => (d.swaps || []).filter((x) => x.canAccept) })
   const notifications = useApi('/users/notifications', { params: { limit: 6 }, select: (d) => d.notifications || [] })
 
   const pendingPaymentTotal = (paymentsPending.data?.payments || []).reduce((n, p) => n + (p.amount || 0), 0)
@@ -96,6 +112,7 @@ const Dashboard = () => {
     isSecurity && { n: count(visitorsExpected.data, 'visitors'), label: 'invited visitors expected', to: '/gate', cta: 'Open console' },
     isResident && { n: (votes.data || []).filter((e) => e.phase === 'open' && !e.voted).length, label: 'votes waiting for you', to: '/votes', cta: 'Vote' },
     sees('society_admin', 'security', 'staff') && { n: upkeep.data?.counts?.overdue || 0, label: 'upkeep jobs overdue', to: '/upkeep', cta: 'Open' },
+    sees('security', 'staff') && { n: swapsToAnswer.data?.length || 0, label: 'shift swap requests waiting for your answer', to: '/swaps', cta: 'Answer' },
     sees('security', 'staff') && { n: (shifts.data?.shifts || []).filter((x) => x.date === shifts.data.today && x.phase !== 'completed').length, label: 'shifts today', to: '/my-shifts', cta: 'Open' }
   ].filter((x) => x && x.n > 0)
 
@@ -131,6 +148,28 @@ const Dashboard = () => {
               </li>
             ))}
           </ul>
+        </section>
+      )}
+
+      {isResident && onDuty.data && (
+        <section aria-labelledby="duty-h" className="panel mb-6 p-4">
+          <h2 id="duty-h" className="mb-2 flex items-center gap-2 text-base font-bold"><FiShield className="text-brand" /> {t('Security on duty now')}</h2>
+          {!onDuty.data.onDuty?.length ? (
+            <p className="text-sm text-muted">{t('No guard is rostered right now. In an emergency call 112 or press SOS.')}</p>
+          ) : (
+            <ul className="divide-y divide-line">
+              {onDuty.data.onDuty.map((g) => (
+                <li key={g.userId} className="flex items-center gap-3 py-2.5">
+                  <div className="min-w-0 flex-1">
+                    <p className="font-semibold">{g.name}</p>
+                    <p className="text-xs text-muted">{g.postName || String(g.post || '').replace(/_/g, ' ')} · {t('until')} {g.endTime}{g.checkedIn ? '' : ` · ${t('not clocked in yet')}`}</p>
+                  </div>
+                  {g.phone && <a className="btn-secondary btn-sm" href={`tel:${g.phone}`} aria-label={`${t('Call')} ${g.name}`}><FiPhone size={14} /> {t('Call')}</a>}
+                </li>
+              ))}
+            </ul>
+          )}
+          {onDuty.data.head?.phone && <p className="mt-2 text-xs text-muted">{t('Head of security')}: {onDuty.data.head.name} · <a className="font-semibold text-brand" href={`tel:${onDuty.data.head.phone}`}>{onDuty.data.head.phone}</a></p>}
         </section>
       )}
 

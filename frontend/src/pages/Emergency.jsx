@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { FiAlertTriangle, FiPhone, FiPlus, FiTrash2 } from 'react-icons/fi'
+import { Link } from 'react-router-dom'
+import { FiAlertTriangle, FiPhone, FiPlus, FiTrash2, FiShield, FiUsers } from 'react-icons/fi'
 import { useAuth } from '../contexts/AuthContext'
 import api from '../services/api'
 import useApi from '../hooks/useApi'
@@ -43,9 +44,9 @@ const AlertRow = ({ alert: a, responder, busy, onAck, onResolve }) => (
 
 const Emergency = () => {
   const { user, isResident, isAdmin } = useAuth()
-  const responder = ['security', 'society_admin', 'super_admin'].includes(user?.role)
+  const responder = ['security', 'guard_admin', 'society_admin', 'super_admin'].includes(user?.role)
   const alerts = useApi('/emergency/alerts', { params: { limit: 30 }, select: (d) => d.alerts || [] })
-  const contacts = useApi('/emergency/contacts', { select: (d) => d.contacts || [] })
+  const contacts = useApi('/emergency/contacts')
   const { busy, run } = useAction(() => { alerts.reload(); contacts.reload() })
 
   const [sosOpen, setSosOpen] = useState(false)
@@ -86,6 +87,7 @@ const Emergency = () => {
             <div role="status">
               <p className="text-lg font-bold text-ok">{sent.repeated ? 'Your alert is already with the gate' : 'Alert sent'}</p>
               <p className="mt-1 text-sm">{sent.message}</p>
+              {sent.textedContacts > 0 && <p className="mt-1 text-xs text-muted">We also texted {sent.textedContacts} of your emergency contacts.</p>}
               <button className="btn-secondary mt-3" onClick={() => setSent(null)}>Done</button>
             </div>
           ) : (
@@ -120,23 +122,50 @@ const Emergency = () => {
         </section>
       )}
 
+      {!!contacts.data?.onDuty?.length && (
+        <section className="panel mb-6 p-4" aria-label="On duty now">
+          <p className="mb-2 flex items-center gap-2 font-bold"><FiShield className="text-brand" /> Security on duty now</p>
+          <ul className="divide-y divide-line">
+            {contacts.data.onDuty.map((g) => (
+              <li key={g.userId} className="flex items-center gap-3 py-2">
+                <div className="min-w-0 flex-1"><p className="font-semibold">{g.name}</p><p className="text-xs text-muted">{g.postName || String(g.post || '').replace(/_/g, ' ')} · until {g.endTime}{g.checkedIn ? '' : ' · not clocked in yet'}</p></div>
+                {g.phone && <a className="btn-secondary btn-sm" href={`tel:${g.phone}`}><FiPhone size={14} /> Call</a>}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {isResident && (
+        <section className="mb-6" aria-labelledby="pc-h">
+          <div className="mb-2 flex items-center justify-between"><h2 id="pc-h" className="flex items-center gap-2 text-base font-bold"><FiUsers /> My emergency contacts</h2><Link to="/profile" className="btn-secondary btn-sm">{contacts.data?.personal?.length ? 'Edit' : 'Add'}</Link></div>
+          {!contacts.data?.personal?.length ? <p className="panel px-4 py-4 text-sm text-muted">Add family or friends in your profile. We text them when you press SOS, and you can call them from here.</p> : (
+            <ul className="panel divide-y divide-line">
+              {contacts.data.personal.map((c) => (
+                <li key={c._id} className="flex items-center gap-3 px-4 py-3"><div className="min-w-0 flex-1"><p className="font-semibold">{c.name}</p><p className="text-xs text-muted">{c.relation}</p></div><a className="btn-primary btn-sm" href={`tel:${c.phone}`}><FiPhone size={14} /> {c.phone}</a></li>
+              ))}
+            </ul>
+          )}
+        </section>
+      )}
+
       <section aria-labelledby="ct-h">
         <div className="mb-2 flex items-center justify-between">
           <h2 id="ct-h" className="text-base font-bold">Important numbers</h2>
           {isAdmin && <button className="btn-secondary btn-sm" onClick={() => setContactForm({ name: '', phone: '', kind: 'police', note: '' })}><FiPlus size={14} /> Add</button>}
         </div>
-        {contacts.loading ? <div className="panel"><ListSkeleton rows={3} /></div> : contacts.error ? <div className="panel"><ErrorState message={contacts.error} onRetry={contacts.reload} /></div> : !contacts.data.length ? (
+        {contacts.loading ? <div className="panel"><ListSkeleton rows={3} /></div> : contacts.error ? <div className="panel"><ErrorState message={contacts.error} onRetry={contacts.reload} /></div> : !contacts.data.contacts.length ? (
           <div className="panel"><EmptyState icon={FiPhone} title="No numbers yet" text={isAdmin ? 'Add the police, fire brigade, ambulance, nearest hospital and your own security desk.' : 'The society office has not added any numbers yet. In an emergency call 112.'} /></div>
         ) : (
           <ul className="panel divide-y divide-line">
-            {contacts.data.map((c) => (
+            {contacts.data.contacts.map((c) => (
               <li key={c._id} className="flex items-center gap-3 px-4 py-3">
                 <div className="min-w-0 flex-1">
                   <p className="font-semibold">{c.name}</p>
                   <p className="text-xs text-muted">{KINDS.find((k) => k[0] === c.kind)?.[1]}{c.note ? ` · ${c.note}` : ''}</p>
                 </div>
                 <a className="btn-primary btn-sm" href={`tel:${c.phone}`} aria-label={`Call ${c.name}`}><FiPhone size={14} /> {c.phone}</a>
-                {isAdmin && (
+                {isAdmin && !c.dynamic && (
                   <>
                     <button className="btn-ghost btn-sm" onClick={() => setContactForm({ ...c })}>Edit</button>
                     <button className="btn-ghost btn-sm text-danger" aria-label={`Remove ${c.name}`} onClick={() => setRemoving(c)}><FiTrash2 size={14} /></button>

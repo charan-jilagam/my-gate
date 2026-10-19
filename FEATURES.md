@@ -218,3 +218,18 @@ Setup: email uses the same `EMAIL_*` settings as the verification codes. Text me
 4. Restart the backend and sign up with a mobile number. The code arrives as a text from your phone's SIM.
 
 Numbers without a country code get `+91`; change it with `SMS_DEFAULT_COUNTRY_CODE`. The free plan has daily and monthly limits that are shown on the TextBee dashboard, and each text uses your SIM's own SMS allowance. If the phone is off or offline the text is not sent, and the person can ask for a new code.
+
+## Guards, shifts and ratings (added)
+
+- **Guard head role** (`guard_admin`): head of all guards. Admins make a guard the head under People. Plans the roster, sees attendance, tracks guards, and gets shift-swap and attendance notifications along with the admin and other guards (never residents).
+- **Guard posts and society location** (`/guard-posts`): the admin sets the society pin and the places where guards are needed, with time slots and the number of guards for each.
+- **Automatic roster** (`/roster` → Plan automatically): preview, then create shifts from each guard's availability, with fair hours and rest between shifts.
+- **Availability** (`/my-shifts` → When I can work): days, hours and days off per guard.
+- **Shift swaps** (`/swaps`): guard 1 asks, guard 2 accepts or declines; both rosters change on accept. Admin, guard head and other guards are notified.
+- **Attendance** (`/attendance`, `/my-shifts`): on time, late, missed, hours worked, and clock-in distance from the post.
+- **Guard tracking** (`/live`): map of guards who are clocked in, last seen, distance from post. Location is recorded only while clocked in and only while the app is open on the guard's phone; points are deleted after 14 days.
+- **Who is on duty / dynamic emergency number**: residents see the guard on duty; the Security desk number follows the guard on duty.
+- **Personal emergency contacts** (Profile): up to 5 people, texted on SOS and callable from the Emergency screen.
+- **Ratings both ways**: residents rate vendors; vendors rate residents. Vendors get Top rated / Recommended badges, "Recommended" sort, and "You booked before".
+- **Notification links**: every notification opens the right screen and flashes the item; notices open at `/notices/:id`.
+- **Profile**: Sign out, and Change password is hidden until opened.

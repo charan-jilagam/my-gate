@@ -36,7 +36,7 @@ exports.protect = async (req, res, next) => {
       }
 
       // Residents, guards, staff and vendors can use the API only after an admin approves them.
-      if (['resident', 'security', 'staff', 'vendor'].includes(req.user.role) && !req.user.isApproved && req.user.isActive) {
+      if (['resident', 'security', 'guard_admin', 'staff', 'vendor'].includes(req.user.role) && !req.user.isApproved && req.user.isActive) {
         return res.status(403).json({
           success: false,
           message: 'Your account is pending approval from society admin'

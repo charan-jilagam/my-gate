@@ -27,6 +27,10 @@ const Profile = lazy(() => import('./pages/Profile'))
 const GateConsole = lazy(() => import('./pages/GateConsole'))
 const AdminResidents = lazy(() => import('./pages/AdminResidents'))
 const AdminSocieties = lazy(() => import('./pages/AdminSocieties'))
+const Swaps = lazy(() => import('./pages/Swaps'))
+const Attendance = lazy(() => import('./pages/Attendance'))
+const LiveGuards = lazy(() => import('./pages/LiveGuards'))
+const GuardPosts = lazy(() => import('./pages/GuardPosts'))
 const Services = lazy(() => import('./pages/Services'))
 const ServiceProvider = lazy(() => import('./pages/ServiceProvider'))
 const ServiceRequests = lazy(() => import('./pages/ServiceRequests'))
@@ -48,6 +52,7 @@ const Help = lazy(() => import('./pages/Help'))
 const NotFound = lazy(() => import('./pages/NotFound'))
 
 const ADMINS = ['society_admin', 'super_admin']
+const OFFICE = [...ADMINS, 'guard_admin']
 
 // Signed-in users have no reason to see the sign-in screens.
 const GuestOnly = ({ children }) => {
@@ -79,6 +84,7 @@ function App() {
                 <Route path="/deliveries" element={<Deliveries />} />
                 <Route path="/vehicles" element={<Vehicles />} />
                 <Route path="/notices" element={<Notices />} />
+                <Route path="/notices/:id" element={<Notices />} />
                 <Route path="/complaints" element={<Complaints />} />
                 <Route path="/payments" element={<PrivateRoute roles={['resident', ...ADMINS]}><Payments /></PrivateRoute>} />
                 <Route path="/bookings" element={<PrivateRoute roles={['resident', ...ADMINS]}><Bookings /></PrivateRoute>} />
@@ -91,21 +97,25 @@ function App() {
                 <Route path="/admin/services" element={<PrivateRoute roles={ADMINS}><AdminServices /></PrivateRoute>} />
                 <Route path="/community" element={<PrivateRoute roles={['resident', ...ADMINS]}><Community /></PrivateRoute>} />
                 <Route path="/community/:id" element={<PrivateRoute roles={['resident', ...ADMINS]}><CommunityPost /></PrivateRoute>} />
-                <Route path="/emergency" element={<PrivateRoute roles={['resident', 'security', ...ADMINS]}><Emergency /></PrivateRoute>} />
-                <Route path="/daily-help" element={<PrivateRoute roles={['resident', 'security', ...ADMINS]}><DailyHelp /></PrivateRoute>} />
+                <Route path="/emergency" element={<PrivateRoute roles={['resident', 'security', 'guard_admin', ...ADMINS]}><Emergency /></PrivateRoute>} />
+                <Route path="/daily-help" element={<PrivateRoute roles={['resident', 'security', 'guard_admin', ...ADMINS]}><DailyHelp /></PrivateRoute>} />
                 <Route path="/accounts" element={<PrivateRoute roles={['resident', ...ADMINS]}><Accounts /></PrivateRoute>} />
-                <Route path="/documents" element={<PrivateRoute roles={['resident', 'security', 'staff', ...ADMINS]}><Documents /></PrivateRoute>} />
+                <Route path="/documents" element={<PrivateRoute roles={['resident', 'security', 'guard_admin', 'staff', ...ADMINS]}><Documents /></PrivateRoute>} />
                 <Route path="/votes" element={<PrivateRoute roles={['resident', ...ADMINS]}><Votes /></PrivateRoute>} />
-                <Route path="/upkeep" element={<PrivateRoute roles={['resident', 'security', 'staff', ...ADMINS]}><Upkeep /></PrivateRoute>} />
-                <Route path="/roster" element={<PrivateRoute roles={ADMINS}><Roster /></PrivateRoute>} />
-                <Route path="/my-shifts" element={<PrivateRoute roles={['security', 'staff']}><MyShifts /></PrivateRoute>} />
+                <Route path="/upkeep" element={<PrivateRoute roles={['resident', 'security', 'guard_admin', 'staff', ...ADMINS]}><Upkeep /></PrivateRoute>} />
+                <Route path="/roster" element={<PrivateRoute roles={OFFICE}><Roster /></PrivateRoute>} />
+                <Route path="/swaps" element={<PrivateRoute roles={['security', 'guard_admin', 'staff', ...ADMINS]}><Swaps /></PrivateRoute>} />
+                <Route path="/attendance" element={<PrivateRoute roles={OFFICE}><Attendance /></PrivateRoute>} />
+                <Route path="/live" element={<PrivateRoute roles={OFFICE}><LiveGuards /></PrivateRoute>} />
+                <Route path="/guard-posts" element={<PrivateRoute roles={OFFICE}><GuardPosts /></PrivateRoute>} />
+                <Route path="/my-shifts" element={<PrivateRoute roles={['security', 'guard_admin', 'staff']}><MyShifts /></PrivateRoute>} />
                 <Route path="/help" element={<Help />} />
                 {/* Notification links point at one record; these pages are lists, so open the list. */}
-                {['visitors', 'deliveries', 'vehicles', 'notices', 'complaints', 'payments', 'bookings', 'documents'].map((base) => (
+                {['visitors', 'deliveries', 'vehicles', 'complaints', 'payments', 'bookings', 'documents'].map((base) => (
                   <Route key={base} path={`/${base}/:id`} element={<Navigate to={`/${base}`} replace />} />
                 ))}
                 <Route path="/profile" element={<Profile />} />
-                <Route path="/gate" element={<PrivateRoute roles={['security', ...ADMINS]}><GateConsole /></PrivateRoute>} />
+                <Route path="/gate" element={<PrivateRoute roles={['security', 'guard_admin', ...ADMINS]}><GateConsole /></PrivateRoute>} />
                 <Route path="/admin/residents" element={<PrivateRoute roles={ADMINS}><AdminResidents /></PrivateRoute>} />
                 <Route path="/admin/societies" element={<PrivateRoute roles={ADMINS}><AdminSocieties /></PrivateRoute>} />
                 <Route path="*" element={<NotFound />} />

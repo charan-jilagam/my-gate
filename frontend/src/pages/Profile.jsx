@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import toast from 'react-hot-toast'
+import { useNavigate } from 'react-router-dom'
+import { FiLogOut, FiChevronDown, FiChevronUp, FiLock } from 'react-icons/fi'
 import { useAuth } from '../contexts/AuthContext'
+import PersonalContacts from '../components/PersonalContacts'
 import api from '../services/api'
 import { Field, PageHeader, Spinner, errorMessage, titleCase } from '../components/ui'
 import { uploadImage } from '../components/ImageUpload'
@@ -8,7 +11,10 @@ import { imgSrc } from '../utils/media'
 import { currentSubscription, disablePush, enablePush, pushSupported } from '../utils/push'
 
 const Profile = () => {
-  const { user, refreshUser } = useAuth()
+  const { user, refreshUser, logout } = useAuth()
+  const navigate = useNavigate()
+  const [pwOpen, setPwOpen] = useState(false)
+  const signOut = () => { logout(); navigate('/login', { replace: true }) }
   const [profile, setProfile] = useState({ name: user?.name || '', phone: user?.phone || '' })
   const [savingProfile, setSavingProfile] = useState(false)
   const [profileError, setProfileError] = useState('')
@@ -281,8 +287,11 @@ const Profile = () => {
         </section>
 
         <section className="panel h-fit p-5">
-          <h2 className="mb-4 text-lg font-bold">Change password</h2>
-          <form onSubmit={changePassword} className="space-y-4">
+          <button type="button" className="flex w-full items-center gap-2 text-left" aria-expanded={pwOpen} onClick={() => setPwOpen(!pwOpen)}>
+            <FiLock className="text-brand" /><span className="flex-1 text-lg font-bold">Change password</span>{pwOpen ? <FiChevronUp /> : <FiChevronDown />}
+          </button>
+          {!pwOpen && <p className="mt-1 text-sm text-muted">Tap to change your password.</p>}
+          {pwOpen && <form onSubmit={changePassword} className="mt-4 space-y-4">
             <Field label="Current password" htmlFor="pw-current">
               <input id="pw-current" type="password" autoComplete="current-password" className="input" value={pw.currentPassword} onChange={(e) => setPw({ ...pw, currentPassword: e.target.value })} />
             </Field>
@@ -297,7 +306,13 @@ const Profile = () => {
               {savingPw && <Spinner className="h-4 w-4" />}
               Change password
             </button>
-          </form>
+          </form>}
+        </section>
+
+        {user?.role === 'resident' && <div className="lg:col-span-2"><PersonalContacts /></div>}
+        <section className="panel p-5 lg:col-span-2">
+          <button className="btn-danger w-full sm:w-auto" onClick={signOut}><FiLogOut size={16} /> Sign out</button>
+          <p className="mt-2 text-xs text-muted">You will need to sign in again on this phone.</p>
         </section>
         </div>
       </div>

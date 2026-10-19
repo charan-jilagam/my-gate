@@ -57,6 +57,7 @@ const documentRoutes = require('./routes/documents');
 const electionRoutes = require('./routes/elections');
 const facilityRoutes = require('./routes/facility');
 const rosterRoutes = require('./routes/roster');
+const guardRoutes = require('./routes/guards');
 const manualRoutes = require('./routes/manual');
 
 // Middleware
@@ -139,6 +140,7 @@ app.use('/api/documents', documentRoutes);
 app.use('/api/elections', electionRoutes);
 app.use('/api/facility', facilityRoutes);
 app.use('/api/roster', rosterRoutes);
+app.use('/api/guards', guardRoutes);
 app.use('/api/manual', manualRoutes);
 
 // Uploaded images (used only when Cloudinary is not configured). Images must be loadable from the frontend's origin.

@@ -112,6 +112,11 @@ const RequestActions = ({ request, onDone, size = 'md', className = '' }) => {
             <FiStar size={15} /> Rate this job
           </button>
         )}
+        {a.rateResident && (
+          <button className={`btn-primary${sm}`} disabled={!!busy} onClick={() => open('rateResident')}>
+            <FiStar size={15} /> Rate the resident
+          </button>
+        )}
         {a.reschedule && (
           <button className={`btn-secondary${sm}`} disabled={!!busy} onClick={() => open('reschedule')}>
             <FiRepeat size={15} /> Change time
@@ -310,6 +315,32 @@ const RequestActions = ({ request, onDone, size = 'md', className = '' }) => {
           {request.status === 'confirmed' ? ' The vendor may need to confirm the new time.' : ''}
         </p>
         {dialog === 'reschedule' && <SlotPicker providerId={request.provider.profileId} value={slot} onChange={setSlot} refreshKey={refresh} />}
+      </Modal>
+
+      {/* The vendor rates the resident */}
+      <Modal
+        open={dialog === 'rateResident'}
+        onClose={close}
+        title="How was the resident?"
+        size="sm"
+        footer={
+          <>
+            <button className="btn-secondary" onClick={close}>Later</button>
+            <button className="btn-primary" disabled={!rating || busy === 'rateResident'} onClick={() => submit('rateResident', () => api.put(`${base}/rate-resident`, { rating, review: text.trim() || undefined }), 'Thanks for rating')}>
+              {busy === 'rateResident' && <Spinner className="h-4 w-4" />} Submit
+            </button>
+          </>
+        }
+      >
+        <div className="space-y-4">
+          <p className="text-sm text-muted">Were they polite, ready on time and fair on payment? Other vendors see the average, and the resident sees your rating.</p>
+          <div className="flex justify-center py-1">
+            <StarInput value={rating} onChange={setRating} />
+          </div>
+          <Field label="Comments" htmlFor="ra-rr" hint="Optional.">
+            <textarea id="ra-rr" rows={3} maxLength={300} className="input" value={text} onChange={(e) => setText(e.target.value)} />
+          </Field>
+        </div>
       </Modal>
 
       {/* Review */}

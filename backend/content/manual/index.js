@@ -1,11 +1,20 @@
 // One manual per role. A user can only ever be given the manual for their own role.
+const x = require('./extra');
+const security = require('./security');
 const raw = {
-  resident: require('./resident'),
-  security: require('./security'),
-  staff: require('./staff'),
-  vendor: require('./vendor'),
-  society_admin: require('./society_admin'),
-  super_admin: require('./super_admin')
+  resident: (() => { const m = require('./resident'); return { ...m, sections: [...m.sections, x.onDuty, x.ratings, x.openLinks] }; })(),
+  security: { ...security, sections: [...security.sections, x.swaps, x.availability, x.clockLocation] },
+  guard_admin: {
+    ...security,
+    role: 'guard_admin',
+    title: 'Guard head guide',
+    intro: 'This guide is for the head of the guards. You run the guards\' roster, attendance and tracking, and do everything a guard can do at the gate.',
+    sections: [...security.sections, x.swaps, x.availability, x.clockLocation, x.roster, x.attendance, x.live, x.posts]
+  },
+  staff: (() => { const m = require('./staff'); return { ...m, sections: [...m.sections, x.swaps, x.availability, x.clockLocation] }; })(),
+  vendor: (() => { const m = require('./vendor'); return { ...m, sections: [...m.sections, x.rateResident] }; })(),
+  society_admin: (() => { const m = require('./society_admin'); return { ...m, sections: [...m.sections.filter((s) => s.id !== 'roster'), x.roster, x.attendance, x.live, x.swaps, x.posts, x.head, x.openLinks] }; })(),
+  super_admin: (() => { const m = require('./super_admin'); return { ...m, sections: [...m.sections.filter((s) => s.id !== 'roster'), x.roster, x.attendance, x.live, x.swaps, x.posts, x.head] }; })()
 };
 
 // Every guide explains the guide itself first.

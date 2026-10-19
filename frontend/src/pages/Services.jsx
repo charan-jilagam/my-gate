@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
-import { FiClock, FiSearch, FiShield, FiTool } from 'react-icons/fi'
+import { FiClock, FiRepeat, FiSearch, FiShield, FiStar, FiThumbsUp, FiTool } from 'react-icons/fi'
 import { useAuth } from '../contexts/AuthContext'
 import useApi from '../hooks/useApi'
 import useCategories from '../hooks/useCategories'
@@ -10,6 +10,7 @@ import { Avatar, EmptyState, ErrorState, ListSkeleton, PageHeader, Stars } from 
 import { categoryIcon, dayLabel, rupees, timeLabel } from '../utils/services'
 
 const SORTS = [
+  { key: 'recommended', label: 'Recommended' },
   { key: 'soonest', label: 'Soonest available' },
   { key: 'rating', label: 'Best rated' },
   { key: 'price', label: 'Lowest visit charge' }
@@ -28,6 +29,10 @@ const ProviderCard = ({ p, category }) => {
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
             <h3 className="truncate text-base font-bold">{p.name}</h3>
+            {p.badge === 'top_rated' && <span className="tag-ok"><FiStar size={12} /> Top rated</span>}
+            {p.badge === 'recommended' && <span className="tag-ok"><FiThumbsUp size={12} /> Recommended</span>}
+            {p.badge === 'new' && <span className="tag-neutral">New</span>}
+            {p.bookedBefore && <span className="tag-info"><FiRepeat size={12} /> You booked before</span>}
             {p.isVerified && (
               <span className="tag-ok" title="Identity checked by your society office">
                 <FiShield size={12} /> Verified
@@ -65,7 +70,7 @@ const Services = () => {
   const [params, setParams] = useSearchParams()
   const category = params.get('category') || ''
   const [query, setQuery] = useState('')
-  const [sort, setSort] = useState('soonest')
+  const [sort, setSort] = useState('recommended')
   const q = useDebounced(query.trim(), 300)
   const { categories, loading: loadingCategories } = useCategories()
 

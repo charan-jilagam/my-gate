@@ -6,13 +6,15 @@ const EmergencyContact = require('../models/EmergencyContact');
 const User = require('../models/User');
 const { protect, authorize, scopeToSociety } = require('../middleware/auth');
 const { safeNotify, safeNotifyMany } = require('../utils/safeNotify');
+const { onDutyNow, pickDesk, guardHead } = require('../utils/duty');
+const sms = require('../utils/sms');
 const { fail, invalid, serverError, societyFor, flatLabel, paging } = require('../utils/routeKit');
 
 router.param('alertId', scopeToSociety(EmergencyAlert));
 router.param('contactId', scopeToSociety(EmergencyContact));
 
 const COOLDOWN_MS = 2 * 60 * 1000; // a second press within two minutes returns the first alert instead of paging everyone again
-const RESPONDERS = ['security', 'society_admin', 'super_admin'];
+const RESPONDERS = ['security', 'guard_admin', 'society_admin', 'super_admin'];
 const TYPE_LABEL = { medical: 'Medical emergency', fire: 'Fire', security: 'Security threat', other: 'Emergency' };
 
 const presentAlert = (a) => ({
@@ -33,12 +35,36 @@ const presentAlert = (a) => ({
 // ---- Contacts -------------------------------------------------------------------------------
 
 // @route   GET /api/emergency/contacts
+// @desc    The numbers to call. The security desk is the guard who is on duty right now, so it changes through the day;
+//          the society's own list is shown when nobody is on duty. Residents also get their own emergency contacts.
 router.get('/contacts', protect, async (req, res) => {
   try {
     const societyId = societyFor(req);
-    if (!societyId) return res.json({ success: true, contacts: [] });
-    const contacts = await EmergencyContact.find({ societyId }).sort({ sortOrder: 1, name: 1 }).lean();
-    res.json({ success: true, contacts });
+    if (!societyId) return res.json({ success: true, contacts: [], onDuty: [], personal: [] });
+    const saved = (await EmergencyContact.find({ societyId }).sort({ sortOrder: 1, name: 1 }).lean()) || [];
+
+    let onDuty = [];
+    let head = null;
+    try {
+      [onDuty, head] = await Promise.all([onDutyNow(societyId), guardHead(societyId)]);
+    } catch (e) {
+      console.error('On-duty lookup failed:', e.message);
+    }
+    const desk = pickDesk(onDuty);
+
+    const live = [];
+    if (desk && desk.phone) {
+      live.push({
+        _id: 'on-duty', dynamic: true, name: `Security desk: ${desk.name}`, phone: desk.phone, kind: 'security',
+        note: `${desk.checkedIn ? 'On duty now' : 'Rostered now'}${desk.postName ? ` at ${desk.postName}` : ''} until ${desk.endTime}. This number changes with the guard on duty.`
+      });
+    }
+    if (head && head.phone) live.push({ _id: 'guard-head', dynamic: true, name: `Head of security: ${head.name}`, phone: head.phone, kind: 'security', note: 'Call if the desk does not answer.' });
+
+    // The fixed "security" entry is replaced by the live one while a guard is on duty, and kept as the fallback otherwise.
+    const fixed = desk && desk.phone ? saved.filter((c) => c.kind !== 'security') : saved;
+    const personal = req.user.role === 'resident' ? (req.user.emergencyContacts || []).map((c) => ({ _id: c._id, name: c.name, phone: c.phone, relation: c.relation, notify: c.notify })) : [];
+    res.json({ success: true, contacts: [...live, ...fixed], onDuty, personal });
   } catch (error) {
     serverError(res, error, 'List emergency contacts');
   }
@@ -120,7 +146,7 @@ router.post(
         block: req.user.block
       });
 
-      const responders = await User.find({ societyId: req.user.societyId, role: { $in: ['security', 'society_admin'] }, isActive: true, isApproved: true }).select('_id');
+      const responders = await User.find({ societyId: req.user.societyId, role: { $in: ['security', 'guard_admin', 'society_admin'] }, isActive: true, isApproved: true }).select('_id');
       const flat = flatLabel(req.user);
       await safeNotifyMany(req.app.get('io'), responders.map((r) => r._id), {
         societyId: req.user.societyId,
@@ -136,11 +162,31 @@ router.post(
       alert.notifiedCount = responders.length;
       await alert.save();
 
+      // Text the people the resident chose in their profile, so family hears even if they are not in the app.
+      let textedContacts = 0;
+      const contacts = (req.user.emergencyContacts || []).filter((c) => c.notify !== false && c.phone);
+      for (const c of contacts) {
+        try {
+          const ok = await sms.sendSms(c.phone, `Nivora SOS: ${req.user.name} pressed the emergency button${flat ? ` at flat ${flat}` : ''} (${TYPE_LABEL[type].toLowerCase()}). Please call ${req.user.phone || 'them'} now.`);
+          if (ok !== false) textedContacts += 1;
+        } catch (e) {
+          console.error('Emergency contact text failed:', e.message);
+        }
+      }
+      let desk = null;
+      try {
+        desk = pickDesk(await onDutyNow(req.user.societyId));
+      } catch (e) {
+        desk = null;
+      }
+
       res.status(201).json({
         success: true,
         alert: presentAlert(alert),
         notified: responders.length,
-        message: responders.length ? 'Alert sent to the gate and the society office.' : 'Alert recorded, but no guard or admin is set up to receive it. Please call the numbers below.'
+        textedContacts,
+        onDuty: desk ? { name: desk.name, phone: desk.phone, postName: desk.postName } : null,
+        message: responders.length ? `Alert sent to the gate and the society office.${desk ? ` ${desk.name} is on duty.` : ''}${textedContacts ? ` Your ${textedContacts} emergency contact${textedContacts === 1 ? ' was' : 's were'} texted.` : ''}` : 'Alert recorded, but no guard or admin is set up to receive it. Please call the numbers below.'
       });
     } catch (error) {
       serverError(res, error, 'Raise SOS');

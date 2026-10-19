@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { useParams } from 'react-router-dom'
 import { FiBell, FiCalendar, FiMapPin, FiPlus, FiTrash2 } from 'react-icons/fi'
 import { useAuth } from '../contexts/AuthContext'
 import api from '../services/api'
@@ -64,11 +65,31 @@ const Notices = () => {
   const { data, loading, error, reload } = useApi('/notices', { select: (d) => d.notices || [] })
   const { data: societies } = useApi('/societies', { enabled: isSuperAdmin, live: false, select: (d) => d.societies || [] })
   const { busy, run } = useAction(reload)
+  // A link from a notification (/notices/<id>) opens the list with that notice at the top and highlighted.
+  // If it is not in the recent list (older, or expired), it is fetched by itself so the link still works.
+  const { id: linkedId } = useParams()
+  const inList = !!linkedId && (data || []).some((n) => n._id === linkedId)
+  const single = useApi(`/notices/${linkedId}`, { enabled: !!linkedId && !loading && !inList, live: false, select: (d) => d.notice })
+  const list = linkedId
+    ? [...(inList ? data.filter((n) => n._id === linkedId) : single.data ? [single.data] : []), ...(data || []).filter((n) => n._id !== linkedId)]
+    : data
   const [open, setOpen] = useState(false)
   const [form, setForm] = useState(EMPTY_FORM)
   const [formError, setFormError] = useState('')
   const [deleting, setDeleting] = useState(null)
   const [visible, setVisible] = useState(10)
+  const pinned = linkedId ? list?.[0] : null
+  useEffect(() => {
+    if (!pinned || pinned._id !== linkedId) return undefined
+    const timer = setTimeout(() => {
+      const el = document.querySelector(`[data-item-id="${linkedId}"]`)
+      if (!el) return
+      el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      el.classList.add('flash-highlight')
+      setTimeout(() => el.classList.remove('flash-highlight'), 3500)
+    }, 200)
+    return () => clearTimeout(timer)
+  }, [pinned?._id, linkedId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const submit = async (e) => {
     e.preventDefault()
@@ -128,7 +149,7 @@ const Notices = () => {
         <div className="panel"><ListSkeleton rows={4} /></div>
       ) : error ? (
         <div className="panel"><ErrorState message={error} onRetry={reload} /></div>
-      ) : !data?.length ? (
+      ) : !list?.length ? (
         <div className="panel">
           <EmptyState
             icon={FiBell}
@@ -139,8 +160,8 @@ const Notices = () => {
         </div>
       ) : (
         <ul className="space-y-3">
-          {data.slice(0, visible).map((n) => (
-            <li key={n._id} className="panel p-5">
+          {list.slice(0, visible).map((n) => (
+            <li key={n._id} data-item-id={n._id} className="panel p-5">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="min-w-0">
                   <div className="mb-1.5 flex flex-wrap items-center gap-2">
@@ -182,9 +203,9 @@ const Notices = () => {
           ))}
         </ul>
       )}
-      {data?.length > visible && (
+      {list?.length > visible && (
         <div className="mt-4 text-center">
-          <button className="btn-secondary" onClick={() => setVisible(visible + 10)}>Show older notices ({data.length - visible} more)</button>
+          <button className="btn-secondary" onClick={() => setVisible(visible + 10)}>Show older notices ({list.length - visible} more)</button>
         </div>
       )}
 

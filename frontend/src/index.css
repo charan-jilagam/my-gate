@@ -214,3 +214,10 @@
 }
 .ticket-notch::before { left: -10px; }
 .ticket-notch::after { right: -10px; }
+
+/* A record opened from a notification flashes once so the person sees what the message was about. */
+@keyframes flash-ring {
+  0%, 60% { box-shadow: 0 0 0 3px rgb(var(--brand) / 0.55); background-color: rgb(var(--brand) / 0.08); }
+  100% { box-shadow: 0 0 0 0 rgb(var(--brand) / 0); }
+}
+.flash-highlight { animation: flash-ring 3.4s ease-out; border-radius: 0.75rem; }

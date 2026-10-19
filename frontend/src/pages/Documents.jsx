@@ -1,3 +1,4 @@
+import { useHighlight } from '../hooks/useHighlight'
 import { useRef, useState } from 'react'
 import toast from 'react-hot-toast'
 import { FiDownload, FiFileText, FiLink, FiLock, FiPlus, FiSearch, FiTrash2, FiUpload } from 'react-icons/fi'
@@ -25,6 +26,7 @@ const EMPTY = { title: '', category: 'bylaws', description: '', visibility: 'all
 
 const Documents = () => {
   const { isAdmin } = useAuth()
+  useHighlight(true)
   const { t } = useT()
   const scope = useSocietyScope()
   const [category, setCategory] = useState('')
@@ -100,7 +102,7 @@ const Documents = () => {
       ) : (
         <ul className="panel divide-y divide-line">
           {data.map((d) => (
-            <li key={d._id} className="flex flex-wrap items-center gap-3 px-4 py-3.5">
+            <li key={d._id} data-item-id={d._id} className="flex flex-wrap items-center gap-3 px-4 py-3.5">
               <span className="grid h-10 w-10 shrink-0 place-items-center rounded-md bg-brand-soft text-brand"><FiFileText size={18} /></span>
               <div className="min-w-0 flex-1">
                 <p className="truncate font-semibold">{d.title}</p>

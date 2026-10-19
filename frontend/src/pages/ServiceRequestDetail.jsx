@@ -117,6 +117,15 @@ const ServiceRequestDetail = () => {
                     <dd>{r.workSummary}</dd>
                   </div>
                 )}
+                {r.residentRating && (
+                  <div className="sm:col-span-2">
+                    <dt className="text-xs text-muted">{isVendor ? 'Your rating of the resident' : 'Vendor rated you'}</dt>
+                    <dd>
+                      <Stars value={r.residentRating} />
+                      {r.residentReview && <p className="mt-1">{r.residentReview}</p>}
+                    </dd>
+                  </div>
+                )}
                 {r.rating && (
                   <div className="sm:col-span-2">
                     <dt className="text-xs text-muted">Rating</dt>
@@ -173,6 +182,7 @@ const ServiceRequestDetail = () => {
                 {r.viewerRole === 'admin' && <Person label="Resident" person={r.resident} extra={`Flat ${r.flat}`} />}
               </>
             )}
+            {isVendor && r.resident?.score && <p className="flex items-center gap-2 rounded-md bg-sunken px-3 py-2 text-xs text-muted"><Stars value={r.resident.score.avg} count={r.resident.score.count} /> <span>rating of this resident by other vendors</span></p>}
             {isVendor && !r.resident.phone && <p className="rounded-md bg-sunken px-3 py-2 text-xs text-muted">The resident's number appears once you accept the job.</p>}
             {isResident && !r.provider.phone && <p className="rounded-md bg-sunken px-3 py-2 text-xs text-muted">The vendor's number appears once they confirm.</p>}
             {r.provider.profileId && !isVendor && (

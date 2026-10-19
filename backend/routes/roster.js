@@ -5,14 +5,18 @@ const Shift = require('../models/Shift');
 const User = require('../models/User');
 const Society = require('../models/Society');
 const { protect, authorize, scopeToSociety } = require('../middleware/auth');
-const { safeNotify } = require('../utils/safeNotify');
+const GuardPost = require('../models/GuardPost');
+const { safeNotify, safeNotifyMany } = require('../utils/safeNotify');
+const { placeFor, checkPlace, isCoord } = require('../utils/geo');
+const { idsWithRoles } = require('../utils/duty');
 const { DEFAULT_TZ, todayIn, addDays, isValidDate, isValidTime, zonedToUtc, toMinutes } = require('../utils/timezone');
 const { fail, invalid, serverError, societyFor } = require('../utils/routeKit');
 
 router.param('id', scopeToSociety(Shift));
 
-const ADMINS = ['society_admin', 'super_admin'];
-const ON_DUTY_ROLES = ['security', 'staff'];
+// The office plans the roster: the admin and the head of the guards.
+const ADMINS = ['society_admin', 'super_admin', 'guard_admin'];
+const ON_DUTY_ROLES = ['security', 'guard_admin', 'staff'];
 const EARLY_MINUTES = 30; // a guard may clock in this long before the shift starts
 const isDuplicateKey = (e) => e && (e.code === 11000 || /E11000/.test(e.message || ''));
 
@@ -32,11 +36,35 @@ const present = (s, now = new Date()) => ({
   endTime: s.endTime,
   overnight: toMinutes(s.endTime) <= toMinutes(s.startTime),
   post: s.post,
+  postName: s.postName || undefined,
+  autoAllocated: !!s.autoAllocated,
   note: s.note,
   clockInAt: s.clockInAt,
   clockOutAt: s.clockOutAt,
+  clockInOutside: s.clockInLocation ? !!s.clockInLocation.outside : undefined,
+  clockInDistanceM: s.clockInLocation ? s.clockInLocation.distanceM : undefined,
   phase: s.phase(now)
 });
+
+// Works out where a clock-in or clock-out happened, compared with the post (or the society).
+// Returns { stored, report }: `stored` goes on the shift; `report` goes back to the guard.
+const locate = async (shift, input) => {
+  if (!input || !isCoord(Number(input.lat), Number(input.lng))) return null;
+  const point = { lat: Number(input.lat), lng: Number(input.lng), accuracy: input.accuracy != null ? Number(input.accuracy) : undefined };
+  const [society, post] = await Promise.all([Society.findById(shift.societyId).select('location').lean(), shift.postId ? GuardPost.findById(shift.postId).lean() : null]);
+  const place = placeFor(post, society);
+  const where = checkPlace(point, place);
+  return {
+    stored: { ...point, distanceM: where.distanceM == null ? undefined : where.distanceM, outside: where.outside == null ? undefined : where.outside },
+    report: { distanceM: where.distanceM, outside: where.outside, placeLabel: place ? place.label : null, known: !!place }
+  };
+};
+
+const locationRules = [
+  body('lat').optional({ nullable: true }).isFloat({ min: -90, max: 90 }),
+  body('lng').optional({ nullable: true }).isFloat({ min: -180, max: 180 }),
+  body('accuracy').optional({ nullable: true }).isFloat({ min: 0, max: 100000 })
+];
 
 const rangeDays = (from, to) => Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86400000);
 
@@ -116,6 +144,7 @@ router.post(
     body('startTime').custom(isValidTime).withMessage('Enter a start time like 08:00'),
     body('endTime').custom(isValidTime).withMessage('Enter an end time like 16:00'),
     body('post').optional().isIn(Shift.POSTS).withMessage('Unknown post'),
+    body('postId').optional({ nullable: true }).isMongoId().withMessage('Unknown guard post'),
     body('note').optional().isString().isLength({ max: 200 })
   ],
   async (req, res) => {
@@ -123,7 +152,17 @@ router.post(
       if (invalid(req, res)) return undefined;
       const societyId = societyFor(req);
       if (!societyId) return fail(res, 400, 'Choose a society first.');
-      const { userId, startTime, endTime, post, note } = req.body;
+      const { userId, startTime, endTime, note } = req.body;
+      let { post } = req.body;
+      let postId;
+      let postName;
+      if (req.body.postId) {
+        const p = await GuardPost.findOne({ _id: req.body.postId, societyId }).select('name kind').lean();
+        if (!p) return fail(res, 400, 'That guard post does not exist.');
+        postId = p._id;
+        postName = p.name;
+        post = p.kind;
+      }
       if (startTime === endTime) return fail(res, 400, 'The shift must have some length. For a night shift, end the next morning (for example 22:00 to 06:00).');
 
       const person = await User.findById(userId).select('name role societyId isApproved isActive');
@@ -140,7 +179,7 @@ router.post(
         const startAt = zonedToUtc(date, startTime, tz);
         const endAt = zonedToUtc(overnight ? addDays(date, 1) : date, endTime, tz);
         try {
-          const shift = await Shift.create({ societyId, userId: person._id, date, startTime, endTime, startAt, endAt, post, note, createdBy: req.user.id });
+          const shift = await Shift.create({ societyId, userId: person._id, date, startTime, endTime, startAt, endAt, post, postId, postName, note, createdBy: req.user.id });
           created.push(shift.date);
         } catch (e) {
           if (isDuplicateKey(e)) skipped += 1;
@@ -182,15 +221,30 @@ router.delete('/:id', protect, authorize(...ADMINS), async (req, res) => {
 });
 
 // @route   POST /api/roster/:id/clock-in   (the person on the shift)
-router.post('/:id/clock-in', protect, authorize(...ON_DUTY_ROLES), async (req, res) => {
+router.post('/:id/clock-in', protect, authorize(...ON_DUTY_ROLES), locationRules, async (req, res) => {
   try {
+    if (invalid(req, res)) return undefined;
     const now = new Date();
+    const mine = req.body && req.body.lat != null ? await Shift.findOne({ _id: req.params.id, userId: req.user.id }).select('societyId postId') : null;
+    const where = mine ? await locate(mine, req.body) : null;
     const shift = await Shift.findOneAndUpdate(
       { _id: req.params.id, userId: req.user.id, clockInAt: { $exists: false }, endAt: { $gte: now }, startAt: { $lte: new Date(now.getTime() + EARLY_MINUTES * 60000) } },
-      { $set: { clockInAt: now } },
+      { $set: { clockInAt: now, ...(where ? { clockInLocation: where.stored } : {}) } },
       { new: true }
     );
-    if (shift) return res.json({ success: true, shift: present(shift, now), message: 'You are on duty.' });
+    if (shift) {
+      // Tell the office when someone clocks in far from where they should be, so it can be checked.
+      if (where && where.report.outside === true) {
+        const office = (await idsWithRoles(shift.societyId, ['society_admin', 'guard_admin'])).filter((id) => id !== String(req.user.id));
+        await safeNotifyMany(req.app.get('io'), office, {
+          societyId: shift.societyId, type: 'attendance', priority: 'high', title: 'Clocked in away from the post',
+          message: `${req.user.name} clocked in about ${where.report.distanceM} m from ${where.report.placeLabel || 'the post'}.`,
+          relatedModel: 'Shift', relatedId: shift._id, actionUrl: '/live'
+        });
+      }
+      const note = !where ? 'You are on duty.' : where.report.outside ? `You are on duty, but you are about ${where.report.distanceM} m from ${where.report.placeLabel}. The office can see this.` : 'You are on duty.';
+      return res.json({ success: true, shift: present(shift, now), location: where ? where.report : undefined, message: note });
+    }
 
     const existing = await Shift.findById(req.params.id);
     if (!existing || idOf(existing.userId) !== String(req.user.id)) return fail(res, 404, 'Shift not found');
@@ -203,10 +257,13 @@ router.post('/:id/clock-in', protect, authorize(...ON_DUTY_ROLES), async (req, r
 });
 
 // @route   POST /api/roster/:id/clock-out
-router.post('/:id/clock-out', protect, authorize(...ON_DUTY_ROLES), async (req, res) => {
+router.post('/:id/clock-out', protect, authorize(...ON_DUTY_ROLES), locationRules, async (req, res) => {
   try {
+    if (invalid(req, res)) return undefined;
     const now = new Date();
-    const shift = await Shift.findOneAndUpdate({ _id: req.params.id, userId: req.user.id, clockInAt: { $exists: true }, clockOutAt: { $exists: false } }, { $set: { clockOutAt: now } }, { new: true });
+    const mine = req.body && req.body.lat != null ? await Shift.findOne({ _id: req.params.id, userId: req.user.id }).select('societyId postId') : null;
+    const where = mine ? await locate(mine, req.body) : null;
+    const shift = await Shift.findOneAndUpdate({ _id: req.params.id, userId: req.user.id, clockInAt: { $exists: true }, clockOutAt: { $exists: false } }, { $set: { clockOutAt: now, ...(where ? { clockOutLocation: where.stored } : {}) } }, { new: true });
     if (shift) return res.json({ success: true, shift: present(shift, now), message: 'Shift finished. Thank you!' });
 
     const existing = await Shift.findById(req.params.id);

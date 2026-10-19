@@ -215,7 +215,7 @@ router.get('/', protect, async (req, res) => {
       // No filter - see all visitors
     }
     // Security and society admins see all visitors in their society
-    else if (['security', 'society_admin'].includes(req.user.role)) {
+    else if (['security', 'guard_admin', 'society_admin'].includes(req.user.role)) {
       query.societyId = req.user.societyId;
     }
 
@@ -391,7 +391,7 @@ router.put('/:id/approve', protect, authorize('resident'), async (req, res) => {
 // @route   PUT /api/visitors/:id/reject
 // @desc    Reject visitor
 // @access  Private (Residents, Security, Admins)
-router.put('/:id/reject', protect, authorize('resident', 'security', 'society_admin'), [
+router.put('/:id/reject', protect, authorize('resident', 'security', 'guard_admin', 'society_admin'), [
   body('reason').optional().trim()
 ], async (req, res) => {
   try {
@@ -456,7 +456,7 @@ router.put('/:id/reject', protect, authorize('resident', 'security', 'society_ad
 // @route   PUT /api/visitors/:id/check-in
 // @desc    Check in visitor
 // @access  Private (Security)
-router.put('/:id/check-in', protect, authorize('security', 'society_admin', 'super_admin'), guessLimiter, [
+router.put('/:id/check-in', protect, authorize('security', 'guard_admin', 'society_admin', 'super_admin'), guessLimiter, [
   body('code').optional({ nullable: true }).isString().isLength({ max: 400 }),
   body('entryPhoto').optional().trim(),
   body('expectedExit').optional({ nullable: true, checkFalsy: true }).isISO8601().withMessage('Pick when the visitor is expected to leave'),
@@ -547,7 +547,7 @@ router.put('/:id/check-in', protect, authorize('security', 'society_admin', 'sup
 // @route   PUT /api/visitors/:id/check-out
 // @desc    Check out visitor
 // @access  Private (Security)
-router.put('/:id/check-out', protect, authorize('security', 'society_admin', 'super_admin'), guessLimiter, [
+router.put('/:id/check-out', protect, authorize('security', 'guard_admin', 'society_admin', 'super_admin'), guessLimiter, [
   body('code').optional({ nullable: true }).isString().isLength({ max: 400 }),
   body('exitPhoto').optional().trim()
 ], async (req, res) => {
@@ -610,7 +610,7 @@ router.put('/:id/check-out', protect, authorize('security', 'society_admin', 'su
 // @route   GET /api/visitors/logs/today
 // @desc    Get today's visitor logs
 // @access  Private (Security, Admins)
-router.get('/logs/today', protect, authorize('security', 'society_admin', 'super_admin'), async (req, res) => {
+router.get('/logs/today', protect, authorize('security', 'guard_admin', 'society_admin', 'super_admin'), async (req, res) => {
   try {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -646,7 +646,7 @@ router.get('/logs/today', protect, authorize('security', 'society_admin', 'super
 // @route   POST /api/visitors/walk-in
 // @desc    Guard logs an unannounced visitor; the resident gets a live request to approve or reject
 // @access  Private (Security, Admins)
-router.post('/walk-in', protect, authorize('security', 'society_admin'), [
+router.post('/walk-in', protect, authorize('security', 'guard_admin', 'society_admin'), [
   body('name').trim().notEmpty().withMessage('Visitor name is required'),
   body('phone').matches(/^[0-9]{10}$/).withMessage('Enter a valid 10-digit phone number'),
   body('flatNo').trim().notEmpty().withMessage('Flat number is required'),
@@ -727,7 +727,7 @@ router.post('/walk-in', protect, authorize('security', 'society_admin'), [
 // @route   GET /api/visitors/lookup/:code
 // @desc    Find an invited visitor by the pass code printed under their QR code
 // @access  Private (Security, Admins)
-router.get('/lookup/:code', protect, authorize('security', 'society_admin', 'super_admin'), guessLimiter, async (req, res) => {
+router.get('/lookup/:code', protect, authorize('security', 'guard_admin', 'society_admin', 'super_admin'), guessLimiter, async (req, res) => {
   try {
     const code = String(req.params.code || '').trim().toLowerCase();
     if (!/^[0-9a-f]{8,32}$/.test(code)) {

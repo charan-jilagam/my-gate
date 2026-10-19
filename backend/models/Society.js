@@ -47,6 +47,13 @@ const societySchema = new mongoose.Schema({
       message: 'Unknown time zone'
     }
   },
+  // Where the society is on the map. The admin sets it; guards are measured against it (or against their post).
+  location: {
+    lat: { type: Number, min: -90, max: 90 },
+    lng: { type: Number, min: -180, max: 180 },
+    radiusMeters: { type: Number, min: 50, max: 5000, default: 300 },
+    label: { type: String, trim: true, maxlength: 120, default: '' }
+  },
   settings: {
     visitorApprovalRequired: { type: Boolean, default: true },
     deliveryApprovalRequired: { type: Boolean, default: true },

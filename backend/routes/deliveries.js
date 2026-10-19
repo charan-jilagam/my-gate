@@ -122,7 +122,7 @@ router.get('/', protect, async (req, res) => {
       query.residentId = req.user.id;
     } else if (req.user.role === 'super_admin') {
       // Super admin sees all deliveries
-    } else if (['security', 'society_admin'].includes(req.user.role)) {
+    } else if (['security', 'guard_admin', 'society_admin'].includes(req.user.role)) {
       query.societyId = req.user.societyId;
     }
 
@@ -192,7 +192,7 @@ router.get('/:id', protect, async (req, res) => {
 // @route   PUT /api/deliveries/:id/approve
 // @desc    Approve delivery
 // @access  Private (Residents, Security, Admins)
-router.put('/:id/approve', protect, authorize('resident', 'security', 'society_admin'), async (req, res) => {
+router.put('/:id/approve', protect, authorize('resident', 'security', 'guard_admin', 'society_admin'), async (req, res) => {
   try {
     const delivery = await Delivery.findById(req.params.id);
 
@@ -247,7 +247,7 @@ router.put('/:id/approve', protect, authorize('resident', 'security', 'society_a
 // @route   PUT /api/deliveries/:id/reject
 // @desc    Reject or cancel a delivery that has not reached the gate yet
 // @access  Private (Residents, Security, Admins)
-router.put('/:id/reject', protect, authorize('resident', 'security', 'society_admin'), [
+router.put('/:id/reject', protect, authorize('resident', 'security', 'guard_admin', 'society_admin'), [
   body('reason').optional().trim().isLength({ max: 200 })
 ], async (req, res) => {
   try {
@@ -296,7 +296,7 @@ router.put('/:id/reject', protect, authorize('resident', 'security', 'society_ad
 // @route   PUT /api/deliveries/:id/check-in
 // @desc    Check in delivery
 // @access  Private (Security)
-router.put('/:id/check-in', protect, authorize('security', 'society_admin', 'super_admin'), [
+router.put('/:id/check-in', protect, authorize('security', 'guard_admin', 'society_admin', 'super_admin'), [
   body('entryPhoto').optional().trim()
 ], async (req, res) => {
   try {
@@ -353,7 +353,7 @@ router.put('/:id/check-in', protect, authorize('security', 'society_admin', 'sup
 // @route   PUT /api/deliveries/:id/deliver
 // @desc    Mark delivery as delivered
 // @access  Private (Residents, Security)
-router.put('/:id/deliver', protect, authorize('resident', 'security', 'society_admin', 'super_admin'), [
+router.put('/:id/deliver', protect, authorize('resident', 'security', 'guard_admin', 'society_admin', 'super_admin'), [
   body('otp').optional().trim()
 ], async (req, res) => {
   try {

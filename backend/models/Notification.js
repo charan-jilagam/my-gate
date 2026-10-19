@@ -37,6 +37,8 @@ const notificationSchema = new mongoose.Schema({
       'document',
       'facility',
       'shift',
+      'shift_swap',
+      'attendance',
       'general'
     ],
     required: true
@@ -55,7 +57,7 @@ const notificationSchema = new mongoose.Schema({
   },
   relatedModel: {
     type: String,
-    enum: ['Visitor', 'Delivery', 'Vehicle', 'Payment', 'Complaint', 'Notice', 'Booking', 'ServiceRequest', 'EmergencyAlert', 'DailyHelp', 'Post', 'Election', 'SocietyDocument', 'FacilityTask', 'Shift']
+    enum: ['Visitor', 'Delivery', 'Vehicle', 'Payment', 'Complaint', 'Notice', 'Booking', 'ServiceRequest', 'EmergencyAlert', 'DailyHelp', 'Post', 'Election', 'SocietyDocument', 'FacilityTask', 'Shift', 'SwapRequest']
   },
   isRead: {
     type: Boolean,

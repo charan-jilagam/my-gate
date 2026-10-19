@@ -60,7 +60,7 @@ const overlapping = (amenity, societyId, startAt, endAt, exceptId) => {
 
 // @route   GET /api/bookings/amenities
 // @desc    The spaces residents can book, with their hours and prices
-router.get('/amenities', protect, authorize(...MEMBERS, 'security'), async (req, res) => {
+router.get('/amenities', protect, authorize(...MEMBERS, 'security', 'guard_admin'), async (req, res) => {
   try {
     const societyId = req.user.role === 'super_admin' ? req.query.societyId : req.user.societyId;
     if (!societyId) return res.json({ success: true, amenities: [] });
@@ -313,7 +313,7 @@ router.post(
 );
 
 // @route   GET /api/bookings
-router.get('/', protect, authorize(...MEMBERS, 'security'), async (req, res) => {
+router.get('/', protect, authorize(...MEMBERS, 'security', 'guard_admin'), async (req, res) => {
   try {
     const filter = {};
     if (req.user.role === 'resident') filter.residentId = req.user.id;

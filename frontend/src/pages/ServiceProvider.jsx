@@ -90,6 +90,7 @@ const ServiceProvider = () => {
                   <Stars value={provider.rating.avg} count={provider.rating.count} />
                   {provider.jobsCompleted > 0 && <span>{provider.jobsCompleted} jobs done</span>}
                 </div>
+                {provider.badge && provider.badge !== 'new' && <span className="tag-ok mr-2 mt-2">{provider.badge === 'top_rated' ? 'Top rated by residents' : 'Recommended by residents'}</span>}
                 {provider.isVerified && (
                   <span className="tag-ok mt-2">
                     <FiShield size={12} /> Verified by your society office

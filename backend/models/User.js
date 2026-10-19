@@ -30,7 +30,7 @@ const userSchema = new mongoose.Schema({
   },
   role: {
     type: String,
-    enum: ['super_admin', 'society_admin', 'resident', 'security', 'staff', 'vendor'],
+    enum: ['super_admin', 'society_admin', 'resident', 'security', 'guard_admin', 'staff', 'vendor'],
     default: 'resident',
     required: true
   },
@@ -81,6 +81,18 @@ const userSchema = new mongoose.Schema({
   rejectedReason: {
     type: String,
     trim: true
+  },
+  // People the user wants reached in an emergency. They add and remove these themselves in Profile.
+  emergencyContacts: {
+    type: [{
+      name: { type: String, required: true, trim: true, maxlength: 60 },
+      phone: { type: String, required: true, trim: true, maxlength: 20 },
+      relation: { type: String, trim: true, maxlength: 30, default: '' },
+      // Send this person a text message when the user presses SOS.
+      notify: { type: Boolean, default: true }
+    }],
+    default: [],
+    validate: { validator: (v) => v.length <= 5, message: 'You can add up to 5 emergency contacts' }
   },
   notificationPrefs: {
     push: { type: Boolean, default: true },

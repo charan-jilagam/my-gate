@@ -81,7 +81,7 @@ router.get('/', protect, async (req, res) => {
       query.residentId = req.user.id;
     } else if (req.user.role === 'super_admin') {
       // Super admin sees all vehicles
-    } else if (['security', 'society_admin'].includes(req.user.role)) {
+    } else if (['security', 'guard_admin', 'society_admin'].includes(req.user.role)) {
       query.societyId = req.user.societyId;
     }
 
@@ -208,7 +208,7 @@ router.get('/:id', protect, async (req, res) => {
 // @route   POST /api/vehicles/:id/entry
 // @desc    Log vehicle entry
 // @access  Private (Security)
-router.post('/:id/entry', protect, authorize('security', 'society_admin', 'super_admin'), [
+router.post('/:id/entry', protect, authorize('security', 'guard_admin', 'society_admin', 'super_admin'), [
   body('entryGate').optional().trim(),
   body('purpose').optional().trim(),
   body('notes').optional().trim()
@@ -274,7 +274,7 @@ router.post('/:id/entry', protect, authorize('security', 'society_admin', 'super
 // @route   POST /api/vehicles/:id/exit
 // @desc    Log vehicle exit
 // @access  Private (Security)
-router.post('/:id/exit', protect, authorize('security', 'society_admin', 'super_admin'), [
+router.post('/:id/exit', protect, authorize('security', 'guard_admin', 'society_admin', 'super_admin'), [
   body('exitGate').optional().trim(),
   body('notes').optional().trim()
 ], async (req, res) => {
@@ -338,7 +338,7 @@ router.post('/:id/exit', protect, authorize('security', 'society_admin', 'super_
 // @route   GET /api/vehicles/search/:vehicleNumber
 // @desc    Search vehicle by number
 // @access  Private (Security, Admins)
-router.get('/search/:vehicleNumber', protect, authorize('security', 'society_admin', 'super_admin'), async (req, res) => {
+router.get('/search/:vehicleNumber', protect, authorize('security', 'guard_admin', 'society_admin', 'super_admin'), async (req, res) => {
   try {
     const vehicle = await Vehicle.findOne({
       vehicleNumber: req.params.vehicleNumber.toUpperCase(),

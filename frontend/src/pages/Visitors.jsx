@@ -328,7 +328,7 @@ const Visitors = () => {
             ) : (
               <ul className="grid gap-3 md:grid-cols-2">
                 {help.data.map((h) => (
-                  <li key={h._id} className="panel flex items-center gap-3 p-4">
+                  <li key={h._id} data-item-id={h._id} className="panel flex items-center gap-3 p-4">
                     <Avatar name={h.name} src={h.photo} size={44} />
                     <div className="min-w-0 flex-1">
                       <p className="truncate font-semibold">{h.name}</p>

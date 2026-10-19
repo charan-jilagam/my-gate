@@ -318,4 +318,90 @@ router.put('/profile', protect, [
   }
 });
 
+// ---- Emergency contacts: the people each user wants reached in an emergency ----------------------
+
+const PHONE = /^[0-9+\-() ]{7,20}$/;
+
+// @route   GET /api/users/emergency-contacts
+router.get('/emergency-contacts', protect, async (req, res) => {
+  res.json({ success: true, contacts: (req.user.emergencyContacts || []).map((c) => ({ _id: c._id, name: c.name, phone: c.phone, relation: c.relation, notify: c.notify })) });
+});
+
+// @route   PUT /api/users/emergency-contacts
+// @desc    Replaces the whole list (up to 5). The person edits their own list from Profile.
+router.put('/emergency-contacts', protect, [
+  body('contacts').isArray({ max: 5 }).withMessage('You can add up to 5 emergency contacts'),
+  body('contacts.*.name').trim().isLength({ min: 2, max: 60 }).withMessage('Enter the name of each contact'),
+  body('contacts.*.phone').trim().matches(PHONE).withMessage('Enter a valid phone number for each contact'),
+  body('contacts.*.relation').optional({ nullable: true }).trim().isLength({ max: 30 }).withMessage('Keep the relation short, for example "Brother"'),
+  body('contacts.*.notify').optional().isBoolean()
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ success: false, message: errors.array()[0].msg, errors: errors.array() });
+    const seen = new Set();
+    const contacts = [];
+    for (const c of req.body.contacts) {
+      const key = String(c.phone).replace(/\D/g, '').slice(-10);
+      if (seen.has(key)) continue; // the same number twice is one contact
+      seen.add(key);
+      contacts.push({ name: c.name, phone: String(c.phone).trim(), relation: (c.relation || '').trim(), notify: c.notify !== false });
+    }
+    req.user.emergencyContacts = contacts;
+    await req.user.save({ validateBeforeSave: true });
+    res.json({ success: true, contacts: req.user.emergencyContacts, message: contacts.length ? 'Emergency contacts saved' : 'Emergency contacts cleared' });
+  } catch (error) {
+    if (error.name === 'ValidationError') return res.status(400).json({ success: false, message: Object.values(error.errors)[0].message });
+    console.error('Save emergency contacts error:', error);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// ---- Guard head -----------------------------------------------------------------------------------
+
+// @route   PUT /api/users/:id/guard-head
+// @desc    Make an approved guard the head of the guards (or return them to an ordinary guard)
+// @access  Private (Admins)
+router.put('/:id/guard-head', protect, authorize('society_admin', 'super_admin'), [
+  body('isHead').isBoolean().withMessage('isHead must be true or false')
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ success: false, message: errors.array()[0].msg, errors: errors.array() });
+    const user = await User.findById(req.params.id);
+    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+    if (!['security', 'guard_admin'].includes(user.role)) {
+      return res.status(400).json({ success: false, message: 'Only a guard can be made the head of the guards.' });
+    }
+    if (req.user.role === 'society_admin' && user.societyId?.toString() !== req.user.societyId?.toString()) {
+      return res.status(403).json({ success: false, message: 'Not authorized' });
+    }
+    if (!user.isApproved || !user.isActive) {
+      return res.status(400).json({ success: false, message: 'Approve this guard first.' });
+    }
+    const makeHead = req.body.isHead === true || req.body.isHead === 'true';
+    user.role = makeHead ? 'guard_admin' : 'security';
+    await user.save({ validateBeforeSave: false });
+
+    const io = req.app.get('io');
+    try {
+      await notifyUser(io, user._id, {
+        societyId: user.societyId,
+        type: 'general',
+        title: makeHead ? 'You are now the head of the guards' : 'You are now a guard again',
+        message: makeHead
+          ? 'You can plan shifts, see attendance and see where guards are. Sign out and in again if the menu does not change.'
+          : 'You no longer manage the roster. Your own shifts and duty stay the same.',
+        priority: 'high'
+      });
+    } catch (e) {
+      console.error('Guard head notification failed:', e.message);
+    }
+    res.json({ success: true, user: { _id: user._id, name: user.name, role: user.role }, message: makeHead ? `${user.name} is now the head of the guards` : `${user.name} is an ordinary guard again` });
+  } catch (error) {
+    console.error('Guard head error:', error);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
 module.exports = router;

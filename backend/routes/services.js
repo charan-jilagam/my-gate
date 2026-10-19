@@ -8,7 +8,7 @@ const { protect, authorize, scopeToSociety } = require('../middleware/auth');
 const { CATEGORIES, CATEGORY_KEYS, labelOf } = require('../utils/serviceCatalog');
 const { DEFAULT_TZ, isValidDate, todayIn, zonedToUtc } = require('../utils/timezone');
 const { buildDaySlots, summarizeDays, nextAvailableSlot, validateAvailability, SLOT_LENGTHS } = require('../utils/slots');
-const { presentProvider, presentReview } = require('../utils/presentService');
+const { presentProvider, presentReview, recommendScore } = require('../utils/presentService');
 const { safeNotify } = require('../utils/safeNotify');
 
 router.param('id', scopeToSociety(ServiceProvider));
@@ -198,7 +198,7 @@ router.get(
   '/providers',
   protect,
   authorize('resident', 'society_admin', 'super_admin'),
-  [query('category').optional().isIn(CATEGORY_KEYS), query('sort').optional().isIn(['soonest', 'rating', 'price'])],
+  [query('category').optional().isIn(CATEGORY_KEYS), query('sort').optional().isIn(['soonest', 'rating', 'price', 'recommended'])],
   async (req, res) => {
     try {
       if (invalid(req, res)) return undefined;
@@ -226,8 +226,16 @@ router.get(
         : [];
       const byProvider = groupBy(bookings, 'providerId');
 
+      // Vendors this resident has already had a finished job with, so "Book again" can lead the list.
+      let usedBefore = new Set();
+      if (req.user.role === 'resident' && providers.length) {
+        const done = await ServiceRequest.find({ residentId: req.user.id, providerId: { $in: providers.map((p) => p._id) }, status: 'completed' }).select('providerId').lean();
+        usedBefore = new Set((done || []).map((d) => String(d.providerId)));
+      }
+
       const list = providers.map((p) =>
         presentProvider(p, {
+          bookedBefore: usedBefore.has(String(p._id)),
           nextAvailable: nextAvailableSlot({ provider: p, bookings: byProvider[String(p._id)] || [], now, tz, searchDays: Math.min(p.maxAdvanceDays || 14, 14) })
         })
       );
@@ -235,6 +243,7 @@ router.get(
       const sort = req.query.sort || 'soonest';
       const soonest = (p) => (p.nextAvailable ? Date.parse(p.nextAvailable.startAt) : Infinity);
       list.sort((a, b) => {
+        if (sort === 'recommended') return recommendScore(b.rating.avg, b.rating.count) - recommendScore(a.rating.avg, a.rating.count) || soonest(a) - soonest(b);
         if (sort === 'rating') return b.rating.avg - a.rating.avg || b.rating.count - a.rating.count || soonest(a) - soonest(b);
         if (sort === 'price') return a.visitCharge - b.visitCharge || soonest(a) - soonest(b);
         return soonest(a) - soonest(b) || b.rating.avg - a.rating.avg;

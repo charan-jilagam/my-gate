@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { FiCheck, FiSearch, FiSlash, FiUserCheck, FiUsers, FiX } from 'react-icons/fi'
+import { FiAward, FiCheck, FiSearch, FiSlash, FiUserCheck, FiUsers, FiX } from 'react-icons/fi'
 import { useAuth } from '../contexts/AuthContext'
 import api from '../services/api'
 import useApi from '../hooks/useApi'
@@ -7,7 +7,7 @@ import useAction from '../hooks/useAction'
 import ExportButtons from '../components/ExportButtons'
 import { ConfirmDialog, DataList, EmptyState, Field, Modal, PageHeader, StatusTag, formatDate, titleCase } from '../components/ui'
 
-const ROLE_LABEL = { resident: 'Resident', security: 'Guard', staff: 'Staff', vendor: 'Vendor' }
+const ROLE_LABEL = { resident: 'Resident', security: 'Guard', guard_admin: 'Guard head', staff: 'Staff', vendor: 'Vendor' }
 
 // One word for where a person stands: waiting, rejected, active or deactivated.
 const stateOf = (u) => (!u.isApproved ? (u.rejectedAt ? 'rejected' : 'pending') : u.isActive === false ? 'deactivated' : 'active')
@@ -85,7 +85,12 @@ const AdminResidents = () => {
             </div>
           )
         return (
-          <div className="flex justify-end">
+          <div className="flex flex-wrap justify-end gap-2">
+            {state === 'active' && ['security', 'guard_admin'].includes(u.role) && (
+              <button className="btn-secondary btn-sm" disabled={busy === u._id} onClick={() => run(u._id, () => api.put(`/users/${u._id}/guard-head`, { isHead: u.role !== 'guard_admin' }), u.role === 'guard_admin' ? `${u.name} is a guard again` : `${u.name} is now the guard head`)}>
+                <FiAward size={14} /> {u.role === 'guard_admin' ? 'Remove as guard head' : 'Make guard head'}
+              </button>
+            )}
             {state === 'active' ? (
               <button className="btn-secondary btn-sm" disabled={busy === u._id} onClick={() => setDeactivating(u)}>
                 <FiSlash size={14} /> Deactivate

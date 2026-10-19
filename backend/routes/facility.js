@@ -12,7 +12,7 @@ const { fail, invalid, serverError, isAdminRole, societyFor } = require('../util
 router.param('id', scopeToSociety(FacilityTask));
 
 const ADMINS = ['society_admin', 'super_admin'];
-const DOERS = ['staff', 'security', ...ADMINS]; // may record that a job was done
+const DOERS = ['staff', 'security', 'guard_admin', ...ADMINS]; // may record that a job was done
 const SOON_DAYS = 7;
 
 const societyTz = async (societyId) => {

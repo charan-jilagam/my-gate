@@ -65,6 +65,11 @@ const serviceRequestSchema = new mongoose.Schema(
     review: { type: String, trim: true, maxlength: 500 },
     reviewedAt: Date,
 
+    // The vendor's rating of the resident after the job (1 to 5), so other vendors know what to expect.
+    residentRating: { type: Number, min: 1, max: 5 },
+    residentReview: { type: String, trim: true, maxlength: 300 },
+    residentRatedAt: Date,
+
     // Gate pass created for the vendor once the booking is confirmed
     visitorId: { type: mongoose.Schema.Types.ObjectId, ref: 'Visitor' }
   },

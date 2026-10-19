@@ -10,7 +10,7 @@ const { fail, invalid, serverError, isAdminRole, societyFor, isSafeUrl, paging }
 router.param('id', scopeToSociety(SocietyDocument));
 
 const ADMINS = ['society_admin', 'super_admin'];
-const READERS = ['resident', 'security', 'staff', ...ADMINS];
+const READERS = ['resident', 'security', 'guard_admin', 'staff', ...ADMINS];
 
 const present = (d) => ({
   _id: d._id,
