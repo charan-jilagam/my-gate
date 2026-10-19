@@ -1,13 +1,15 @@
 import { useMemo, useState } from 'react'
-import { FiAward, FiCheck, FiSearch, FiSlash, FiUserCheck, FiUsers, FiX } from 'react-icons/fi'
+import { FiAward, FiCheck, FiMail, FiSearch, FiSlash, FiUserCheck, FiUserPlus, FiUsers, FiX } from 'react-icons/fi'
 import { useAuth } from '../contexts/AuthContext'
 import api from '../services/api'
 import useApi from '../hooks/useApi'
 import useAction from '../hooks/useAction'
 import ExportButtons from '../components/ExportButtons'
+import AddPersonModal from '../components/AddPersonModal'
+import { useT } from '../contexts/LanguageContext'
 import { ConfirmDialog, DataList, EmptyState, Field, Modal, PageHeader, StatusTag, formatDate, titleCase } from '../components/ui'
 
-const ROLE_LABEL = { resident: 'Resident', security: 'Guard', guard_admin: 'Guard head', staff: 'Staff', vendor: 'Vendor' }
+const ROLE_LABEL = { society_admin: 'Society admin', resident: 'Resident', security: 'Guard', guard_admin: 'Guard head', staff: 'Staff', vendor: 'Vendor' }
 
 // One word for where a person stands: waiting, rejected, active or deactivated.
 const stateOf = (u) => (!u.isApproved ? (u.rejectedAt ? 'rejected' : 'pending') : u.isActive === false ? 'deactivated' : 'active')
@@ -15,7 +17,10 @@ const stateOf = (u) => (!u.isApproved ? (u.rejectedAt ? 'rejected' : 'pending') 
 const flatOf = (u) => `${u.block ? `${u.block}-` : ''}${u.flatNo || '-'}`
 
 const AdminResidents = () => {
+  const { t } = useT()
   const { user, isSuperAdmin, isStaff } = useAuth()
+  const [adding, setAdding] = useState(false)
+  const [resent, setResent] = useState(null)
   const [tab, setTab] = useState('pending')
   // Staff can approve new residents, nothing else. The office is told when they do.
   const [query, setQuery] = useState('')
@@ -38,6 +43,16 @@ const AdminResidents = () => {
     return source.filter((u) => [u.name, u.email, u.phone, u.flatNo, u.block].some((f) => f?.toLowerCase().includes(q)))
   }, [list.data, query])
 
+  // Someone an admin added who has not signed in yet can be sent a fresh setup link.
+  const resend = async (u) => {
+    const ok = await run(u._id, async () => {
+      const res = await api.post(`/users/${u._id}/invite`)
+      setResent({ user: u, invite: res.data.invite })
+      return res
+    }, null)
+    return ok
+  }
+
   const approve = (u) => run(u._id, () => api.put(`/users/approve/${u._id}`), `${u.name} approved`)
 
   const [deactivating, setDeactivating] = useState(null)
@@ -59,7 +74,7 @@ const AdminResidents = () => {
     { key: 'flat', header: 'Flat', render: (u) => (u.flatNo ? flatOf(u) : '-') },
     { key: 'phone', header: 'Phone', render: (u) => u.phone },
     { key: 'joined', header: 'Registered', render: (u) => formatDate(u.createdAt) },
-    ...(tab === 'all' ? [{ key: 'status', header: 'Status', render: (u) => <StatusTag status={stateOf(u)} /> }] : []),
+    ...(tab === 'all' ? [{ key: 'status', header: 'Status', render: (u) => (<div><StatusTag status={stateOf(u)} />{stateOf(u) === 'active' && !u.lastLogin && <p className="mt-1 text-xs text-muted">{t('Not signed in yet')}</p>}</div>) }] : []),
     {
       key: 'actions',
       header: '',
@@ -94,7 +109,12 @@ const AdminResidents = () => {
                 <FiAward size={14} /> {u.role === 'guard_admin' ? 'Remove as guard head' : 'Make guard head'}
               </button>
             )}
-            {state === 'active' ? (
+            {state === 'active' && !u.lastLogin && !isStaff && (isSuperAdmin || u.role !== 'society_admin') && (
+              <button className="btn-secondary btn-sm" disabled={busy === u._id} onClick={() => resend(u)}>
+                <FiMail size={14} /> {t('Send link again')}
+              </button>
+            )}
+            {state === 'active' && u.role === 'society_admin' && !isSuperAdmin ? null : state === 'active' ? (
               <button className="btn-secondary btn-sm" disabled={busy === u._id} onClick={() => setDeactivating(u)}>
                 <FiSlash size={14} /> Deactivate
               </button>
@@ -113,8 +133,13 @@ const AdminResidents = () => {
     <>
       <PageHeader
         title="People"
-        subtitle="Approve or reject new sign-ups, and see who lives in your society."
+        subtitle={isStaff ? 'Approve new residents.' : 'Add people, approve or reject new sign-ups, and see who is in your society.'}
         action={
+          <div className="flex flex-wrap items-center gap-2">
+          {!isStaff && (
+            <button className="btn-primary" onClick={() => setAdding(true)}><FiUserPlus size={16} /> {t('Add person')}</button>
+          )}
+          {!isStaff && (
           <ExportButtons
             filename="people"
             title="People"
@@ -129,6 +154,8 @@ const AdminResidents = () => {
               { header: 'Status', value: (u) => titleCase(stateOf(u)) }
             ]}
           />
+          )}
+          </div>
         }
       />
 
@@ -171,6 +198,28 @@ const AdminResidents = () => {
           />
         }
       />
+
+      <AddPersonModal
+        open={adding}
+        onClose={() => setAdding(false)}
+        isSuper={isSuperAdmin}
+        societies={societies || []}
+        defaultSocietyId={isSuperAdmin ? activeSociety : ''}
+        onCreated={() => { pending.reload(); if (tab === 'all') all.reload() }}
+      />
+
+      <Modal
+        open={!!resent}
+        onClose={() => setResent(null)}
+        title="New setup link"
+        size="sm"
+        footer={<button className="btn-primary" onClick={() => setResent(null)}>{t('Done')}</button>}
+      >
+        <p className="mb-3 text-sm">{resent?.invite?.emailSent ? `${t('We emailed a new link to')} ${resent?.user?.name}.` : t('The email could not be sent. Share the link below with them yourself.')}</p>
+        <Field label="Setup link" htmlFor="resent-link" hint="Works for 7 days. Share it only with this person.">
+          <input id="resent-link" readOnly className="input text-xs" value={resent?.invite?.setupUrl || ''} onFocus={(e) => e.target.select()} />
+        </Field>
+      </Modal>
 
       <ConfirmDialog
         open={!!deactivating}

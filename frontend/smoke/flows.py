@@ -308,8 +308,44 @@ def no_flash(page):
     flashes = page.evaluate('window.__flash')
     assert flashes == 0, f'a loader flashed {flashes} times while switching between screens already visited'
 
+def admin_adds_person(page):
+    page.goto(smoke.BASE + '/admin/residents'); page.wait_for_selector('button:has-text("Add person")')
+    page.click('button:has-text("Add person")'); page.wait_for_selector('#np-name')
+    page.select_option('#np-role', 'guard_admin')
+    assert page.locator('#np-flat').count() == 0, 'only residents are asked for a flat'
+    page.fill('#np-name', 'Gopi Head'); page.fill('#np-email', 'gopi@example.com'); page.fill('#np-phone', '9876500011')
+    page.click('button[form="add-person-form"]'); page.wait_for_selector('text=Account created')
+    sent = [b for m, p, b in posts if m == 'POST' and p == '/users/create']
+    assert sent and sent[-1] == dict(role='guard_admin', name='Gopi Head', email='gopi@example.com', phone='9876500011'), sent
+    body = page.inner_text('body')
+    assert 'could not be sent' in body and 'reset-password/abc123' in page.input_value('#np-link'), body[:400]
+    assert page.locator('a:has-text("Share on WhatsApp")').count() == 1
+
+def super_adds_admin(page):
+    page.goto(smoke.BASE + '/admin/residents'); page.wait_for_selector('button:has-text("Add person")')
+    page.click('button:has-text("Add person")'); page.wait_for_selector('#np-society')
+    opts = page.locator('#np-role option').all_inner_texts()
+    assert 'Society admin' in opts, opts
+    page.select_option('#np-role', 'society_admin')
+    page.fill('#np-name', 'New Admin'); page.fill('#np-email', 'na@example.com'); page.fill('#np-phone', '9876500022')
+    assert page.input_value('#np-society'), 'the society being viewed is chosen for you'
+    page.click('button[form="add-person-form"]'); page.wait_for_selector('text=Account created')
+    sent = [b for m, p, b in posts if m == 'POST' and p == '/users/create']
+    assert sent[-1]['role'] == 'society_admin' and sent[-1]['societyId'], sent[-1]
+
+def admin_cannot_add_admin(page):
+    page.goto(smoke.BASE + '/admin/residents'); page.wait_for_selector('button:has-text("Add person")')
+    page.click('button:has-text("Add person")'); page.wait_for_selector('#np-role')
+    assert 'Society admin' not in page.locator('#np-role option').all_inner_texts()
+    assert page.locator('#np-society').count() == 0
+
+def staff_has_no_add(page):
+    page.goto(smoke.BASE + '/admin/residents'); page.wait_for_selector('main')
+    page.wait_for_timeout(500)
+    assert page.locator('button:has-text("Add person")').count() == 0
+
 def main():
-  for role, name, fn in [('resident', 'book service', book_service), ('resident', 'amenity booking', amenity), ('resident', 'SOS', sos), ('resident', 'RSVP', rsvp), ('resident', 'notification deep link', notif), ('resident', 'switching screens does not flash a loader', no_flash), ('security', 'gate check', gate_check),
+  for role, name, fn in [('resident', 'book service', book_service), ('resident', 'amenity booking', amenity), ('resident', 'SOS', sos), ('resident', 'RSVP', rsvp), ('resident', 'notification deep link', notif), ('society_admin', 'admin adds a guard head', admin_adds_person), ('society_admin', 'admin cannot add admins', admin_cannot_add_admin), ('super_admin', 'super admin adds a society admin', super_adds_admin), ('staff', 'staff cannot add people', staff_has_no_add), ('resident', 'switching screens does not flash a loader', no_flash), ('security', 'gate check', gate_check),
                          ('resident', 'language switch', language), ('resident', 'data and headings translate and restore', translate_data), ('resident', 'guide is role-only and searchable', help_isolation), ('resident', 'guide is translated and searchable in Telugu', guide_in_telugu), ('society_admin', 'admin guide', help_admin),
                          ('resident', 'cast a vote', vote), ('staff', 'mark upkeep done', mark_done), ('society_admin', 'add shifts', add_shift),
                          ('society_admin', 'create a vote', new_vote), ('society_admin', 'add a document', add_document),

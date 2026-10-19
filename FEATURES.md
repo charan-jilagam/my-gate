@@ -248,3 +248,10 @@ Numbers without a country code get `+91`; change it with `SMS_DEFAULT_COUNTRY_CO
 - **Staff and amenity bookings**: staff see Amenities, are told about new requests with the admin, and can approve or reject. The admin is told when staff approve.
 - **No loader flash between screens**: the last answer for each screen is shown at once and refreshed quietly; every screen's code is loaded ahead of time when the phone is idle; page changes use a short fade; a loader only appears if something is genuinely slow (after about a third of a second). The cache is emptied on sign out.
 - **Nearby places search is done by our server** (`GET /api/nearby/places`): it tries four free OpenStreetMap servers, then the OSM address search, and remembers answers for six hours. The browser falls back to the public server only if ours is unreachable. No API key is needed for any of it.
+
+## Adding people from the People screen (added)
+
+- **Add person** (`/admin/residents`): the society admin creates a resident, security guard, guard head, staff member or service vendor in their own society. The platform admin picks the society and can also create society admins. Staff cannot add people.
+- **No passwords handed around**: the person is approved straight away and gets an email with a link to choose their own password (valid 7 days). If the email cannot be sent, the screen shows the link to copy or share on WhatsApp. **Send link again** appears for people who have not signed in yet.
+- When the platform admin adds staff or a guard head, that society's admins are notified.
+- The All people list now includes society admins, shows "Not signed in yet", and the platform admin can deactivate a society admin. Guard heads can be deactivated like anyone else.

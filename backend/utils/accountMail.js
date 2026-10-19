@@ -49,4 +49,21 @@ const sendRejectedEmail = ({ user, reason }) =>
       <p>Please contact your society office if you think this is a mistake.</p>`)
   });
 
-module.exports = { sendApprovedEmail, sendRejectedEmail };
+const ROLE_WORDS = { society_admin: 'society admin', resident: 'resident', security: 'security guard', guard_admin: 'guard head', staff: 'staff member', vendor: 'service vendor' };
+
+// "Your account is ready: choose a password." Sent when an admin creates someone's account.
+const sendInviteEmail = ({ user, societyName, invitedByName, setupUrl, days = 7 }) => {
+  const role = ROLE_WORDS[user.role] || user.role;
+  return send({
+    email: user.email,
+    subject: 'Welcome to Nivora: set your password',
+    message: [`Hi ${first(user.name)},`, `${invitedByName || 'The society office'} created your Nivora account${societyName ? ` for ${societyName}` : ''} as a ${role}.`, `Choose your password to start (the link works for ${days} days): ${setupUrl}`].join('\n\n'),
+    html: frame(`<h2 style="margin:0 0 12px">Welcome to Nivora, ${esc(first(user.name))}!</h2>
+      <p>${esc(invitedByName || 'The society office')} created your account${societyName ? ` for <b>${esc(societyName)}</b>` : ''} as a <b>${esc(role)}</b>.</p>
+      <p>Choose your password to get started. This link works for ${days} days.</p>
+      ${button(setupUrl, 'Set my password')}
+      <p style="color:#5b6f6d;font-size:13px">After that, sign in at ${esc(baseUrl())}/login with this email address.</p>`)
+  });
+};
+
+module.exports = { sendApprovedEmail, sendRejectedEmail, sendInviteEmail, baseUrl };

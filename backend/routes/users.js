@@ -8,7 +8,8 @@ const { protect, authorize } = require('../middleware/auth');
 const { notifyUser } = require('../utils/notifyUser');
 const { isSafeUrl } = require('../utils/imageUrl');
 const { safeNotifyMany } = require('../utils/safeNotify');
-const { sendApprovedEmail, sendRejectedEmail } = require('../utils/accountMail');
+const crypto = require('crypto');
+const { sendApprovedEmail, sendRejectedEmail, sendInviteEmail, baseUrl } = require('../utils/accountMail');
 const Society = require('../models/Society');
 
 // @route   GET /api/users/notifications
@@ -102,7 +103,7 @@ router.put('/notifications/read-all', protect, async (req, res) => {
 });
 
 // Roles that sign up on their own and must be approved by a society admin.
-const APPROVABLE_ROLES = ['resident', 'security', 'staff', 'vendor'];
+const APPROVABLE_ROLES = ['resident', 'security', 'guard_admin', 'staff', 'vendor'];
 
 // @route   PUT /api/users/reject/:id
 // @desc    Reject a sign-up. The person can no longer sign in and sees the reason.
@@ -251,7 +252,8 @@ router.put('/:id/active', protect, authorize('society_admin', 'super_admin'), [
 
     const user = await User.findById(req.params.id);
     if (!user) return res.status(404).json({ success: false, message: 'User not found' });
-    if (!APPROVABLE_ROLES.includes(user.role)) {
+    const switchable = req.user.role === 'super_admin' ? [...APPROVABLE_ROLES, 'society_admin'] : APPROVABLE_ROLES;
+    if (!switchable.includes(user.role)) {
       return res.status(400).json({ success: false, message: 'This account cannot be changed here' });
     }
     if (req.user.role === 'society_admin' && user.societyId?.toString() !== req.user.societyId?.toString()) {
@@ -268,6 +270,129 @@ router.put('/:id/active', protect, authorize('society_admin', 'super_admin'), [
     res.json({ success: true, message: active ? `${user.name} can sign in again` : `${user.name} has been deactivated` });
   } catch (error) {
     console.error('Set active error:', error);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// ---- Admins creating accounts ----
+// A society admin can add every kind of person in their own society. The super admin can also add society admins,
+// for any society. Nobody is given a password: the person gets a link to choose their own, valid for 7 days.
+const CREATABLE = {
+  society_admin: ['resident', 'security', 'guard_admin', 'staff', 'vendor'],
+  super_admin: ['society_admin', 'resident', 'security', 'guard_admin', 'staff', 'vendor']
+};
+const INVITE_DAYS = 7;
+
+// New reset-style token for the person; the plain token only ever leaves in the link.
+const issueSetupLink = async (user) => {
+  const token = crypto.randomBytes(20).toString('hex');
+  user.resetPasswordToken = crypto.createHash('sha256').update(token).digest('hex');
+  user.resetPasswordExpire = Date.now() + INVITE_DAYS * 24 * 60 * 60 * 1000;
+  await user.save({ validateBeforeSave: false });
+  return `${baseUrl()}/reset-password/${token}?welcome=1`;
+};
+
+const inviteResult = async (req, user, society) => {
+  const setupUrl = await issueSetupLink(user);
+  const emailSent = await sendInviteEmail({ user, societyName: society && society.name, invitedByName: req.user.name, setupUrl, days: INVITE_DAYS });
+  return { emailSent, setupUrl, days: INVITE_DAYS };
+};
+
+// @route   POST /api/users/create
+// @desc    Create an account for someone (resident, guard, guard head, staff, vendor; the super admin also society admins)
+// @access  Private (Admins)
+router.post('/create', protect, authorize('society_admin', 'super_admin'), [
+  body('name').trim().isLength({ min: 2, max: 60 }).withMessage('Enter the person\'s name'),
+  body('email').trim().isEmail().withMessage('Enter a valid email address').normalizeEmail({ gmail_remove_dots: false }),
+  body('phone').matches(/^[0-9]{10}$/).withMessage('Enter a valid 10-digit phone number'),
+  body('role').isIn(CREATABLE.super_admin).withMessage('Choose what kind of person this is'),
+  body('societyId').optional({ checkFalsy: true }).isMongoId().withMessage('Choose a society'),
+  body('flatNo').optional({ checkFalsy: true }).trim().isLength({ max: 20 }),
+  body('block').optional({ checkFalsy: true }).trim().isLength({ max: 20 })
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ success: false, message: errors.array()[0].msg, errors: errors.array() });
+
+    const { name, email, phone, role, flatNo, block } = req.body;
+    if (!CREATABLE[req.user.role].includes(role)) {
+      return res.status(403).json({ success: false, message: 'Only the platform admin can add a society admin.' });
+    }
+    const societyId = req.user.role === 'super_admin' ? req.body.societyId : req.user.societyId;
+    if (!societyId) return res.status(400).json({ success: false, message: 'Choose which society this person belongs to.' });
+    const society = await Society.findById(societyId).select('name');
+    if (!society) return res.status(404).json({ success: false, message: 'Society not found' });
+    if (role === 'resident' && !flatNo) return res.status(400).json({ success: false, message: 'Enter the flat number for a resident.' });
+    if (await User.findOne({ email })) return res.status(409).json({ success: false, message: 'Someone already has an account with this email.' });
+
+    let user;
+    try {
+      user = await User.create({
+        name,
+        email,
+        phone,
+        role,
+        societyId,
+        flatNo: role === 'resident' ? flatNo : undefined,
+        block: role === 'resident' && block ? block : undefined,
+        // Nobody knows this password. The person chooses their own through the link below.
+        password: `${crypto.randomBytes(18).toString('base64url')}a1`,
+        isApproved: true,
+        approvedBy: req.user.id,
+        approvedAt: new Date(),
+        isActive: true,
+        // The admin vouches for the person, and choosing a password through the emailed link proves the address.
+        emailVerified: true,
+        phoneVerified: true
+      });
+    } catch (e) {
+      if (e.code === 11000) return res.status(409).json({ success: false, message: 'Someone already has an account with this email.' });
+      if (e.name === 'ValidationError') return res.status(400).json({ success: false, message: Object.values(e.errors)[0].message });
+      throw e;
+    }
+
+    const invite = await inviteResult(req, user, society);
+
+    // When the platform admin adds someone, the society's own admins should know.
+    if (req.user.role === 'super_admin' && role !== 'society_admin') {
+      const admins = await User.find({ societyId, role: 'society_admin', isActive: true }).select('_id');
+      await safeNotifyMany(req.app.get('io'), admins.map((a) => a._id), {
+        societyId,
+        type: 'general',
+        title: 'New person added',
+        message: `${req.user.name} added ${user.name} as ${role === 'guard_admin' ? 'guard head' : role === 'security' ? 'a guard' : `a ${role.replace('_', ' ')}`}.`,
+        actionUrl: '/admin/residents',
+        priority: 'low'
+      });
+    }
+
+    res.status(201).json({
+      success: true,
+      user: { _id: user._id, name: user.name, email: user.email, phone: user.phone, role: user.role, societyId: user.societyId, flatNo: user.flatNo, block: user.block },
+      invite,
+      message: invite.emailSent ? `Account created. ${user.name} was emailed a link to choose a password.` : `Account created. The email could not be sent, so share the setup link with ${user.name} yourself.`
+    });
+  } catch (error) {
+    console.error('Create user error:', error);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// @route   POST /api/users/:id/invite
+// @desc    Send a new setup link to someone who has not signed in yet
+// @access  Private (Admins)
+router.post('/:id/invite', protect, authorize('society_admin', 'super_admin'), async (req, res) => {
+  try {
+    const user = await User.findById(req.params.id);
+    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+    if (!CREATABLE[req.user.role].includes(user.role)) return res.status(403).json({ success: false, message: 'Not authorized' });
+    if (req.user.role === 'society_admin' && String(user.societyId) !== String(req.user.societyId)) return res.status(403).json({ success: false, message: 'Not authorized' });
+    if (user.lastLogin) return res.status(409).json({ success: false, message: `${user.name} has already signed in. They can use Forgot password if they need a new one.` });
+    const society = await Society.findById(user.societyId).select('name');
+    const invite = await inviteResult(req, user, society);
+    res.json({ success: true, invite, message: invite.emailSent ? `A new link was emailed to ${user.name}.` : 'The email could not be sent, so share the setup link yourself.' });
+  } catch (error) {
+    console.error('Resend invite error:', error);
     res.status(500).json({ success: false, message: 'Server error' });
   }
 });

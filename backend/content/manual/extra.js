@@ -200,4 +200,36 @@ const societyAddress = {
   tips: ['Pin the main gate for the most accurate guard tracking.']
 };
 
-module.exports = { nearby, societyAddress, swaps, availability, clockLocation, roster, attendance, live, posts, head, onDuty, rateResident, ratings, openLinks };
+const addPeople = {
+  id: 'add-people',
+  title: 'Adding people yourself',
+  path: '/admin/residents',
+  covers: [],
+  summary: 'Create accounts for residents, guards, guard heads, staff and vendors.',
+  steps: [
+    'Open People and tap Add person. Choose the kind of person: resident, security guard, guard head, staff or service vendor.',
+    'Fill in their name, email and mobile number. For a resident, also enter the flat number.',
+    'Tap Create account. They are approved straight away and get an email with a link to choose their own password. You never need to know it.',
+    'If the email cannot be sent, copy the setup link or share it on WhatsApp. The link works for 7 days.',
+    'In All people, someone who has not signed in yet shows Not signed in yet. Tap Send link again to give them a fresh link.'
+  ],
+  tips: ['Only the platform admin can add a society admin.']
+};
+
+const addPeopleSuper = {
+  id: 'add-people-platform',
+  title: 'Adding admins, guard heads and staff to any society',
+  path: '/admin/residents',
+  covers: [],
+  summary: 'Create accounts for any society from People.',
+  steps: [
+    'Open People and tap Add person. Choose the society, then the kind of person: society admin, guard head, staff, security guard, resident or service vendor.',
+    'Fill in their name, email and mobile number, then tap Create account.',
+    'They are approved straight away and get an email with a link to choose their own password. If the email cannot be sent, copy the link or share it on WhatsApp.',
+    'When you add staff or a guard head, that society\'s admins are told.',
+    'In All people, choose a society to see everyone there, including its admins. Deactivate a society admin there if they should no longer sign in.'
+  ],
+  tips: ['A society can have more than one admin.']
+};
+
+module.exports = { addPeople, addPeopleSuper, nearby, societyAddress, swaps, availability, clockLocation, roster, attendance, live, posts, head, onDuty, rateResident, ratings, openLinks };

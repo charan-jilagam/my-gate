@@ -13,8 +13,8 @@ const raw = {
   },
   staff: (() => { const m = require('./staff'); return { ...m, sections: [...m.sections, x.nearby, x.swaps, x.availability, x.clockLocation] }; })(),
   vendor: (() => { const m = require('./vendor'); return { ...m, sections: [...m.sections, x.rateResident] }; })(),
-  society_admin: (() => { const m = require('./society_admin'); return { ...m, sections: [...m.sections.filter((s) => s.id !== 'roster'), x.roster, x.attendance, x.live, x.swaps, x.posts, x.societyAddress, x.nearby, x.head, x.openLinks] }; })(),
-  super_admin: (() => { const m = require('./super_admin'); return { ...m, sections: [...m.sections.filter((s) => s.id !== 'roster'), x.roster, x.attendance, x.live, x.swaps, x.posts, x.societyAddress, x.nearby, x.head] }; })()
+  society_admin: (() => { const m = require('./society_admin'); return { ...m, sections: [...m.sections.filter((s) => s.id !== 'roster'), x.roster, x.attendance, x.live, x.swaps, x.posts, x.societyAddress, x.addPeople, x.nearby, x.head, x.openLinks] }; })(),
+  super_admin: (() => { const m = require('./super_admin'); return { ...m, sections: [...m.sections.filter((s) => s.id !== 'roster'), x.roster, x.attendance, x.live, x.swaps, x.posts, x.societyAddress, x.addPeopleSuper, x.nearby, x.head] }; })()
 };
 
 // Every guide explains the guide itself first.

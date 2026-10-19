@@ -75,6 +75,7 @@ def api(role, method, path, q):
              dict(_id='f2', name='Service the lifts', category='lift', intervalDays=30, nextDue=d(5), lastDone=d(-25), active=True, status='due_soon', daysLeft=5, history=[], canComplete=role in OFFICE + STAFFY, canManage=role in OFFICE),
              dict(_id='f3', name='Fire extinguisher check', category='fire_safety', intervalDays=180, nextDue=d(100), active=True, status='ok', daysLeft=100, history=[], canComplete=role in OFFICE + STAFFY, canManage=role in OFFICE)]
         return dict(success=True, today=d(0), tasks=t, counts=dict(overdue=1, due_soon=1, ok=1))
+    if p == '/users/create': return dict(success=True, user=dict(_id='nu1', name='Gopi Head', email='gopi@example.com', role='guard_admin'), invite=dict(emailSent=False, setupUrl='https://app.example.com/reset-password/abc123?welcome=1', days=7))
     if p == '/nearby/places': return dict(success=True, places=[dict(id='n1', name='City Care Hospital', lat=17.3862, lng=78.4871, address='MG Road', phone='+91 40 1234 5678', hours='24/7', distanceM=140), dict(id='w2', name='Sri Ganesh Temple', lat=17.392, lng=78.49, address='', phone='', hours='', distanceM=900)])
     if p == '/nearby/home': return dict(success=True, areaMeters=1000, home=dict(name='Green Heights', label='Green Heights main gate', address='12 MG Road, Madhapur, Hyderabad', lat=17.385, lng=78.4867))
     if p == '/roster/people': return dict(success=True, people=[dict(_id='u4', name='Gate Guard', role='security'), dict(_id='u5', name='Sunil Staff', role='staff')])
