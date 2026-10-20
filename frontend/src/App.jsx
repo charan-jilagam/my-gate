@@ -45,6 +45,8 @@ const Emergency = lazy(() => import('./pages/Emergency'))
 const DailyHelp = lazy(() => import('./pages/DailyHelp'))
 const Accounts = lazy(() => import('./pages/Accounts'))
 const Documents = lazy(() => import('./pages/Documents'))
+const Occasions = lazy(() => import('./pages/Occasions'))
+const OccasionDetail = lazy(() => import('./pages/OccasionDetail'))
 const Votes = lazy(() => import('./pages/Votes'))
 const Upkeep = lazy(() => import('./pages/Upkeep'))
 const Roster = lazy(() => import('./pages/Roster'))
@@ -102,6 +104,8 @@ function App() {
                 <Route path="/daily-help" element={<PrivateRoute roles={['resident', 'security', 'guard_admin', ...ADMINS]}><DailyHelp /></PrivateRoute>} />
                 <Route path="/accounts" element={<PrivateRoute roles={['resident', ...ADMINS]}><Accounts /></PrivateRoute>} />
                 <Route path="/documents" element={<PrivateRoute roles={['resident', 'security', 'guard_admin', 'staff', ...ADMINS]}><Documents /></PrivateRoute>} />
+                <Route path="/occasions" element={<PrivateRoute roles={['resident', 'security', 'guard_admin', 'staff', ...ADMINS]}><Occasions /></PrivateRoute>} />
+                <Route path="/occasions/:id" element={<PrivateRoute roles={['resident', 'security', 'guard_admin', 'staff', ...ADMINS]}><OccasionDetail /></PrivateRoute>} />
                 <Route path="/votes" element={<PrivateRoute roles={['resident', ...ADMINS]}><Votes /></PrivateRoute>} />
                 <Route path="/upkeep" element={<PrivateRoute roles={['resident', 'security', 'guard_admin', 'staff', ...ADMINS]}><Upkeep /></PrivateRoute>} />
                 <Route path="/roster" element={<PrivateRoute roles={OFFICE}><Roster /></PrivateRoute>} />

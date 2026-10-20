@@ -333,7 +333,7 @@ const RequestActions = ({ request, onDone, size = 'md', className = '' }) => {
         }
       >
         <div className="space-y-4">
-          <p className="text-sm text-muted">Were they polite, ready on time and fair on payment? Other vendors see the average, and the resident sees your rating.</p>
+          <p className="text-sm text-muted">Were they polite, ready on time and fair on payment? Other vendors see the average. The resident never sees your rating.</p>
           <div className="flex justify-center py-1">
             <StarInput value={rating} onChange={setRating} />
           </div>

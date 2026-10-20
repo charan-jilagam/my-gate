@@ -51,6 +51,16 @@
 }
 
 @layer base {
+  /* Scrolling still works everywhere (wheel, touch, keys); only the bulky scroll bar is not drawn. */
+  * {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  *::-webkit-scrollbar {
+    display: none;
+    width: 0;
+    height: 0;
+  }
   html {
     color-scheme: light;
   }

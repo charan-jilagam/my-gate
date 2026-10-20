@@ -31,6 +31,7 @@ const loaders = [
   () => import('./pages/DailyHelp'),
   () => import('./pages/Accounts'),
   () => import('./pages/Documents'),
+  () => import('./pages/Occasions'),
   () => import('./pages/Votes'),
   () => import('./pages/Upkeep'),
   () => import('./pages/Roster'),

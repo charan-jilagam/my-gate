@@ -1,5 +1,5 @@
 import { Link, Navigate } from 'react-router-dom'
-import { FiAlertTriangle, FiArrowRight, FiCompass, FiMapPin, FiPhone, FiRepeat, FiNavigation, FiBell, FiCalendar, FiCheckCircle, FiClipboard, FiClock, FiCreditCard, FiFileText, FiFolder, FiMessageSquare, FiPackage, FiPieChart, FiShield, FiThumbsUp, FiTool, FiUserPlus, FiUsers } from 'react-icons/fi'
+import { FiAlertTriangle, FiArrowRight, FiCamera, FiCompass, FiMapPin, FiPhone, FiRepeat, FiNavigation, FiBell, FiCalendar, FiCheckCircle, FiClipboard, FiClock, FiCreditCard, FiFileText, FiFolder, FiMessageSquare, FiPackage, FiPieChart, FiShield, FiThumbsUp, FiTool, FiUserPlus, FiUsers } from 'react-icons/fi'
 import { useAuth } from '../contexts/AuthContext'
 import { useT } from '../contexts/LanguageContext'
 import useApi from '../hooks/useApi'
@@ -22,6 +22,7 @@ const QUICK = {
     { to: '/complaints', icon: FiFileText, label: 'Raise a complaint' },
     { to: '/daily-help', icon: FiClock, label: 'Daily help' },
     { to: '/community', icon: FiMessageSquare, label: 'Community' },
+    { to: '/occasions', icon: FiCamera, label: 'Occasions' },
     { to: '/nearby', icon: FiCompass, label: 'Nearby places' },
     { to: '/votes', icon: FiThumbsUp, label: 'Votes' },
     { to: '/documents', icon: FiFolder, label: 'Documents' },
@@ -40,7 +41,8 @@ const QUICK = {
     { to: '/my-shifts', icon: FiClipboard, label: 'My shifts' },
     { to: '/upkeep', icon: FiTool, label: 'Upkeep' },
     { to: '/complaints', icon: FiFileText, label: 'Complaints' },
-    { to: '/notices', icon: FiBell, label: 'Notices' }
+    { to: '/notices', icon: FiBell, label: 'Notices' },
+    { to: '/occasions', icon: FiCamera, label: 'Add occasion photos' }
   ],
   society_admin: [
     { to: '/admin/residents', icon: FiCheckCircle, label: 'Approve people' },
@@ -51,6 +53,7 @@ const QUICK = {
     { to: '/votes', icon: FiThumbsUp, label: 'Votes' },
     { to: '/roster', icon: FiClipboard, label: 'Duty roster' },
     { to: '/upkeep', icon: FiTool, label: 'Upkeep' },
+    { to: '/occasions', icon: FiCamera, label: 'Occasions' },
     { to: '/documents', icon: FiFolder, label: 'Documents' },
     { to: '/emergency', icon: FiAlertTriangle, label: 'Emergency', danger: true }
   ]

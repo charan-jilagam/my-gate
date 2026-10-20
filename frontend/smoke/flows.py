@@ -411,8 +411,25 @@ def invite_with_leaving_time(page):
     sent = [b for m, p, b in posts if m == 'POST' and p == '/visitors/invite']
     assert sent and sent[-1]['plannedExit'].endswith('Z') and 'validForHours' in sent[-1], sent[-1:]
 
+def admin_adds_occasion(page):
+    page.goto(smoke.BASE + '/occasions'); page.wait_for_selector('text=Diwali night')
+    page.locator('main button:has-text("Add occasion")').first.click(); page.wait_for_selector('#oc-title')
+    page.fill('#oc-title', 'Holi get-together'); page.fill('#oc-date', '2026-03-04'); page.fill('#oc-venue', 'Park')
+    page.click('button[form="occasion-form"]'); page.wait_for_timeout(800)
+    sent = [b for m, p, b in posts if m == 'POST' and p == '/occasions']
+    assert sent and sent[-1]['title'] == 'Holi get-together' and sent[-1]['date'] == '2026-03-04', sent[-1:]
+
+def resident_views_occasion(page):
+    page.goto(smoke.BASE + '/occasions'); page.wait_for_selector('text=Diwali night')
+    assert page.locator('button:has-text("Add occasion")').count() == 0, 'residents cannot add occasions'
+    page.locator('a:has-text("Diwali night")').first.click(); page.wait_for_selector('text=Rangoli won by Block B')
+    page.locator('main img').nth(1).click(); page.wait_for_selector('[role=dialog]')
+    page.keyboard.press('Escape'); page.wait_for_timeout(300)
+    assert page.locator('footer:has-text("Nivero-Dev Team")').count() >= 1, 'footer credit missing'
+    assert page.evaluate('document.documentElement.scrollWidth <= window.innerWidth'), 'horizontal overflow'
+
 def main():
-  for role, name, fn in [('resident', 'book service', book_service), ('resident', 'amenity booking', amenity), ('resident', 'SOS', sos), ('resident', 'RSVP', rsvp), ('resident', 'notification deep link', notif), ('society_admin', 'admin adds a guard head', admin_adds_person), ('society_admin', 'admin cannot add admins', admin_cannot_add_admin), ('super_admin', 'super admin adds a society admin', super_adds_admin), ('staff', 'staff cannot add people', staff_has_no_add), ('resident', 'switching screens does not flash a loader', no_flash), ('security', 'gate check', gate_check), ('resident', 'outside tap keeps typed details', modal_outside_tap), ('resident', 'list reloads after a save', refreshes_after_action), ('resident', 'helper attendance shows time inside and downloads', helper_attendance), ('security', 'old daily help code still finds them', helper_old_code), ('security', 'check-in uses the leaving time the resident set', checkin_uses_planned_exit), ('resident', 'invite with a leaving time', invite_with_leaving_time),
+  for role, name, fn in [('resident', 'book service', book_service), ('resident', 'amenity booking', amenity), ('resident', 'SOS', sos), ('resident', 'RSVP', rsvp), ('resident', 'notification deep link', notif), ('society_admin', 'admin adds a guard head', admin_adds_person), ('society_admin', 'admin cannot add admins', admin_cannot_add_admin), ('super_admin', 'super admin adds a society admin', super_adds_admin), ('staff', 'staff cannot add people', staff_has_no_add), ('resident', 'switching screens does not flash a loader', no_flash), ('security', 'gate check', gate_check), ('resident', 'outside tap keeps typed details', modal_outside_tap), ('resident', 'list reloads after a save', refreshes_after_action), ('resident', 'helper attendance shows time inside and downloads', helper_attendance), ('security', 'old daily help code still finds them', helper_old_code), ('security', 'check-in uses the leaving time the resident set', checkin_uses_planned_exit), ('resident', 'invite with a leaving time', invite_with_leaving_time), ('society_admin', 'admin adds an occasion', admin_adds_occasion), ('resident', 'resident views occasion photos', resident_views_occasion),
                          ('resident', 'language switch', language), ('resident', 'data and headings translate and restore', translate_data), ('resident', 'guide is role-only and searchable', help_isolation), ('resident', 'guide is translated and searchable in Telugu', guide_in_telugu), ('society_admin', 'admin guide', help_admin),
                          ('resident', 'cast a vote', vote), ('staff', 'mark upkeep done', mark_done), ('society_admin', 'add shifts', add_shift),
                          ('society_admin', 'create a vote', new_vote), ('society_admin', 'add a document', add_document),

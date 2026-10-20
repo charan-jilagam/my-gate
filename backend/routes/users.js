@@ -17,16 +17,16 @@ const Society = require('../models/Society');
 // @access  Private
 router.get('/notifications', protect, async (req, res) => {
   try {
-    const notifications = await Notification.find({ userId: req.user.id })
-      .populate('relatedId')
+    // A vendor's private rating of a resident must never reach the resident: older "X rated you" notices are hidden,
+    // and the related job is loaded without the rating fields.
+    const visible = { userId: req.user.id, $nor: [{ type: 'service_review', title: /rated you \d stars?$/ }] };
+    const notifications = await Notification.find(visible)
+      .populate({ path: 'relatedId', select: '-residentRating -residentReview -residentRatedAt' })
       .sort({ createdAt: -1 })
       .limit(Math.min(parseInt(req.query.limit) || 200, 500))
       .skip(parseInt(req.query.skip) || 0);
 
-    const unreadCount = await Notification.countDocuments({
-      userId: req.user.id,
-      isRead: false
-    });
+    const unreadCount = await Notification.countDocuments({ ...visible, isRead: false });
 
     res.json({
       success: true,

@@ -6,6 +6,7 @@ import toast from 'react-hot-toast'
 import api from '../services/api'
 import { Spinner, formatDate } from '../components/ui'
 import { Logo } from '../components/Layout'
+import Footer from '../components/Footer'
 
 const STATE_TEXT = {
   checked_in: 'You are inside. Show this pass again when you leave.',
@@ -76,6 +77,7 @@ const PublicPass = () => {
             </div>
           </div>
         )}
+        <Footer className="mt-8" />
       </div>
     </div>
   )

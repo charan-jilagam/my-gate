@@ -4,10 +4,12 @@ import { preloadPages } from '../preload'
 import { onDataChange } from '../utils/apiCache'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import ErrorBoundary from './ErrorBoundary'
+import Footer from './Footer'
 import {
   FiAlertTriangle,
   FiBell,
   FiBookOpen,
+  FiCamera,
   FiCalendar,
   FiCheckCircle,
   FiClipboard,
@@ -67,6 +69,7 @@ const I = {
   jobs: { to: '/work', icon: FiTool, label: 'My jobs' },
   schedule: { to: '/work/setup', icon: FiCalendar, label: 'My schedule' },
   documents: { to: '/documents', icon: FiFolder, label: 'Documents' },
+  occasions: { to: '/occasions', icon: FiCamera, label: 'Occasions' },
   votes: { to: '/votes', icon: FiThumbsUp, label: 'Votes' },
   upkeep: { to: '/upkeep', icon: FiTool, label: 'Upkeep' },
   roster: { to: '/roster', icon: FiClipboard, label: 'Duty roster' },
@@ -84,27 +87,27 @@ const NAV = {
   resident: [
     { items: [I.home] },
     { title: 'At the gate', items: [I.visitors, I.deliveries, I.vehicles, I.help] },
-    { title: 'Home and community', items: [I.services, I.bookings, I.community, I.nearby, I.notices, I.votes, I.documents] },
+    { title: 'Home and community', items: [I.services, I.bookings, I.community, I.nearby, I.notices, I.occasions, I.votes, I.documents] },
     { title: 'Money and help', items: [I.payments, I.accounts, I.complaints, I.upkeep, I.emergency] },
     { items: [I.guide] }
   ],
   security: [
     { items: [I.home, I.gate, I.shifts, I.swaps] },
     { title: 'Gate', items: [I.visitors, I.deliveries, I.vehicles, I.help] },
-    { title: 'Society', items: [I.notices, I.nearby, I.emergency, I.upkeep, I.documents] },
+    { title: 'Society', items: [I.notices, I.occasions, I.nearby, I.emergency, I.upkeep, I.documents] },
     { items: [I.guide] }
   ],
   guard_admin: [
     { items: [I.home, I.gate, I.shifts, I.swaps] },
     { title: 'Guards', items: [I.roster, I.attendance, I.live, I.posts] },
     { title: 'Gate', items: [I.visitors, I.deliveries, I.vehicles, I.help] },
-    { title: 'Society', items: [I.notices, I.nearby, I.emergency, I.upkeep, I.documents] },
+    { title: 'Society', items: [I.notices, I.occasions, I.nearby, I.emergency, I.upkeep, I.documents] },
     { items: [I.guide] }
   ],
   society_admin: [
     { items: [I.home, I.people] },
     { title: 'Gate', items: [I.gate, I.visitors, I.deliveries, I.vehicles, I.help] },
-    { title: 'Society', items: [I.notices, I.nearby, I.votes, I.complaints, I.community, I.bookings, I.adminServices, I.emergency] },
+    { title: 'Society', items: [I.notices, I.occasions, I.nearby, I.votes, I.complaints, I.community, I.bookings, I.adminServices, I.emergency] },
     { title: 'Guards', items: [I.roster, I.attendance, I.live, I.swaps, I.posts] },
     { title: 'Operations', items: [I.upkeep, I.documents] },
     { title: 'Money', items: [I.payments, I.accounts] },
@@ -114,14 +117,14 @@ const NAV = {
   super_admin: [
     { items: [I.home, I.societies, I.people] },
     { title: 'Gate', items: [I.visitors, I.deliveries, I.vehicles, I.help] },
-    { title: 'Society', items: [I.notices, I.nearby, I.votes, I.complaints, I.community, I.bookings, I.adminServices, I.emergency] },
+    { title: 'Society', items: [I.notices, I.occasions, I.nearby, I.votes, I.complaints, I.community, I.bookings, I.adminServices, I.emergency] },
     { title: 'Guards', items: [I.roster, I.attendance, I.live, I.swaps, I.posts] },
     { title: 'Operations', items: [I.upkeep, I.documents] },
     { title: 'Money', items: [I.payments, I.accounts] },
     { items: [I.guide] }
   ],
   staff: [
-    { items: [I.home, I.people, I.bookings, I.shifts, I.swaps, I.upkeep, I.complaints, I.notices, I.nearby, I.documents] },
+    { items: [I.home, I.people, I.bookings, I.shifts, I.swaps, I.upkeep, I.complaints, I.notices, I.occasions, I.nearby, I.documents] },
     { items: [I.guide] }
   ],
   vendor: [
@@ -528,6 +531,7 @@ const Layout = () => {
             <div key={location.pathname} className="page-in"><Outlet /></div>
           </Suspense>
         </ErrorBoundary>
+        <Footer className="mt-12 border-t border-line pt-5" />
       </main>
 
       {/* Phone navigation: the main places for this role, always one thumb away. */}

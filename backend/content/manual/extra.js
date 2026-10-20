@@ -139,7 +139,7 @@ const rateResident = {
   summary: 'After a job is complete, rate how it went.',
   steps: [
     'Open a completed job and tap Rate the resident. Choose 1 to 5 stars and add a comment if you like.',
-    'The resident sees your rating. Other vendors see the average rating of a resident before they accept a job.'
+    'Your rating is private. The resident is not told and cannot see it. Other vendors see the average rating of a resident before they accept a job.'
   ],
   tips: ['You can rate each job once.']
 };
@@ -184,6 +184,39 @@ const nearby = {
     'Use 2 km or 5 km to look further, or From where I am to search around you instead of the society.'
   ],
   tips: ['Places come from OpenStreetMap, so a new shop may be missing. Call ahead for timings.']
+};
+
+const occasions = {
+  id: 'occasions',
+  title: 'Occasions and photos',
+  path: '/occasions',
+  covers: ['/occasions'],
+  summary: 'Festivals, celebrations and get-togethers in your society, with photos.',
+  steps: [
+    'Open Occasions. The newest one is shown large at the top, and older ones are below as cards with their cover photo and date.',
+    'Use the type buttons (Festival, Sports and so on) and the year to find one.',
+    'Tap an occasion to see the date, venue, who organised it, how many people came, what happened and its highlights.',
+    'Tap any photo to see it full screen. Swipe or use the arrows to move between photos, and the cross to close.',
+    'You get a notification when the society adds a new occasion.'
+  ],
+  tips: ['Only the society office and staff can add occasions.']
+};
+
+const occasionsManage = {
+  id: 'occasions',
+  title: 'Occasions and photos',
+  path: '/occasions',
+  covers: ['/occasions'],
+  summary: 'Add festivals and celebrations with photos for everyone in the society to see.',
+  steps: [
+    'Open Occasions and tap Add occasion.',
+    'Enter the name, the type, the date (and the last day if it ran for several days), the venue, who organised it and roughly how many people came.',
+    'Write a few lines about it, and add up to 8 highlights, such as "Rangoli contest won by Block B".',
+    'Tap Add photos and choose up to 24 pictures from your phone. Give a photo a caption if you like. The first photo is the cover. Tap the star on another photo to make it the cover.',
+    'Leave Tell residents and staff about it ticked to send everyone a notification, then tap Publish.',
+    'To change or remove an occasion, open it and tap Edit or Remove. Staff can change only the occasions they added; the society office can change all of them.'
+  ],
+  tips: ['Large phone photos are shrunk before they upload, so they send quickly on mobile data.', 'Photos of children are best shared only with the parents\' consent.']
 };
 
 const societyAddress = {
@@ -232,4 +265,4 @@ const addPeopleSuper = {
   tips: ['A society can have more than one admin.']
 };
 
-module.exports = { addPeople, addPeopleSuper, nearby, societyAddress, swaps, availability, clockLocation, roster, attendance, live, posts, head, onDuty, rateResident, ratings, openLinks };
+module.exports = { occasions, occasionsManage, addPeople, addPeopleSuper, nearby, societyAddress, swaps, availability, clockLocation, roster, attendance, live, posts, head, onDuty, rateResident, ratings, openLinks };

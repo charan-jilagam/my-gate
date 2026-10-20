@@ -685,7 +685,40 @@ router.put(
 );
 
 // @route   PUT /api/service-requests/:id/rate-resident
-// @desc    The vendor rates the resident after a completed job (once). Other vendors and the office can see the score.
+// @desc    The vendor rates the resident after a completed job (once). Private: other vendors and the office can see it, the resident cannot.
+router.put(
+  '/:id/rate-resident',
+  protect,
+  authorize('vendor'),
+  [
+    body('rating').isInt({ min: 1, max: 5 }).withMessage('Choose between 1 and 5 stars'),
+    body('review').optional({ nullable: true }).isString().isLength({ max: 300 }).withMessage('Keep the comment under 300 characters')
+  ],
+  async (req, res) => {
+    try {
+      if (invalid(req, res)) return undefined;
+      const request = await loadRequest(req.params.id);
+      if (!request) return fail(res, 404, 'Request not found');
+      if (idOf(request.providerUserId) !== String(req.user.id)) return fail(res, 403, 'This is not your job.');
+      if (request.status !== 'completed') return fail(res, 409, 'You can rate the resident once the job is completed.');
+      if (request.residentRating) return fail(res, 409, 'You have already rated this resident.');
+
+      request.residentRating = Number(req.body.rating);
+      request.residentReview = (req.body.review || '').trim() || undefined;
+      request.residentRatedAt = new Date();
+      await request.save();
+
+      // Deliberately no notification: the resident is not told about this rating, and cannot see it.
+      await respond(res, req, request, 'Thanks for rating.');
+      return undefined;
+    } catch (error) {
+      return serverError(res, error, 'Review service request');
+    }
+  }
+);
+
+// @route   PUT /api/service-requests/:id/rate-resident
+// @desc    The vendor rates the resident after a completed job (once). Private: other vendors and the office can see it, the resident cannot.
 router.put(
   '/:id/rate-resident',
   protect,

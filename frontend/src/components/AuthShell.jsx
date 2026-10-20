@@ -1,5 +1,6 @@
 import { FiBell, FiCheckCircle, FiMapPin, FiShield, FiTruck } from 'react-icons/fi'
 import { LogoMark } from './Layout'
+import Footer from './Footer'
 
 const POINTS = [
   [FiShield, 'Guests are pre-approved before they reach the gate'],
@@ -62,6 +63,7 @@ const AuthShell = ({ title, subtitle, children, footer }) => (
           {footer && <div className="mt-6 rounded-xl bg-sunken px-4 py-3 text-center text-sm text-muted">{footer}</div>}
         </div>
       </main>
+      <Footer className="px-4 pb-6" />
     </div>
   </div>
 )

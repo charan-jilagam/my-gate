@@ -62,6 +62,12 @@ def api(role, method, path, q):
         return dict(success=True, requests=[r, pend] if role == 'vendor' else [r])
 
     if p == '/manual': return dict(success=True, manual=MANUALS[role])
+    if p.startswith('/occasions'):
+        img = 'data:image/svg+xml;utf8,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%27400%27 height=%27300%27%3E%3Crect width=%27400%27 height=%27300%27 fill=%27%23e9a23b%27/%3E%3C/svg%3E'
+        OC = dict(_id='oc1', title='Diwali night', kind='festival', date='2026-10-18', venue='Clubhouse lawn', hostedBy='Cultural committee', attendees=120, description='Lamps, sweets and a rangoli contest.', highlights=['Rangoli won by Block B'], photos=[dict(url=img, caption='Lamps'), dict(url=img, caption='Rangoli')], cover=img, preview=[img], photoCount=2, createdAt=NOW)
+        if p == '/occasions': return dict(success=True, occasions=[OC], canAdd=role in OFFICE or role == 'staff')
+        if p == '/occasions/oc1': return dict(success=True, occasion=OC, canChange=role in OFFICE or role == 'staff')
+        return dict(success=True, message='Occasion added', occasion=OC)
     if p == '/documents': return dict(success=True, documents=[dict(_id='d1', title='Society bylaws 2026', category='bylaws', description='Rules everyone follows', url='/uploads/a.pdf', fileName='bylaws.pdf', visibility='all', createdAt=NOW)] + ([dict(_id='d2', title='Audit draft', category='financial', url='https://example.com/audit', visibility='admins', createdAt=NOW)] if role in OFFICE else []))
     if p == '/elections':
         return dict(success=True, elections=[
@@ -158,15 +164,15 @@ def run(role, pages, mobile=True):
 if __name__ == '__main__':
     allerr = []
     plans = {
-      'resident': [('/nearby', ['Nearby places', 'City Care Hospital', 'Walking directions']), ('/documents', ['Society bylaws 2026', 'Bylaws and rules']), ('/votes', ['Install solar panels?', 'Open now']), ('/upkeep', ['Clean overhead water tanks', 'Overdue']), ('/help', ['Resident guide', 'How to use this guide', 'Getting started']), ('/dashboard', ['Pre-approve a visitor', 'Your home services', 'Leaking kitchen tap']), ('/services', ['Home services', 'Ravi Kumar', 'Next free']),
+      'resident': [('/nearby', ['Nearby places', 'City Care Hospital', 'Walking directions']), ('/documents', ['Society bylaws 2026', 'Bylaws and rules']), ('/occasions', ['Occasions', 'Diwali night', 'Clubhouse lawn']), ('/occasions/oc1', ['Diwali night', 'Rangoli won by Block B']), ('/votes', ['Install solar panels?', 'Open now']), ('/upkeep', ['Clean overhead water tanks', 'Overdue']), ('/help', ['Resident guide', 'How to use this guide', 'Getting started']), ('/dashboard', ['Pre-approve a visitor', 'Your home services', 'Leaking kitchen tap']), ('/services', ['Home services', 'Ravi Kumar', 'Next free']),
                    ('/services/providers/p1', ['Choose a time', 'Fifteen years', 'Verified']), ('/services/requests', ['My bookings', 'Leaking kitchen tap']),
                    ('/services/requests/r1', ['4821', 'Progress', 'Cancel']), ('/community', ['Study table', 'Pinned']), ('/community/po1', ['Is it still available?']),
                    ('/emergency', ['SOS', 'City Police']), ('/daily-help', ['Lakshmi', '482913', 'Inside since']), ('/accounts', ['Collected', 'Where the money went', 'Security']),
                    ('/bookings', ['Clubhouse', 'Pay ₹1,000']), ('/notices', ['Diwali night', 'people coming', 'Going']), ('/visitors/abc123', [])],
       'vendor': [('/help', ['Service provider guide', 'My schedule']), ('/dashboard', ['Need your reply', 'Waiting for your reply']), ('/work', ['Waiting for your reply', 'No power in bedroom', 'Accept']), ('/work/setup', ['Working hours', 'Days off', 'Slot length']), ('/services/requests/r1', ['Progress'])],
-      'society_admin': [('/help', ['Society admin guide', 'Duty roster']), ('/documents', ['Add document', 'Audit draft', 'Office only']), ('/votes', ['New vote', 'Install solar panels?']), ('/upkeep', ['Add job', 'Clean overhead water tanks']), ('/roster', ['Add shifts', 'Gate Guard', 'overnight']), ('/dashboard', ['Approve people', 'Duty roster']), ('/nearby', ['Nearby places', 'Green Heights main gate']), ('/admin/services', ['Ravi Kumar', 'Verified']), ('/accounts', ['Add expense', 'Lift service']), ('/emergency', ['Medical emergency', 'I am responding']), ('/admin/societies', [])],
+      'society_admin': [('/help', ['Society admin guide', 'Duty roster']), ('/documents', ['Add document', 'Audit draft', 'Office only']), ('/occasions', ['Add occasion', 'Diwali night']), ('/votes', ['New vote', 'Install solar panels?']), ('/upkeep', ['Add job', 'Clean overhead water tanks']), ('/roster', ['Add shifts', 'Gate Guard', 'overnight']), ('/dashboard', ['Approve people', 'Duty roster']), ('/nearby', ['Nearby places', 'Green Heights main gate']), ('/admin/services', ['Ravi Kumar', 'Verified']), ('/accounts', ['Add expense', 'Lift service']), ('/emergency', ['Medical emergency', 'I am responding']), ('/admin/societies', [])],
       'security': [('/help', ['Security guard guide', 'Gate console']), ('/my-shifts', ['My shifts', 'Clock in', 'overnight']), ('/upkeep', ['Mark done']), ('/documents', ['Society bylaws 2026']), ('/dashboard', ['Gate console', 'My shifts']), ('/daily-help', ['Daily help at the gate']), ('/emergency', ['Medical emergency'])],
-      'staff': [('/dashboard', ['My shifts', 'Upkeep']), ('/admin/residents', ['Waiting for approval']), ('/bookings', ['Clubhouse', 'Approve']), ('/nearby', ['Nearby places']), ('/my-shifts', ['Clock in']), ('/upkeep', ['Mark done']), ('/help', ['Staff guide']), ('/documents', ['Society bylaws 2026'])],
+      'staff': [('/dashboard', ['My shifts', 'Upkeep']), ('/admin/residents', ['Waiting for approval']), ('/bookings', ['Clubhouse', 'Approve']), ('/nearby', ['Nearby places']), ('/my-shifts', ['Clock in']), ('/upkeep', ['Mark done']), ('/help', ['Staff guide']), ('/documents', ['Society bylaws 2026']), ('/occasions', ['Add occasion', 'Diwali night'])],
       'super_admin': [('/help', ['Platform admin guide', 'Societies']), ('/roster', ['Society', 'Green Heights', 'Add shifts']), ('/votes', ['Green Heights', 'New vote']), ('/documents', ['Green Heights', 'Add document']), ('/upkeep', ['Green Heights', 'Add job'])],
     }
     for role, pages in plans.items():

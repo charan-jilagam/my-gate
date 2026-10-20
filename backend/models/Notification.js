@@ -35,6 +35,7 @@ const notificationSchema = new mongoose.Schema({
       'community',
       'election',
       'document',
+      'occasion',
       'facility',
       'shift',
       'shift_swap',
@@ -57,7 +58,7 @@ const notificationSchema = new mongoose.Schema({
   },
   relatedModel: {
     type: String,
-    enum: ['Visitor', 'Delivery', 'Vehicle', 'Payment', 'Complaint', 'Notice', 'Booking', 'ServiceRequest', 'EmergencyAlert', 'DailyHelp', 'Post', 'Election', 'SocietyDocument', 'FacilityTask', 'Shift', 'SwapRequest']
+    enum: ['Visitor', 'Delivery', 'Vehicle', 'Payment', 'Complaint', 'Notice', 'Booking', 'ServiceRequest', 'EmergencyAlert', 'DailyHelp', 'Post', 'Election', 'SocietyDocument', 'Occasion', 'FacilityTask', 'Shift', 'SwapRequest']
   },
   isRead: {
     type: Boolean,

@@ -29,15 +29,25 @@ const rateResident = (r, who, body) => h.api().put(`/api/service-requests/${r._i
 const notesTo = (user) => h.savedDocs(Notification).filter((n) => String(n.userId) === String(user._id));
 
 describe('the vendor rates the resident', () => {
-  test('after the job is done, with stars and a comment; the resident is told', async () => {
+  test('after the job is done, with stars and a comment; the resident is NOT told', async () => {
     const r = job({ status: 'completed' });
     const res = await rateResident(r, vendor, { rating: 5, review: 'Polite and ready on time' });
     expect(res.status).toBe(200);
     expect(r).toMatchObject({ residentRating: 5, residentReview: 'Polite and ready on time' });
     expect(r.residentRatedAt).toBeInstanceOf(Date);
     expect(res.body.request).toMatchObject({ residentRating: 5, actions: expect.objectContaining({ rateResident: false }) });
-    expect(notesTo(resident)[0]).toMatchObject({ type: 'service_review', title: 'Ravi rated you 5 stars' });
-    expect(notesTo(resident)[0].actionUrl).toBe(`/services/requests/${r._id}`);
+    expect(notesTo(resident)).toHaveLength(0);
+  });
+
+  test('the resident never sees it, in the job, the list or the average', async () => {
+    const r = job({ status: 'completed', residentRating: 2, residentReview: 'Late to pay', residentRatedAt: new Date() });
+    const one = await h.api().get(`/api/service-requests/${r._id}`).set(h.auth(resident));
+    expect(one.status).toBe(200);
+    for (const k of ['residentRating', 'residentReview', 'residentRatedAt']) expect(one.body.request[k]).toBeUndefined();
+    expect(one.body.request.resident.score).toBeUndefined();
+    expect(JSON.stringify(one.body)).not.toMatch(/Late to pay/);
+    const mine = await h.api().get(`/api/service-requests/${r._id}`).set(h.auth(vendor));
+    expect(mine.body.request).toMatchObject({ residentRating: 2, residentReview: 'Late to pay' });
   });
 
   test('the vendor is offered the button only for a finished job they have not rated', async () => {
@@ -69,13 +79,13 @@ describe('the vendor rates the resident', () => {
     expect((await rateResident(r, admin, { rating: 5 })).status).toBe(403);
   });
 
-  test('the vendor sees how other vendors rated this resident, and the resident sees their own score', async () => {
+  test('the vendor sees how other vendors rated this resident, and the resident does not', async () => {
     const r = job({ status: 'requested' });
     mockingoose(ServiceRequest).toReturn([{ _id: resident._id, avg: 4.5, n: 6 }], 'aggregate');
     const asVendor = await h.api().get(`/api/service-requests/${r._id}`).set(h.auth(vendor));
     expect(asVendor.body.request.resident.score).toEqual({ avg: 4.5, count: 6 });
     const asResident = await h.api().get(`/api/service-requests/${r._id}`).set(h.auth(resident));
-    expect(asResident.body.request.resident.score).toEqual({ avg: 4.5, count: 6 });
+    expect(asResident.body.request.resident.score).toBeUndefined();
     const list = await h.api().get('/api/service-requests').set(h.auth(vendor));
     expect(list.status).toBe(200);
   });

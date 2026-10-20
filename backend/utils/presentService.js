@@ -72,7 +72,7 @@ const presentRequest = (doc, viewer, extra = {}) => {
       photo: resident ? resident.profilePic : undefined,
       // A vendor sees the resident's number only once the job is confirmed.
       phone: resident && (isResident || contactVisible) ? resident.phone : undefined,
-      // How vendors have rated this resident so far (shown to the vendor and the office, and to the resident themselves).
+      // How vendors have rated this resident so far. Shown to vendors and the office only, never to the resident.
       score: extra.residentScore || undefined
     },
     provider: {
@@ -105,6 +105,14 @@ const presentRequest = (doc, viewer, extra = {}) => {
     actions: requestActions({ viewerRole, status: r.status, paymentStatus: r.paymentStatus, rated: !!r.rating, residentRated: !!r.residentRating, finalAmount: r.finalAmount }),
     createdAt: r.createdAt
   };
+
+  // What a vendor thinks of a resident is private: the resident never sees the stars, the comment, the date or the average.
+  if (isResident) {
+    delete out.residentRating;
+    delete out.residentReview;
+    delete out.residentRatedAt;
+    delete out.resident.score;
+  }
 
   // Only the resident ever sees the start code, and only until the work begins.
   if (isResident && ['confirmed', 'on_the_way'].includes(r.status) && r.startOtp) out.startOtp = r.startOtp;

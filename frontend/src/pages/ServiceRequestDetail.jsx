@@ -117,9 +117,9 @@ const ServiceRequestDetail = () => {
                     <dd>{r.workSummary}</dd>
                   </div>
                 )}
-                {r.residentRating && (
+                {isVendor && r.residentRating && (
                   <div className="sm:col-span-2">
-                    <dt className="text-xs text-muted">{isVendor ? 'Your rating of the resident' : 'Vendor rated you'}</dt>
+                    <dt className="text-xs text-muted">Your rating of the resident</dt>
                     <dd>
                       <Stars value={r.residentRating} />
                       {r.residentReview && <p className="mt-1">{r.residentReview}</p>}

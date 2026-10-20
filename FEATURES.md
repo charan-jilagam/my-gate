@@ -265,3 +265,10 @@ Numbers without a country code get `+91`; change it with `SMS_DEFAULT_COUNTRY_CO
 - **Daily help QR**: a new code and QR are made for every helper each day. The QR is mailed every morning (05:00 society time, `DAILY_CODE_MAIL_HOUR`) to the helper's email, or to the households when none was given. If a helper says yesterday's code, the guard still finds them, can check them in, and is shown today's code to tell them (codes up to 2 days old identify, never open the gate by themselves).
 - **Daily help attendance**: every visit shows how long the helper stayed inside (and "so far" while inside), the month shows days present and total time, and it downloads as CSV or PDF. A visit never closed at the gate counts as unknown, not as days.
 - **Look**: the sign-in panel uses one teal gradient without floating circles; dashboard tiles and the attention list line up on phones.
+
+## Occasions, private ratings, footer, scrollbars (Oct 20)
+
+- **Occasions** (`/occasions`): the society office and staff add festivals, celebrations, matches and get-togethers with date(s), venue, organiser, attendance, a description, up to 8 highlights and up to 24 photos (first photo is the cover). Everyone in the society can browse them (featured latest, filters by type and year, full-screen photo viewer). Staff can edit only their own; the office can edit all. Optional notification to residents and staff.
+- **Private vendor ratings**: a vendor's rating and comment about a resident are never shown to that resident (job page, notifications, API). Vendors still see the resident's average.
+- **Footer**: "© year Nivora. All rights reserved. Developed with ♥ by Nivero-Dev Team" on every screen, including sign-in and guest pass pages.
+- **Scrollbars**: hidden everywhere; scrolling by touch, wheel and keyboard still works.
