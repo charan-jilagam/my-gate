@@ -344,8 +344,75 @@ def staff_has_no_add(page):
     page.wait_for_timeout(500)
     assert page.locator('button:has-text("Add person")').count() == 0
 
+def modal_outside_tap(page):
+    page.goto(smoke.BASE + '/daily-help'); page.wait_for_selector('button:has-text("Add helper")')
+    page.locator('main button:has-text("Add helper")').first.click(); page.wait_for_selector('#h-name')
+    page.fill('#h-name', 'Savitri')
+    page.mouse.click(8, 300)                       # a tap on the dimmed area outside the form
+    page.wait_for_timeout(300)
+    assert page.locator('#h-name').count() == 1 and page.input_value('#h-name') == 'Savitri', 'tapping outside must not close a form that has been typed in'
+    page.keyboard.press('Escape'); page.wait_for_timeout(300)
+    assert page.locator('#h-name').count() == 1, 'Escape must not throw away typed details either'
+    page.click('button:has-text("Cancel")'); page.wait_for_timeout(300)
+    assert page.locator('#h-name').count() == 0, 'the Cancel button still closes it'
+    # a dialog with no fields (a confirmation) is still closed by tapping outside
+    page.locator('button:has-text("Remove")').first.click(); page.wait_for_selector('text=Remove this helper?')
+    page.mouse.click(8, 300); page.wait_for_timeout(300)
+    assert page.locator('text=Remove this helper?').count() == 0
+
+def refreshes_after_action(page):
+    seen = []
+    page.on('request', lambda r: seen.append((r.method, r.url.split('/api')[-1])) if '/api/daily-help' in r.url and '/pass' not in r.url else None)
+    page.goto(smoke.BASE + '/daily-help'); page.wait_for_selector('text=Lakshmi'); page.wait_for_timeout(600)
+    page.click('button:has-text("Edit")'); page.wait_for_selector('#e-email')
+    page.fill('#e-email', 'lakshmi@example.com')
+    before = len([1 for m, u in seen if m == 'GET' and u.startswith('/daily-help')])
+    page.click('button[form="edit-help-form"]'); page.wait_for_timeout(1200)
+    after = len([1 for m, u in seen if m == 'GET' and u.startswith('/daily-help')])
+    sent = [b for m, p, b in posts if m == 'PUT' and p == '/daily-help/h1']
+    assert sent and sent[-1]['email'] == 'lakshmi@example.com', sent
+    assert after > before, 'the list must reload by itself after a save, without a manual refresh'
+
+def helper_attendance(page):
+    page.goto(smoke.BASE + '/daily-help'); page.wait_for_selector('text=Lakshmi')
+    assert 'Inside since' in page.inner_text('main') and ' · ' in page.inner_text('main')
+    page.click('button:has-text("Attendance")'); page.wait_for_selector('text=4 h in total')
+    body = page.inner_text('[role=dialog]')
+    assert '2 h 30 min' in body and '1 h 30 min' in body and '2 days present' in body, body
+    with page.expect_download() as dl: page.click('[role=dialog] button:has-text("CSV")')
+    path = dl.value.path(); text = open(path, encoding='utf-8-sig').read()
+    assert 'Time inside' in text and '2 h 30 min' in text and 'Total' in text and '240' in text, text
+
+def helper_old_code(page):
+    page.goto(smoke.BASE + '/daily-help'); page.wait_for_selector('[aria-label="Helper code"]')
+    page.fill('[aria-label="Helper code"]', '111222'); page.click('button:has-text("Find")')
+    page.wait_for_selector('text=That was an old code'); assert '482913' in page.inner_text('main')
+    page.locator('main button:has-text("Check in")').click(); page.wait_for_timeout(500)
+
+def checkin_uses_planned_exit(page):
+    page.goto(smoke.BASE + '/gate'); page.wait_for_selector('#pass')
+    page.fill('#pass', 'FEEDBEEF'); page.click('button:has-text("Find")'); page.wait_for_selector('text=Approved by')
+    page.locator('main button:has-text("Check in")').first.click()
+    page.wait_for_selector('text=The resident set the leaving time when inviting.')
+    assert page.locator('text=How long will they stay?').count() == 0, 'the guard has no stay to pick'
+    assert 'Expected out by' in page.inner_text('[role=dialog]')
+    page.click('button:has-text("Let them in")'); page.wait_for_timeout(600)
+    sent = [b for m, p, b in posts if m == 'PUT' and p.endswith('/check-in')]
+    assert sent and sent[-1] == dict(code='FEEDBEEF'), sent[-1:]
+
+def invite_with_leaving_time(page):
+    page.goto(smoke.BASE + '/visitors'); page.wait_for_selector('button:has-text("Invite visitor")')
+    page.locator('main button:has-text("Invite visitor")').first.click(); page.wait_for_selector('#v-out')
+    assert page.locator('#v-valid').count() == 1
+    page.fill('#v-name', 'Guest Two'); page.fill('#v-phone', '9812345678')
+    page.fill('#v-out', (__import__('datetime').datetime.now() + __import__('datetime').timedelta(days=2)).strftime('%Y-%m-%dT%H:%M'))
+    assert page.locator('#v-valid').count() == 0, 'with a leaving time the validity choice is not needed'
+    page.click('button[form="invite-form"]'); page.wait_for_timeout(800)
+    sent = [b for m, p, b in posts if m == 'POST' and p == '/visitors/invite']
+    assert sent and sent[-1]['plannedExit'].endswith('Z') and 'validForHours' in sent[-1], sent[-1:]
+
 def main():
-  for role, name, fn in [('resident', 'book service', book_service), ('resident', 'amenity booking', amenity), ('resident', 'SOS', sos), ('resident', 'RSVP', rsvp), ('resident', 'notification deep link', notif), ('society_admin', 'admin adds a guard head', admin_adds_person), ('society_admin', 'admin cannot add admins', admin_cannot_add_admin), ('super_admin', 'super admin adds a society admin', super_adds_admin), ('staff', 'staff cannot add people', staff_has_no_add), ('resident', 'switching screens does not flash a loader', no_flash), ('security', 'gate check', gate_check),
+  for role, name, fn in [('resident', 'book service', book_service), ('resident', 'amenity booking', amenity), ('resident', 'SOS', sos), ('resident', 'RSVP', rsvp), ('resident', 'notification deep link', notif), ('society_admin', 'admin adds a guard head', admin_adds_person), ('society_admin', 'admin cannot add admins', admin_cannot_add_admin), ('super_admin', 'super admin adds a society admin', super_adds_admin), ('staff', 'staff cannot add people', staff_has_no_add), ('resident', 'switching screens does not flash a loader', no_flash), ('security', 'gate check', gate_check), ('resident', 'outside tap keeps typed details', modal_outside_tap), ('resident', 'list reloads after a save', refreshes_after_action), ('resident', 'helper attendance shows time inside and downloads', helper_attendance), ('security', 'old daily help code still finds them', helper_old_code), ('security', 'check-in uses the leaving time the resident set', checkin_uses_planned_exit), ('resident', 'invite with a leaving time', invite_with_leaving_time),
                          ('resident', 'language switch', language), ('resident', 'data and headings translate and restore', translate_data), ('resident', 'guide is role-only and searchable', help_isolation), ('resident', 'guide is translated and searchable in Telugu', guide_in_telugu), ('society_admin', 'admin guide', help_admin),
                          ('resident', 'cast a vote', vote), ('staff', 'mark upkeep done', mark_done), ('society_admin', 'add shifts', add_shift),
                          ('society_admin', 'create a vote', new_vote), ('society_admin', 'add a document', add_document),

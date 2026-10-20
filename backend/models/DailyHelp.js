@@ -13,6 +13,13 @@ const schema = new mongoose.Schema(
     code: { type: String, required: true, match: /^\d{6}$/ },
     // The society-local day (YYYY-MM-DD) this code belongs to. A different day means the code is out of date and gets replaced.
     codeDate: { type: String, match: /^\d{4}-\d{2}-\d{2}$/ },
+    // Yesterday's code. A helper who says it at the gate is still recognised, and the guard is told today's code to pass on.
+    prevCode: { type: String, match: /^\d{6}$/ },
+    prevCodeDate: { type: String, match: /^\d{4}-\d{2}-\d{2}$/ },
+    // Where the daily QR code is mailed (optional). Without it the households get the mail.
+    email: { type: String, trim: true, lowercase: true, maxlength: 120 },
+    // The day (society time) the code was last mailed, so it goes out once a day.
+    mailedDate: { type: String, match: /^\d{4}-\d{2}-\d{2}$/ },
     // The flats they work in. One helper can work for several households.
     residents: {
       type: [new mongoose.Schema({ userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true }, flat: String }, { _id: false })],

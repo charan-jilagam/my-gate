@@ -68,9 +68,12 @@ router.post('/', protect, authorize('super_admin'), [
 // @access  Public
 router.get('/public', async (req, res) => {
   try {
-    const societies = await Society.find({ isActive: true })
+    // Societies created before isActive existed have no value; only an explicit false hides one.
+    const societies = await Society.find({ isActive: { $ne: false } })
       .select('name _id address')
-      .sort({ name: 1 });
+      .sort({ name: 1 })
+      .lean();
+    res.set('Cache-Control', 'no-store'); // a society added a minute ago must show up now
     res.json({ success: true, societies });
   } catch (error) {
     res.status(500).json({ success: false, message: 'Server error' });

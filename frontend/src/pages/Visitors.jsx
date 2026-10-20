@@ -17,7 +17,7 @@ import { clock, clockWithDay, flatText, floorOf, isOverdue, minutesOver, overTex
 import { Avatar, ConfirmDialog, DataList, EmptyState, Field, Modal, PageHeader, Spinner, StatusTag, formatDate, titleCase } from '../components/ui'
 
 const PURPOSES = ['personal', 'business', 'delivery', 'service', 'other']
-const EMPTY_FORM = { name: '', phone: '', email: '', purpose: 'personal', numberOfVisitors: 1, vehicleNumber: '', expectedArrival: '', validForHours: 24 }
+const EMPTY_FORM = { name: '', phone: '', email: '', purpose: 'personal', numberOfVisitors: 1, vehicleNumber: '', expectedArrival: '', plannedExit: '', validForHours: 24 }
 
 const FILTERS = [
   { key: 'all', label: 'All' },
@@ -145,11 +145,16 @@ const Visitors = () => {
     const payload = { ...form, numberOfVisitors: Number(form.numberOfVisitors) || 1, validForHours: Number(form.validForHours) || 24 }
     if (!payload.expectedArrival) delete payload.expectedArrival
     else payload.expectedArrival = new Date(payload.expectedArrival).toISOString()
+    if (payload.plannedExit) {
+      payload.plannedExit = new Date(payload.plannedExit).toISOString()
+      if (payload.expectedArrival && payload.plannedExit <= payload.expectedArrival) return setFormError('The leaving time must be after the arrival time.')
+      if (new Date(payload.plannedExit) <= new Date()) return setFormError('The leaving time has already passed. Pick a later time.')
+    } else delete payload.plannedExit
     if (!payload.vehicleNumber) delete payload.vehicleNumber
     if (!payload.email) delete payload.email
 
     if (editing) {
-      const done = await run('invite', () => api.put(`/visitors/${editing._id}`, { ...payload, expectedArrival: payload.expectedArrival || null }), 'Invitation updated')
+      const done = await run('invite', () => api.put(`/visitors/${editing._id}`, { ...payload, expectedArrival: payload.expectedArrival || null, plannedExit: payload.plannedExit || null }), 'Invitation updated')
       if (done) {
         setInviteOpen(false)
         setEditing(null)
@@ -183,6 +188,7 @@ const Visitors = () => {
       numberOfVisitors: v.numberOfVisitors || 1,
       vehicleNumber: v.vehicleNumber || '',
       expectedArrival: toLocalInput(v.expectedArrival),
+      plannedExit: toLocalInput(v.plannedExit),
       validForHours: v.validForHours || 24
     })
     setInviteOpen(true)
@@ -435,12 +441,17 @@ const Visitors = () => {
           <Field label="Guest's email" htmlFor="v-email" hint="Optional. We send the pass with its QR code here as well as by text message.">
             <input id="v-email" type="email" className="input" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
           </Field>
-          <Field label="Invitation valid for" htmlFor="v-valid" hint="After the expected arrival time">
-            <select id="v-valid" className="input" value={form.validForHours} onChange={(e) => setForm({ ...form, validForHours: Number(e.target.value) })}>
-              {VALID_CHOICES.map((c) => <option key={c.hours} value={c.hours}>{c.label}</option>)}
-              {!VALID_CHOICES.some((c) => c.hours === Number(form.validForHours)) && <option value={form.validForHours}>{`${form.validForHours} hours`}</option>}
-            </select>
+          <Field label="Expected to leave by" htmlFor="v-out" hint="The QR code works until this time, and the guard does not have to type it at the gate. Leave empty to use 24 hours after arrival.">
+            <input id="v-out" type="datetime-local" className="input" value={form.plannedExit} min={form.expectedArrival || undefined} onChange={(e) => setForm({ ...form, plannedExit: e.target.value })} />
           </Field>
+          {!form.plannedExit && (
+            <Field label="Invitation valid for" htmlFor="v-valid" hint="After the expected arrival time">
+              <select id="v-valid" className="input" value={form.validForHours} onChange={(e) => setForm({ ...form, validForHours: Number(e.target.value) })}>
+                {VALID_CHOICES.map((c) => <option key={c.hours} value={c.hours}>{c.label}</option>)}
+                {!VALID_CHOICES.some((c) => c.hours === Number(form.validForHours)) && <option value={form.validForHours}>{`${form.validForHours} hours`}</option>}
+              </select>
+            </Field>
+          )}
           <Field label="Vehicle number" htmlFor="v-vehicle" hint="Optional">
             <input id="v-vehicle" className="input uppercase" value={form.vehicleNumber} onChange={(e) => setForm({ ...form, vehicleNumber: e.target.value })} />
           </Field>

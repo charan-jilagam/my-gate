@@ -1,6 +1,7 @@
 import { imgSrc } from '../utils/media'
 import { Suspense, useCallback, useEffect, useRef, useState } from 'react'
 import { preloadPages } from '../preload'
+import { onDataChange } from '../utils/apiCache'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import ErrorBoundary from './ErrorBoundary'
 import {
@@ -252,6 +253,9 @@ const Notifications = () => {
     const timer = setTimeout(() => setRing(false), 1400)
     return () => clearTimeout(timer)
   }, [load, lastNotification])
+
+  // Marking something read, approving, deleting: the count in the bell follows without a refresh.
+  useEffect(() => onDataChange(() => load()), [load])
 
   useEffect(() => {
     if (!open) return undefined

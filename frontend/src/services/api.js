@@ -1,4 +1,5 @@
 import axios from 'axios'
+import { markStale } from '../utils/apiCache'
 
 // Dev: Vite proxies /api to the backend. Production: same origin, or set VITE_API_URL (e.g. https://api.example.com/api).
 const api = axios.create({
@@ -15,8 +16,16 @@ api.interceptors.request.use((config) => {
 
 const PUBLIC_AUTH_PATHS = ['/auth/login', '/auth/register', '/auth/forgot-password', '/auth/reset-password']
 
+// Calls that fire in the background (location pings, push settings, sign-in) must not make every screen reload.
+const QUIET = ['/guards/ping', '/push/', '/auth/login', '/auth/register', '/auth/otp', '/auth/forgot', '/auth/reset', '/nearby/']
+
 api.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    const method = (response.config?.method || 'get').toLowerCase()
+    const url = response.config?.url || ''
+    if (method !== 'get' && !QUIET.some((q) => url.includes(q))) markStale()
+    return response
+  },
   (error) => {
     const url = error.config?.url || ''
     const isPublicAuthCall = PUBLIC_AUTH_PATHS.some((p) => url.includes(p))

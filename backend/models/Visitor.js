@@ -112,6 +112,10 @@ const visitorSchema = new mongoose.Schema({
     max: 720,
     default: 24
   },
+  // When the resident says the guest will leave. The QR code works until then, and it fills in the exit time at the gate.
+  plannedExit: {
+    type: Date
+  },
   // Asked at the gate when the visitor goes in; the guard and the resident can see when they should be out.
   expectedExit: {
     type: Date

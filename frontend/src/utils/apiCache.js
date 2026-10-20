@@ -23,3 +23,21 @@ export const remember = (key, raw) => {
   if (cache.size > MAX_ENTRIES) cache.delete(cache.keys().next().value)
 }
 
+
+// "Something changed" counter. Every successful save/approve/delete bumps it, and every open list reloads,
+// so nobody has to refresh by hand after an action. A burst of changes is merged into one reload.
+const listeners = new Set()
+let version = 0
+let timer = null
+export const dataVersion = () => version
+export const onDataChange = (fn) => {
+  listeners.add(fn)
+  return () => listeners.delete(fn)
+}
+export const markStale = () => {
+  clearTimeout(timer)
+  timer = setTimeout(() => {
+    version += 1
+    listeners.forEach((fn) => fn(version))
+  }, 120)
+}

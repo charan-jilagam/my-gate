@@ -18,8 +18,6 @@ const AuthShell = ({ title, subtitle, children, footer }) => (
     {/* Brand panel (computer) */}
     <aside className="auth-hero relative hidden flex-col justify-between overflow-hidden p-12 text-white lg:flex">
       <div className="hazard absolute inset-x-0 top-0 h-2" aria-hidden="true" />
-      <span className="float-slow absolute -right-16 top-24 h-64 w-64 rounded-full bg-white/5 ring-1 ring-white/10" aria-hidden="true" />
-      <span className="float-slower absolute -left-10 bottom-28 h-44 w-44 rounded-full bg-emerald-300/10 ring-1 ring-white/10" aria-hidden="true" />
 
       <div className="relative">
         <div className="inline-flex items-center gap-4 rounded-3xl bg-white px-5 py-4 shadow-pop">
@@ -47,7 +45,6 @@ const AuthShell = ({ title, subtitle, children, footer }) => (
       {/* Header (phone) */}
       <header className="auth-hero relative overflow-hidden px-5 pb-16 pt-[max(1.75rem,env(safe-area-inset-top))] text-white lg:hidden">
         <div className="hazard absolute inset-x-0 top-0 h-1.5" aria-hidden="true" />
-        <span className="float-slow absolute -right-10 -top-6 h-40 w-40 rounded-full bg-white/6 ring-1 ring-white/10" aria-hidden="true" />
         <div className="relative flex items-center gap-3 pt-2">
           <LogoMark size={52} className="shadow-pop" />
           <div>

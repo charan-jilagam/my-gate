@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import api from '../services/api'
 import { useSocket } from '../contexts/SocketContext'
-import { remember, remembered } from '../utils/apiCache'
+import { dataVersion, onDataChange, remember, remembered } from '../utils/apiCache'
 
 /**
  * GET data with loading and error state.
@@ -22,6 +22,26 @@ const useApi = (path, { params, select = (d) => d, enabled = true, live = true }
   })
   const [loading, setLoading] = useState(() => enabled && !remembered(resourceKey, enabled))
   const [error, setError] = useState('')
+  // Reload whenever anything was saved anywhere in the app (approve, add, delete ...), and when the tab is opened again.
+  const [changes, setChanges] = useState(dataVersion)
+  useEffect(() => onDataChange(setChanges), [])
+  const [seen, setSeen] = useState(0)
+  useEffect(() => {
+    if (!enabled) return undefined
+    let last = Date.now()
+    const wake = () => {
+      if (document.visibilityState === 'visible' && Date.now() - last > 20000) {
+        last = Date.now()
+        setSeen((n) => n + 1)
+      }
+    }
+    document.addEventListener('visibilitychange', wake)
+    window.addEventListener('online', wake)
+    return () => {
+      document.removeEventListener('visibilitychange', wake)
+      window.removeEventListener('online', wake)
+    }
+  }, [enabled])
 
   // Switching to a different resource (say, opening another complaint) must not show the previous one's data.
   const lastResource = useRef(resourceKey)
@@ -60,7 +80,7 @@ const useApi = (path, { params, select = (d) => d, enabled = true, live = true }
     const controller = new AbortController()
     load(controller.signal)
     return () => controller.abort()
-  }, [load, enabled, live ? lastNotification : null])
+  }, [load, enabled, changes, seen, live ? lastNotification : null])
 
   const reload = useCallback(() => load(), [load])
   return switched ? { data: fresh.data, loading: fresh.loading, error: '', reload, setData } : { data, loading, error, reload, setData }

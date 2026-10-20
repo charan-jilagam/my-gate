@@ -20,9 +20,13 @@ const CheckInSheet = ({ visitor, code, onClose, onDone }) => {
   const [custom, setCustom] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  // The resident already said when this guest leaves, so the guard has nothing to pick (but may change it).
+  const planned = visitor?.plannedExit && new Date(visitor.plannedExit).getTime() > Date.now() ? new Date(visitor.plannedExit) : null
+  const [useGiven, setUseGiven] = useState(true)
 
   useEffect(() => {
     if (visitor) {
+      setUseGiven(true)
       setStay(60)
       setCustom('')
       setError('')
@@ -30,7 +34,8 @@ const CheckInSheet = ({ visitor, code, onClose, onDone }) => {
   }, [visitor])
 
   if (!visitor) return null
-  const leaveAt = stay === 'custom' ? (custom ? new Date(custom) : null) : new Date(Date.now() + stay * 60000)
+  const fromResident = !!planned && useGiven
+  const leaveAt = fromResident ? planned : stay === 'custom' ? (custom ? new Date(custom) : null) : new Date(Date.now() + stay * 60000)
 
   const confirm = async () => {
     setError('')
@@ -38,7 +43,8 @@ const CheckInSheet = ({ visitor, code, onClose, onDone }) => {
     if (leaveAt.getTime() <= Date.now()) return setError('That time has already passed.')
     setBusy(true)
     try {
-      await api.put(`/visitors/${visitor._id}/check-in`, { ...(code ? { code } : {}), ...(stay === 'custom' ? { expectedExit: leaveAt.toISOString() } : { stayMinutes: stay }) })
+      const when = fromResident ? {} : stay === 'custom' ? { expectedExit: leaveAt.toISOString() } : { stayMinutes: stay }
+      await api.put(`/visitors/${visitor._id}/check-in`, { ...(code ? { code } : {}), ...when })
       onDone?.(visitor)
     } catch (err) {
       setError(errorMessage(err, 'Could not check this visitor in.'))
@@ -67,6 +73,13 @@ const CheckInSheet = ({ visitor, code, onClose, onDone }) => {
         <p className="text-sm text-muted">{[`Going to ${flatText(visitor)}`, floorOf(visitor.flatNo), visitor.residentId?.name].filter(Boolean).join(' · ')}</p>
       </div>
 
+      {fromResident ? (
+        <p className="mt-4 text-sm text-muted">
+          The resident set the leaving time when inviting.{' '}
+          <button type="button" className="font-semibold text-brand underline" onClick={() => setUseGiven(false)}>Change it</button>
+        </p>
+      ) : (
+        <>
       <p className="mb-2 mt-5 text-sm font-semibold">How long will they stay?</p>
       <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Stay length">
         {[...STAYS, { minutes: 'custom', label: 'Pick a time' }].map((s) => {
@@ -81,6 +94,9 @@ const CheckInSheet = ({ visitor, code, onClose, onDone }) => {
       </div>
       {stay === 'custom' && (
         <input type="datetime-local" aria-label="Expected exit time" className="input mt-3" value={custom} onChange={(e) => setCustom(e.target.value)} />
+      )}
+
+        </>
       )}
 
       <p className="mt-4 flex items-center gap-2 rounded-lg bg-brand-soft px-3 py-2.5 text-sm font-semibold" role="status">

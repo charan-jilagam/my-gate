@@ -71,7 +71,7 @@ module.exports = {
       path: '/daily-help',
       covers: ['/daily-help'],
       summary: 'Maids, cooks and drivers show a QR code or say today\'s 6-digit code, both when they arrive and when they leave.',
-      steps: ['Open Daily help and scan the helper\'s QR code or type the code they tell you, then tap Find.', 'You see who they are and whether they are inside. Tap Check in when they arrive and Check out when they leave. Every household they work for is notified.', 'To check someone out from the Inside now list, tap Check out and enter their code.', 'Too many wrong codes locks you out for 15 minutes. Codes change every day, so ask the helper to read today\'s code from the resident\'s app.'],
+      steps: ['Open Daily help and scan the helper\'s QR code or type the code they tell you, then tap Find.', 'You see who they are and whether they are inside. Tap Check in when they arrive and Check out when they leave. Every household they work for is notified.', 'To check someone out from the Inside now list, tap Check out and enter their code.', 'Too many wrong codes locks you out for 15 minutes. Codes change every day. If the helper says yesterday\'s code, it still finds them: check them in, then tell them today\'s code shown on your screen.'],
       tips: []
     },
     {

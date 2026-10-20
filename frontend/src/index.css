@@ -196,10 +196,8 @@
 
 /* Sign-in screens */
 .auth-hero {
-  background:
-    radial-gradient(60rem 30rem at 110% -10%, rgb(22 194 138 / 0.28), transparent 60%),
-    radial-gradient(40rem 28rem at -10% 110%, rgb(30 120 230 / 0.30), transparent 60%),
-    linear-gradient(160deg, #0a3a39 0%, #0b2f4a 100%);
+  /* One hue, darker toward the bottom: the brand teal, not a rainbow. */
+  background: linear-gradient(165deg, #0e4c49 0%, #0a3a39 52%, #082d2c 100%);
 }
 @keyframes float-slow {
   0%, 100% { transform: translate3d(0, 0, 0); }

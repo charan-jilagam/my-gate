@@ -141,7 +141,7 @@ const Dashboard = () => {
           <h2 id="quick-h" className="sr-only">{t('Quick actions')}</h2>
           <ul className="grid grid-cols-2 gap-2 sm:grid-cols-4">
             {quick.map(({ to, icon: Icon, label, danger }) => (
-              <li key={to + label}>
+              <li key={to + label} className={danger && quick.length % 2 === 1 ? 'col-span-2 sm:col-span-1' : ''}>
                 <Link to={to} className={`flex h-full min-h-[76px] flex-col items-start justify-between gap-2 rounded-lg border p-3 text-sm font-semibold transition-colors ${danger ? 'border-danger/40 bg-danger-soft text-danger hover:border-danger' : 'border-line bg-surface hover:border-brand'}`}>
                   <Icon size={22} className={danger ? '' : 'text-brand'} aria-hidden="true" />
                   {t(label)}
@@ -197,10 +197,10 @@ const Dashboard = () => {
               {attention.map((a) => (
                 <li key={a.label}>
                   <Link to={a.to} className="group flex items-center gap-4 px-5 py-4 hover:bg-sunken/60">
-                    <span className="w-10 text-right font-display text-3xl font-extrabold leading-none">{a.n}</span>
-                    <span className="flex-1 text-sm">{t(a.label)}</span>
-                    <span className="inline-flex items-center gap-1 text-sm font-semibold text-brand">
-                      {t(a.cta)} <FiArrowRight className="transition-transform group-hover:translate-x-0.5" />
+                    <span className="w-9 shrink-0 text-right font-display text-2xl font-extrabold leading-none tabular-nums sm:w-10 sm:text-3xl">{a.n}</span>
+                    <span className="min-w-0 flex-1 text-sm">{t(a.label)}</span>
+                    <span className="inline-flex shrink-0 items-center gap-1 text-sm font-semibold text-brand">
+                      <span className="sr-only sm:not-sr-only">{t(a.cta)}</span> <FiArrowRight className="transition-transform group-hover:translate-x-0.5" />
                     </span>
                   </Link>
                 </li>

@@ -1,8 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import { useAuth } from '../contexts/AuthContext'
-import api from '../services/api'
+import usePublicSocieties from '../hooks/usePublicSocieties'
 import AuthShell from '../components/AuthShell'
 import { Field, Spinner } from '../components/ui'
 
@@ -35,20 +35,12 @@ const Register = () => {
     flatNo: '',
     block: ''
   })
-  const [societies, setSocieties] = useState([])
-  const [societiesLoaded, setSocietiesLoaded] = useState(false)
+  const { societies, state: societyState, retry: retrySocieties } = usePublicSocieties()
+  const societiesLoaded = societyState !== 'loading' || societies.length > 0
   const [errors, setErrors] = useState({})
   const [loading, setLoading] = useState(false)
   const { register } = useAuth()
   const navigate = useNavigate()
-
-  useEffect(() => {
-    api
-      .get('/societies/public')
-      .then((res) => setSocieties(res.data.societies || []))
-      .catch(() => setSocieties([]))
-      .finally(() => setSocietiesLoaded(true))
-  }, [])
 
   const handleChange = (e) => {
     setFormData({ ...formData, [e.target.name]: e.target.value })
@@ -128,7 +120,7 @@ const Register = () => {
             label="Society"
             htmlFor="societyId"
             error={errors.societyId}
-            hint={societiesLoaded && societies.length === 0 ? 'No societies yet. Ask your admin to add yours.' : undefined}
+            hint={societyState === 'ready' && societies.length === 0 ? 'No societies yet. Ask your admin to add yours.' : undefined}
           >
             <select id="societyId" name="societyId" className="input" value={formData.societyId} onChange={handleChange}>
               <option value="">{societiesLoaded ? 'Select society' : 'Loading...'}</option>
@@ -139,6 +131,14 @@ const Register = () => {
                 </option>
               ))}
             </select>
+            {societyState === 'failed' && societies.length === 0 && (
+              <p className="mt-1 text-xs text-danger">
+                Could not load societies.{' '}
+                <button type="button" className="font-semibold underline" onClick={retrySocieties}>
+                  Try again
+                </button>
+              </p>
+            )}
           </Field>
         </div>
 

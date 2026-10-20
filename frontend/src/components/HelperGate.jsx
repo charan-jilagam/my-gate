@@ -7,7 +7,7 @@ import CodePrompt from './CodePrompt'
 import QrScanner from './QrScanner'
 import { Avatar, ErrorState, ListSkeleton, Modal, Spinner, errorMessage } from './ui'
 import { readScan } from '../utils/pass'
-import { clock } from '../utils/gate'
+import { clock, stayText } from '../utils/gate'
 
 const KIND = { maid: 'Maid', cook: 'Cook', driver: 'Driver', nanny: 'Nanny', gardener: 'Gardener', cleaner: 'Cleaner', tutor: 'Tutor', other: 'Helper' }
 
@@ -24,6 +24,8 @@ const HelperGate = () => {
   const [acting, setActing] = useState(false)
   const [scanning, setScanning] = useState(false)
   const [leaving, setLeaving] = useState(null)
+  // Shown after someone was let in with yesterday's code: the guard must pass today's code on to them.
+  const [tell, setTell] = useState(null)
 
   const lookup = async (value) => {
     setError('')
@@ -51,7 +53,8 @@ const HelperGate = () => {
   const act = async () => {
     setActing(true)
     try {
-      await check(found.code, found.next)
+      const done = await check(found.code, found.next)
+      setTell(done.oldCode ? { name: done.helper.name, code: done.todayCode } : null)
       setFound(null)
       setCode('')
     } catch (err) {
@@ -76,7 +79,7 @@ const HelperGate = () => {
     <div className="space-y-5">
       <section className="panel p-5" aria-labelledby="helper-gate-h">
         <h2 id="helper-gate-h" className="text-base font-bold">Daily help at the gate</h2>
-        <p className="mb-3 text-sm text-muted">Scan the helper's QR code or type the 6-digit code they say. It works the same way when they arrive and when they leave.</p>
+        <p className="mb-3 text-sm text-muted">Scan the helper's QR code or type the 6-digit code they say. It works the same way when they arrive and when they leave. If they only remember yesterday's code, it still finds them, and you will see today's code to tell them.</p>
         <form onSubmit={(e) => { e.preventDefault(); if (code.length === 6) lookup(code) }} className="flex flex-wrap items-start gap-2">
           <input className="input w-44 text-center font-display text-xl tracking-[0.3em]" inputMode="numeric" maxLength={6} placeholder="______" aria-label="Helper code" autoComplete="off" value={code} onChange={(e) => { setCode(e.target.value.replace(/\D/g, '')); setFound(null) }} />
           <button className="btn-primary" type="submit" disabled={code.length !== 6 || looking}>{looking ? <Spinner className="h-4 w-4" /> : <FiSearch size={16} />} Find</button>
@@ -84,13 +87,28 @@ const HelperGate = () => {
         </form>
         {error && <p role="alert" className="mt-3 text-sm font-medium text-danger">{error}</p>}
 
+        {tell && (
+          <div role="alert" className="fade-in mt-4 rounded-xl border border-amber/50 bg-amber-soft p-4">
+            <p className="text-sm font-semibold">{`${tell.name} said yesterday's code. Tell them today's code:`}</p>
+            <p className="my-1 font-mono text-3xl font-bold tracking-[0.3em]">{tell.code}</p>
+            <p className="text-xs text-muted">It works for today only. The QR code is also mailed to them each morning.</p>
+            <button className="btn-secondary btn-sm mt-2" onClick={() => setTell(null)}>Done, I told them</button>
+          </div>
+        )}
+
         {helper && (
           <div className="fade-in mt-4 flex flex-wrap items-center gap-4 rounded-xl border border-edge bg-sunken/60 p-4" role="status">
             <Avatar name={helper.name} src={helper.photo} size={52} />
             <div className="min-w-0 flex-1">
               <p className="font-display text-lg font-bold">{helper.name}</p>
               <p className="text-sm text-muted">{KIND[helper.kind] || 'Helper'}{helper.flats?.length ? ` · works at ${helper.flats.join(', ')}` : ''}</p>
-              <p className="mt-1 text-sm font-semibold">{found.inside ? `Inside since ${clock(found.since)}` : 'Not inside right now'}</p>
+              <p className="mt-1 text-sm font-semibold">{found.inside ? `Inside since ${clock(found.since)} · ${stayText((Date.now() - new Date(found.since).getTime()) / 60000)}` : 'Not inside right now'}</p>
+              {found.oldCode && (
+                <p className="mt-2 rounded-lg bg-amber-soft px-3 py-2 text-sm">
+                  {'That was an old code. It still identifies them, and a new code was made for today. After you let them in, tell them: '}
+                  <span className="font-mono text-base font-bold tracking-widest">{found.todayCode}</span>
+                </p>
+              )}
             </div>
             <button className={checkingIn ? 'btn-primary' : 'btn-secondary'} onClick={act} disabled={acting}>
               {acting ? <Spinner className="h-4 w-4" /> : checkingIn ? <FiLogIn size={15} /> : <FiLogOut size={15} />} {checkingIn ? 'Check in' : 'Check out'}
@@ -113,7 +131,7 @@ const HelperGate = () => {
                 <Avatar name={h.name} src={h.photo} size={38} />
                 <div className="min-w-0 flex-1">
                   <p className="truncate font-semibold">{h.name}</p>
-                  <p className="truncate text-xs text-muted">{`${KIND[h.kind] || 'Helper'}${h.flats?.length ? ` · ${h.flats.join(', ')}` : ''}${h.today?.checkIn ? ` · in at ${clock(h.today.checkIn)}` : ''}`}</p>
+                  <p className="truncate text-xs text-muted">{`${KIND[h.kind] || 'Helper'}${h.flats?.length ? ` · ${h.flats.join(', ')}` : ''}${h.today?.checkIn ? ` · in at ${clock(h.today.checkIn)} (${stayText(h.today.minutes)})` : ''}`}</p>
                 </div>
                 <button className="btn-secondary btn-sm" onClick={() => setLeaving(h)}><FiLogOut size={14} /> Check out</button>
               </li>

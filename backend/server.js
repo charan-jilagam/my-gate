@@ -190,6 +190,7 @@ const start = () => {
     httpServer.listen(PORT, () => {
       console.log(`Server running on port ${PORT}`);
     });
+    require('./utils/dailyHelpMail').startDailyCodeMail(); // the new gate QR is mailed to daily help each morning
   })
   .catch((error) => {
     console.error('\nMongoDB connection error:', error.message);

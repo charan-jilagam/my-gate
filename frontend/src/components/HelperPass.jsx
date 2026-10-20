@@ -47,7 +47,7 @@ const HelperPass = ({ helper, onClose }) => {
             </>
           )}
           <p className="mt-4 text-sm text-muted">They show this to the guard when they arrive and again when they leave.</p>
-          <p className="mt-1 text-sm text-muted">The code changes every day. Open this pass each morning to get the new one.</p>
+          <p className="mt-1 text-sm text-muted">A new code is made every morning and mailed as a QR code. If they forget it, they can say yesterday's code and the guard will tell them today's.</p>
         </div>
       )}
     </Modal>

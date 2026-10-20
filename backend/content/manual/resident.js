@@ -39,7 +39,7 @@ module.exports = {
       covers: ['/visitors'],
       summary: 'Invite guests ahead of time, approve walk-ins, and see who is inside.',
       steps: [
-        'Tap Invite visitor. Enter their name, phone, purpose, number of people, expected arrival and vehicle number if any, then save. Under Invitation valid for, choose how long the pass keeps working after the expected arrival. It is 24 hours unless you change it.',
+        'Tap Invite visitor. Enter their name, phone, purpose, number of people, expected arrival and vehicle number if any. Under Expected to leave by, pick when your guest will leave. The QR code works until then, and the guard does not have to type an exit time at the gate. If you leave it empty, the pass works for 24 hours after the expected arrival, and you can change that under Invitation valid for.',
         'Add your guest\'s email if you have it. When you save, they get a message from Nivora with a link to their entry pass: the QR code, the pass code and the flat details. It goes by text message, and by email when you gave one.',
         'On the invitation tap Show pass to see the gate pass with its QR code and pass code. Share it with your guest. They show the QR code or say the pass code to get in, and again to leave. The guard cannot check anyone in or out with a click alone.',
         'If someone arrives without an invitation, the guard asks you to approve. You get a notification: approve or reject (with a reason). Nobody is let in until you approve.',
@@ -80,10 +80,10 @@ module.exports = {
       covers: ['/daily-help'],
       summary: 'Maids, cooks and drivers get a gate code; you see when they arrive and leave.',
       steps: [
-        'Tap Add helper and enter their name, phone and what they do. The app gives them a 6-digit gate code that changes every day.',
+        'Tap Add helper and enter their name, phone, email (optional) and what they do. The app makes a 6-digit gate code and a QR code for them. A new one is made every morning.',
         'Tap Show pass on a helper to see their QR code and today\'s 6-digit code. They show it to the guard when they arrive and again when they leave, and you are told each time.',
-        'A new code is made for every helper each day. Open Show pass in the morning to get today\'s code; yesterday\'s code stops working.',
-        'Open a helper to see monthly attendance.',
+        'The new QR code is mailed every morning to the helper\'s email, or to you if you did not add one. If your helper forgets it, they can say yesterday\'s code: the guard still finds them and tells them today\'s.',
+        'Tap Attendance on a helper to see each visit with how long they stayed inside, and the total for the month. Download it as CSV or PDF.',
         'If your helper also works in another flat, ask that household to add them using the helper\'s code for today (Add by code).'
       ],
       tips: ['Anyone who knows today\'s code can enter as that helper, but only for that day. Remove the helper if they stop working for you.']

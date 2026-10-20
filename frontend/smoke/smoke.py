@@ -94,9 +94,15 @@ def api(role, method, path, q):
     if p == '/bookings/availability': return dict(success=True, amenity=AMEN, date=q.get('date'), closed=False, slots=[dict(start=f'{h:02d}:00', end=f'{h+1:02d}:00', available=(h != 18), reason=None if h != 18 else 'booked') for h in range(6, 22)])
     if p == '/bookings': return dict(success=True, bookings=[dict(_id='b1', amenity='Clubhouse', dateStr=d(3), slotDate=NOW, startTime=NOW, endTime=NOW, status='pending', amount=1000, residentId=dict(name='Asha Rao', flatNo='101')), dict(_id='b2', amenity='Tennis court', dateStr=d(4), slotDate=NOW, startTime=NOW, endTime=NOW, status='approved', amount=1000, paymentId=dict(_id='pay9', status='pending', amount=1000), residentId=dict(name='Asha Rao', flatNo='101'))])
     if p == '/notices': return dict(success=True, notices=[dict(_id='nt1', title='Diwali night', content='Join us', type='event', priority='medium', category='general', isPublished=True, eventDate=(datetime.datetime.utcnow() + datetime.timedelta(days=5)).isoformat() + 'Z', eventLocation='Clubhouse lawn', createdBy=dict(name='Admin'), createdAt=NOW, pollOptions=[], rsvp=dict(going=3, people=7, maybe=1, no=0, mine=None))])
-    if p.startswith('/daily-help/lookup/'): return dict(success=True, helper=dict(_id='h1', name='Lakshmi', kind='maid', flats=['A-101']), inside=False, since=None, next='in')
+    if p.startswith('/daily-help/lookup/'):
+        old = p.endswith('111222')   # yesterday's code: still finds her, and the guard is shown today's
+        return dict(success=True, helper=dict(_id='h1', name='Lakshmi', kind='maid', flats=['A-101']), inside=False, since=None, next='in', oldCode=old, todayCode='482913' if old else None)
+    if p.startswith('/daily-help/') and p.endswith('/attendance'):
+        return dict(success=True, month='2026-10', timezone='Asia/Kolkata', helper=dict(_id='h1', name='Lakshmi', kind='maid'), daysPresent=2, totalMinutes=240,
+                    records=[dict(date='2026-10-01', checkIn='2026-10-01T01:30:00Z', checkOut='2026-10-01T04:00:00Z', inside=False, forgotten=False, minutes=150),
+                             dict(date='2026-10-02', checkIn='2026-10-02T01:30:00Z', checkOut='2026-10-02T03:00:00Z', inside=False, forgotten=False, minutes=90)])
     if p.startswith('/daily-help/') and p.endswith('/pass'): return dict(success=True, code='482913', qrCodeImage='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==')
-    if p.startswith('/visitors/lookup/'): return dict(success=True, visitor=dict(VISITORS[1], qrCode=None, floor='Floor 1', approvedAt=NOW, approvedBy=dict(_id='u1', name='Asha Rao', role='resident'), residentId=dict(_id='u1', name='Asha Rao', phone='9876543210')))
+    if p.startswith('/visitors/lookup/'): return dict(success=True, visitor=dict(VISITORS[1], plannedExit=(datetime.datetime.utcnow() + datetime.timedelta(hours=5)).isoformat() + 'Z' if p.upper().endswith('FEEDBEEF') else None, qrCode=None, floor='Floor 1', approvedAt=NOW, approvedBy=dict(_id='u1', name='Asha Rao', role='resident'), residentId=dict(_id='u1', name='Asha Rao', phone='9876543210')))
     if p == '/visitors':
         rows = VISITORS if q.get('status') is None else [v for v in VISITORS if v['status'] == q['status']]
         # only the resident who owns an invitation is given its code

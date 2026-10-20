@@ -23,15 +23,8 @@ const guessLimiter = rateLimit({
   message: { success: false, message: 'Too many wrong codes. Please wait 15 minutes and try again.' }
 });
 
-// An invitation stops working this many hours after the time the visitor was expected. The resident can change it per invitation.
-const DEFAULT_VALID_HOURS = 24;
-const MAX_VALID_HOURS = 24 * 30;
-const validHours = (v) => Number(v.validForHours) || DEFAULT_VALID_HOURS;
-// When the invitation lapses: counted from the expected arrival, or from when it was created if no time was given.
-const expiryOf = (v) => {
-  const from = v.expectedArrival || v.createdAt;
-  return from ? new Date(new Date(from).getTime() + validHours(v) * 3600 * 1000) : null;
-};
+// Until when an invitation works is decided in utils/visitorPass.js (the resident's leaving time, else 24 hours).
+const { DEFAULT_VALID_HOURS, MAX_VALID_HOURS, validHours, expiryOf, checkPlannedExit } = require('../utils/visitorPass');
 const validForRule = body('validForHours').optional({ nullable: true, checkFalsy: true }).isInt({ min: 1, max: MAX_VALID_HOURS }).withMessage(`Choose a validity between 1 hour and ${MAX_VALID_HOURS / 24} days`);
 
 const passId = (v) => {
@@ -86,6 +79,7 @@ router.post('/invite', protect, authorize('resident'), [
   body('email').optional({ checkFalsy: true }).isEmail().withMessage('Enter a valid email address for the guest'),
   body('purpose').isIn(['personal', 'business', 'delivery', 'service', 'other']).withMessage('Invalid purpose'),
   body('expectedArrival').optional().isISO8601().withMessage('Invalid date format'),
+  body('plannedExit').optional({ nullable: true, checkFalsy: true }).isISO8601().withMessage('Pick when the visitor will leave'),
   validForRule
 ], async (req, res) => {
   try {
@@ -93,6 +87,8 @@ router.post('/invite', protect, authorize('resident'), [
     if (!errors.isEmpty()) {
       return res.status(400).json({ success: false, errors: errors.array() });
     }
+    const exitProblem = checkPlannedExit(req.body.plannedExit, req.body.expectedArrival);
+    if (exitProblem) return res.status(400).json({ success: false, message: exitProblem });
 
     const {
       name,
@@ -132,6 +128,7 @@ router.post('/invite', protect, authorize('resident'), [
       passId: qrData.visitorId,
       expectedArrival: expectedArrival ? new Date(expectedArrival) : null,
       validForHours: validForHours ? Number(validForHours) : DEFAULT_VALID_HOURS,
+      plannedExit: req.body.plannedExit ? new Date(req.body.plannedExit) : null,
       notes,
       // A resident inviting a guest is the approval: the guard should let them in without a second step.
       approved: true,
@@ -299,6 +296,7 @@ router.put('/:id', protect, authorize('resident'), [
   body('purpose').optional().isIn(['personal', 'business', 'delivery', 'service', 'other']).withMessage('Invalid purpose'),
   body('numberOfVisitors').optional().isInt({ min: 1, max: 50 }),
   body('expectedArrival').optional({ nullable: true, checkFalsy: true }).isISO8601().withMessage('Invalid date format'),
+  body('plannedExit').optional({ nullable: true, checkFalsy: true }).isISO8601().withMessage('Pick when the visitor will leave'),
   validForRule
 ], async (req, res) => {
   try {
@@ -322,6 +320,11 @@ router.put('/:id', protect, authorize('resident'), [
       visitor.expectedArrival = req.body.expectedArrival ? new Date(req.body.expectedArrival) : null;
     }
     if (req.body.validForHours !== undefined) visitor.validForHours = Number(req.body.validForHours) || DEFAULT_VALID_HOURS;
+    if (req.body.plannedExit !== undefined) {
+      const problem = checkPlannedExit(req.body.plannedExit, visitor.expectedArrival);
+      if (problem) return res.status(400).json({ success: false, message: problem });
+      visitor.plannedExit = req.body.plannedExit ? new Date(req.body.plannedExit) : null;
+    }
     await visitor.save();
 
     res.json({ success: true, visitor: present(visitor, req.user), message: 'Invitation updated' });
@@ -498,14 +501,21 @@ router.put('/:id/check-in', protect, authorize('security', 'guard_admin', 'socie
       }
     }
 
-    // The guard always records when this person should be out, so anyone who stays past it can be spotted.
+    // The leaving time the resident gave is used as it is, so the guard has nothing to type. A guard can still set a
+    // different one (for example when the visitor says they will stay longer), and walk-ins have none until now.
     const now = new Date();
-    const leaveAt = req.body.expectedExit ? new Date(req.body.expectedExit) : req.body.stayMinutes ? new Date(now.getTime() + Number(req.body.stayMinutes) * 60000) : null;
+    const given = req.body.expectedExit ? new Date(req.body.expectedExit) : req.body.stayMinutes ? new Date(now.getTime() + Number(req.body.stayMinutes) * 60000) : null;
+    const fromResident = !given && visitor.plannedExit ? new Date(visitor.plannedExit) : null;
+    const leaveAt = given || fromResident;
     if (!leaveAt) {
       return res.status(400).json({ success: false, message: 'Pick when the visitor is expected to leave.' });
     }
-    if (leaveAt <= now || leaveAt - now > 24 * 3600 * 1000) {
-      return res.status(400).json({ success: false, message: 'The expected exit must be later than now and within 24 hours.' });
+    if (leaveAt <= now) {
+      return res.status(400).json({ success: false, message: 'The expected exit must be later than now.' });
+    }
+    // A time chosen at the gate is a short stay (up to 24 hours). The resident's own time may cover a longer visit.
+    if (!fromResident && leaveAt - now > 24 * 3600 * 1000) {
+      return res.status(400).json({ success: false, message: 'At the gate the stay can be up to 24 hours. Longer visits are set by the resident when inviting.' });
     }
 
     visitor.entryTime = now;

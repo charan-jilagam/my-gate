@@ -40,3 +40,12 @@ export const minutesOver = (v, now = Date.now()) => Math.max(0, Math.round((now 
 export const overText = (mins) => (mins < 60 ? `${mins} min over` : mins < 1440 ? `${Math.floor(mins / 60)} h ${mins % 60 ? `${mins % 60} min ` : ''}over` : `${Math.floor(mins / 1440)} d over`)
 
 export const ROLE_NAME = { resident: 'Resident', security: 'Security', society_admin: 'Society office', super_admin: 'Platform admin' }
+
+// "1 h 20 min", "45 min", "under a minute". Used for how long someone has been inside.
+export const stayText = (mins) => {
+  const m = Math.max(0, Math.round(Number(mins) || 0))
+  if (m < 1) return 'under a minute'
+  if (m < 60) return `${m} min`
+  const h = Math.floor(m / 60)
+  return m % 60 ? `${h} h ${m % 60} min` : `${h} h`
+}

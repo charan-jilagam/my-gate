@@ -3,6 +3,7 @@ const rateLimit = require('express-rate-limit');
 const Visitor = require('../models/Visitor');
 const Society = require('../models/Society');
 const { floorOf } = require('../utils/routeKit');
+const { expiryOf } = require('../utils/visitorPass');
 
 const router = express.Router();
 
@@ -20,9 +21,7 @@ router.get('/pass/:passId', limiter, async (req, res) => {
     if (!visitor) return res.status(404).json({ success: false, message: 'This pass link is not valid.' });
     const society = await Society.findById(visitor.societyId).select('name').lean();
 
-    const hours = Number(visitor.validForHours) || 24;
-    const from = visitor.expectedArrival || visitor.createdAt;
-    const expiresAt = from ? new Date(new Date(from).getTime() + hours * 3600 * 1000) : null;
+    const expiresAt = expiryOf(visitor);
     const usable = visitor.status === 'approved';
     const expired = usable && !!expiresAt && Date.now() > expiresAt.getTime();
     const host = visitor.residentId && visitor.residentId.name ? String(visitor.residentId.name).trim().split(/\s+/)[0] : 'a resident';
@@ -39,6 +38,7 @@ router.get('/pass/:passId', limiter, async (req, res) => {
         purpose: visitor.purpose,
         numberOfVisitors: visitor.numberOfVisitors || 1,
         expectedArrival: visitor.expectedArrival || null,
+        plannedExit: visitor.plannedExit || null,
         expiresAt,
         status: visitor.status,
         usable: usable && !expired,
