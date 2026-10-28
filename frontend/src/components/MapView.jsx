@@ -12,7 +12,7 @@ import 'leaflet/dist/leaflet.css'
 //
 // Markers are drawn with HTML (not image files) so nothing breaks when the app is built.
 
-const TONES = { brand: '#0f4c4a', warn: '#b45309', danger: '#be3434', muted: '#6b7b79' }
+const TONES = { brand: '#0f766e', warn: '#b45309', danger: '#be3434', muted: '#6b7b79' }
 
 const pin = (label, tone) =>
   L.divIcon({
@@ -68,7 +68,7 @@ const MapView = ({ markers = [], circles = [], line, pick, onPick, height = 320,
       else points.push([c.lat, c.lng])
     })
     if (line && line.length > 1) {
-      L.polyline(line, { color: '#0f4c4a', weight: 3, opacity: 0.7, dashArray: '6 6' }).addTo(g)
+      L.polyline(line, { color: '#0f766e', weight: 3, opacity: 0.7, dashArray: '6 6' }).addTo(g)
       line.forEach((p) => points.push(p))
     }
     markers.forEach((mk) => {

@@ -61,6 +61,7 @@ const rosterRoutes = require('./routes/roster');
 const guardRoutes = require('./routes/guards');
 const nearbyRoutes = require('./routes/nearby');
 const manualRoutes = require('./routes/manual');
+const insightRoutes = require('./routes/insights');
 
 // Middleware
 app.use(helmet());
@@ -146,6 +147,7 @@ app.use('/api/roster', rosterRoutes);
 app.use('/api/guards', guardRoutes);
 app.use('/api/nearby', nearbyRoutes);
 app.use('/api/manual', manualRoutes);
+app.use('/api/insights', insightRoutes);
 
 // Uploaded images (used only when Cloudinary is not configured). Images must be loadable from the frontend's origin.
 app.use('/uploads', express.static(require('path').join(__dirname, 'uploads'), {

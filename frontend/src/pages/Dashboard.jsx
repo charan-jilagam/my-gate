@@ -3,8 +3,10 @@ import { FiAlertTriangle, FiArrowRight, FiCamera, FiCompass, FiMapPin, FiPhone, 
 import { useAuth } from '../contexts/AuthContext'
 import { useT } from '../contexts/LanguageContext'
 import useApi from '../hooks/useApi'
-import { PageHeader, formatDate, formatINR } from '../components/ui'
+import { ErrorState, PageHeader, formatDate, formatINR } from '../components/ui'
 import RequestCard from '../components/RequestCard'
+import { AlertBanner, ServiceTiles, TopNews, WeatherHero } from '../components/HomeLive'
+import { TONE, TONE_ORDER } from '../components/insights'
 import { resolveActionUrl } from '../components/Layout'
 
 const greeting = () => {
@@ -77,7 +79,7 @@ const count = (d, key) => d?.count ?? d?.[key]?.length ?? 0
 
 const Dashboard = () => {
   const { user, isResident, isAdmin, isSecurity } = useAuth()
-  const { t } = useT()
+  const { t, lang } = useT()
   const role = user?.role
   // The guard head can do everything a guard can.
   const sees = (...roles) => roles.includes(role) || (role === 'guard_admin' && roles.includes('security'))
@@ -97,6 +99,9 @@ const Dashboard = () => {
   const shifts = useApi('/roster/mine', { enabled: sees('security', 'staff') })
   const onDuty = useApi('/guards/on-duty', { enabled: isResident, select: (d) => d })
   const swapsToAnswer = useApi('/guards/swaps', { enabled: sees('security', 'staff'), select: (d) => (d.swaps || []).filter((x) => x.canAccept) })
+  // Weather, alerts and headlines for the society's area, from free public sources (one call, cached on the server).
+  const hasPlace = Boolean(user?.societyId) && role !== 'vendor'
+  const live = useApi('/insights/overview', { params: { lang }, enabled: hasPlace, live: false })
   const notifications = useApi('/users/notifications', { params: { limit: 6 }, select: (d) => d.notifications || [] })
 
   const pendingPaymentTotal = (paymentsPending.data?.payments || []).reduce((n, p) => n + (p.amount || 0), 0)
@@ -139,14 +144,32 @@ const Dashboard = () => {
     <>
       <PageHeader title={`${t(greeting())}, ${user?.name?.split(' ')[0] || 'there'}`} subtitle={subtitle || undefined} />
 
+      {hasPlace && (
+        <section aria-label={t('Weather and city updates')} className="mb-6 grid gap-4 lg:grid-cols-[1.2fr_1fr]">
+          {live.data?.weather ? (
+            <WeatherHero weather={live.data.weather} place={live.data.place} updatedAt={live.data.weatherUpdatedAt} />
+          ) : live.loading ? (
+            <div className="skeleton h-[22rem] rounded-3xl" aria-hidden="true" />
+          ) : (
+            <div className="panel flex items-center p-4"><ErrorState message={live.error || 'The weather is not available right now.'} onRetry={live.reload} /></div>
+          )}
+          <div className="flex flex-col gap-4">
+            <ServiceTiles canSos={['resident', 'security', 'guard_admin', 'society_admin', 'super_admin'].includes(role)} />
+            <AlertBanner alerts={live.data?.alerts} />
+          </div>
+        </section>
+      )}
+
       {quick.length > 0 && (
         <section aria-labelledby="quick-h" className="mb-6">
           <h2 id="quick-h" className="sr-only">{t('Quick actions')}</h2>
-          <ul className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-            {quick.map(({ to, icon: Icon, label, danger }) => (
+          <ul className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
+            {quick.map(({ to, icon: Icon, label, danger }, i) => (
               <li key={to + label} className={danger && quick.length % 2 === 1 ? 'col-span-2 sm:col-span-1' : ''}>
-                <Link to={to} className={`flex h-full min-h-[76px] flex-col items-start justify-between gap-2 rounded-lg border p-3 text-sm font-semibold transition-colors ${danger ? 'border-danger/40 bg-danger-soft text-danger hover:border-danger' : 'border-line bg-surface hover:border-brand'}`}>
-                  <Icon size={22} className={danger ? '' : 'text-brand'} aria-hidden="true" />
+                <Link to={to} className={`group flex h-full min-h-[88px] flex-col items-start justify-between gap-3 rounded-2xl border p-3.5 text-sm font-semibold transition duration-200 hover:-translate-y-0.5 hover:shadow-lift ${danger ? 'border-danger/30 bg-danger-soft text-danger hover:border-danger' : 'border-line bg-surface shadow-card hover:border-brand/40'}`}>
+                  <span className={`grid h-10 w-10 place-items-center rounded-xl ${danger ? 'bg-danger text-on-solid' : TONE[TONE_ORDER[i % TONE_ORDER.length]]}`}>
+                    <Icon size={20} aria-hidden="true" />
+                  </span>
                   {t(label)}
                 </Link>
               </li>
@@ -186,6 +209,8 @@ const Dashboard = () => {
           <ul className="space-y-2">{services.data.map((r) => <RequestCard key={r._id} request={r} />)}</ul>
         </section>
       )}
+
+      {hasPlace && <TopNews items={live.data?.news} />}
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-[3fr_2fr]">
         <section aria-labelledby="attention-h" className="panel">

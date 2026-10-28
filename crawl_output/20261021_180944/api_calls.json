@@ -1,0 +1,30 @@
+{
+  "GET /json": {
+    "count": 1,
+    "status": 200,
+    "found_on": [
+      "https://y.gpstracktech.com#/loginv2"
+    ]
+  },
+  "GET /lang/en.json": {
+    "count": 2,
+    "status": 200,
+    "found_on": [
+      "https://y.gpstracktech.com#/loginv2"
+    ]
+  },
+  "GET /webapi/admin/notice/show": {
+    "count": 1,
+    "status": 200,
+    "found_on": [
+      "https://y.gpstracktech.com#/loginv2"
+    ]
+  },
+  "GET /webapi/web/getCustomerInfo": {
+    "count": 1,
+    "status": 200,
+    "found_on": [
+      "https://y.gpstracktech.com#/loginv2"
+    ]
+  }
+}

@@ -1,0 +1,3 @@
+n,url,title,depth,found_from,screenshot
+1,https://y.gpstracktech.com/#/loginv2,BSJ Monitor,0,landing,001_loginv2.png
+2,https://y.gpstracktech.com/diyConfiguration/,server-config-recommand-h5,1,https://y.gpstracktech.com#/loginv2,002_diyConfiguration.png

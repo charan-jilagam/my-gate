@@ -32,6 +32,9 @@ const Attendance = lazy(() => import('./pages/Attendance'))
 const LiveGuards = lazy(() => import('./pages/LiveGuards'))
 const GuardPosts = lazy(() => import('./pages/GuardPosts'))
 const Nearby = lazy(() => import('./pages/Nearby'))
+const Weather = lazy(() => import('./pages/Weather'))
+const News = lazy(() => import('./pages/News'))
+const MoreServices = lazy(() => import('./pages/MoreServices'))
 const Services = lazy(() => import('./pages/Services'))
 const ServiceProvider = lazy(() => import('./pages/ServiceProvider'))
 const ServiceRequests = lazy(() => import('./pages/ServiceRequests'))
@@ -56,6 +59,8 @@ const NotFound = lazy(() => import('./pages/NotFound'))
 
 const ADMINS = ['society_admin', 'super_admin']
 const OFFICE = [...ADMINS, 'guard_admin']
+// Weather, news, gold rates and nearby help are for everyone who belongs to a society.
+const CITY_ROLES = ['resident', 'security', 'guard_admin', 'staff', ...ADMINS]
 
 // Signed-in users have no reason to see the sign-in screens.
 const GuestOnly = ({ children }) => {
@@ -113,6 +118,9 @@ function App() {
                 <Route path="/attendance" element={<PrivateRoute roles={OFFICE}><Attendance /></PrivateRoute>} />
                 <Route path="/live" element={<PrivateRoute roles={OFFICE}><LiveGuards /></PrivateRoute>} />
                 <Route path="/nearby" element={<PrivateRoute roles={['resident', 'security', 'guard_admin', 'staff', ...ADMINS]}><Nearby /></PrivateRoute>} />
+                <Route path="/weather" element={<PrivateRoute roles={CITY_ROLES}><Weather /></PrivateRoute>} />
+                <Route path="/news" element={<PrivateRoute roles={CITY_ROLES}><News /></PrivateRoute>} />
+                <Route path="/more" element={<PrivateRoute roles={CITY_ROLES}><MoreServices /></PrivateRoute>} />
                 <Route path="/guard-posts" element={<PrivateRoute roles={OFFICE}><GuardPosts /></PrivateRoute>} />
                 <Route path="/my-shifts" element={<PrivateRoute roles={['security', 'guard_admin', 'staff']}><MyShifts /></PrivateRoute>} />
                 <Route path="/help" element={<Help />} />
