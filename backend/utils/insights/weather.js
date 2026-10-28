@@ -1,8 +1,9 @@
-// Weather from Open-Meteo (free, no API key). Forecast numbers also feed the "derived" weather advisories.
+// Weather from Open-Meteo (free, no API key), with MET Norway as a back-up when Open-Meteo does not answer. Forecast numbers also feed the "derived" weather advisories.
 // Note for production: Open-Meteo's free service is for non-commercial use. If Nivora is sold as a paid
 // service, either take their commercial plan or switch this one file to another provider.
 const { getJson } = require('./http');
 const { cached } = require('./cache');
+const { fetchFallback } = require('./weatherFallback');
 
 const FORECAST = 'https://api.open-meteo.com/v1/forecast';
 const TTL_MS = 20 * 60 * 1000; // the model updates hourly, so 20 minutes is plenty
@@ -129,7 +130,18 @@ const fetchWeather = async ({ lat, lng }) => {
     timezone: 'auto',
     forecast_days: '7'
   });
-  return shape(await getJson(`${FORECAST}?${q}`));
+  try {
+    return shape(await getJson(`${FORECAST}?${q}`));
+  } catch (primary) {
+    // Open-Meteo can refuse shared server addresses (HTTP 429). MET Norway is the back-up so the screen still works.
+    console.error('Open-Meteo weather failed, trying MET Norway:', primary.message);
+    try {
+      return shape(await fetchFallback({ lat, lng }));
+    } catch (backup) {
+      console.error('MET Norway weather failed too:', backup.message);
+      throw primary;
+    }
+  }
 };
 
 // Cached per ~1 km cell, shared by every resident nearby.

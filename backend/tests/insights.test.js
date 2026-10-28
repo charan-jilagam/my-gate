@@ -414,3 +414,49 @@ describe('home screen overview', () => {
     expect(res.body.weather).not.toBeNull();
   });
 });
+
+describe('weather back-up (MET Norway)', () => {
+  const met = () => ({
+    properties: {
+      timeseries: [0, 1, 2, 3].map((h) => ({
+        time: `2026-10-28T${String(10 + h).padStart(2, '0')}:00:00Z`,
+        data: {
+          instant: { details: { air_temperature: 28 - h, relative_humidity: 70, air_pressure_at_sea_level: 1010, wind_speed: 3, wind_from_direction: 225, ultraviolet_index_clear_sky: 6 } },
+          next_1_hours: { summary: { symbol_code: h === 2 ? 'heavyrain' : 'partlycloudy_day' }, details: { precipitation_amount: h === 2 ? 3 : 0 } }
+        }
+      }))
+    }
+  });
+  const route = (openMeteo) => async (url) => (String(url).includes('api.met.no') ? json(met()) : String(url).includes('nominatim') ? json({ address: { city: 'Hyderabad', state: 'Telangana' } }) : openMeteo);
+
+  test('is used when Open-Meteo refuses the request, and the screen gets a normal answer', async () => {
+    global.fetch = jest.fn().mockImplementation(route(down));
+    const res = await get('/weather');
+    expect(res.status).toBe(200);
+    expect(res.body.weather.current).toMatchObject({ icon: 'partly', condition: 'Partly cloudy', humidity: 70, windDir: 'SW' });
+    expect(res.body.weather.current.temp).toBe(28);
+    expect(res.body.weather.hourly.length).toBeGreaterThan(2);
+    expect(res.body.weather.hourly[2]).toMatchObject({ icon: 'heavy-rain' });
+    expect(res.body.weather.daily[0]).toMatchObject({ max: 28, min: 25, rainMm: 3 });
+    expect(res.body.weather.daily[0].sunrise).toMatch(/^2026-10-28T0[56]:/);
+    expect(res.body.weather.daily[0].sunset).toMatch(/^2026-10-28T1[78]:/);
+  });
+
+  test('is not called while Open-Meteo works', async () => {
+    global.fetch = jest.fn().mockResolvedValue(json(forecast()));
+    await get('/weather');
+    expect(global.fetch.mock.calls.some((c) => String(c[0]).includes('api.met.no'))).toBe(false);
+  });
+
+  test('both down still answers 502 with the same message', async () => {
+    global.fetch = jest.fn().mockResolvedValue(down);
+    expect((await get('/weather')).status).toBe(502);
+  });
+
+  test('the home overview also works on the back-up', async () => {
+    global.fetch = jest.fn().mockImplementation(route(down));
+    const res = await get('/overview');
+    expect(res.status).toBe(200);
+    expect(res.body.weather).toBeTruthy();
+  });
+});
