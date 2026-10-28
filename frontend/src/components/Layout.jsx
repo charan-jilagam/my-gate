@@ -13,6 +13,7 @@ import {
   FiCalendar,
   FiCheckCircle,
   FiClipboard,
+  FiCloud,
   FiClock,
   FiCreditCard,
   FiFileText,
@@ -20,6 +21,7 @@ import {
   FiGlobe,
   FiGrid,
   FiHome,
+  FiLayers,
   FiLogOut,
   FiMenu,
   FiMessageSquare,
@@ -31,6 +33,7 @@ import {
   FiNavigation,
   FiPackage,
   FiPieChart,
+  FiRss,
   FiShield,
   FiThumbsUp,
   FiSun,
@@ -79,8 +82,14 @@ const I = {
   live: { to: '/live', icon: FiNavigation, label: 'Guard tracking' },
   nearby: { to: '/nearby', icon: FiCompass, label: 'Nearby places' },
   posts: { to: '/guard-posts', icon: FiMapPin, label: 'Guard posts' },
+  weather: { to: '/weather', icon: FiCloud, label: 'Weather & alerts' },
+  news: { to: '/news', icon: FiRss, label: 'Local news' },
+  more: { to: '/more', icon: FiLayers, label: 'More services' },
   guide: { to: '/help', icon: FiBookOpen, label: 'User guide' }
 }
+
+// Weather, headlines, gold rates and nearby help for the society's area.
+const CITY = { title: 'City updates', items: [I.weather, I.news, I.more] }
 
 // Sidebar and "More" menu: grouped so a long list stays scannable.
 const NAV = {
@@ -89,12 +98,14 @@ const NAV = {
     { title: 'At the gate', items: [I.visitors, I.deliveries, I.vehicles, I.help] },
     { title: 'Home and community', items: [I.services, I.bookings, I.community, I.nearby, I.notices, I.occasions, I.votes, I.documents] },
     { title: 'Money and help', items: [I.payments, I.accounts, I.complaints, I.upkeep, I.emergency] },
+    CITY,
     { items: [I.guide] }
   ],
   security: [
     { items: [I.home, I.gate, I.shifts, I.swaps] },
     { title: 'Gate', items: [I.visitors, I.deliveries, I.vehicles, I.help] },
     { title: 'Society', items: [I.notices, I.occasions, I.nearby, I.emergency, I.upkeep, I.documents] },
+    CITY,
     { items: [I.guide] }
   ],
   guard_admin: [
@@ -102,6 +113,7 @@ const NAV = {
     { title: 'Guards', items: [I.roster, I.attendance, I.live, I.posts] },
     { title: 'Gate', items: [I.visitors, I.deliveries, I.vehicles, I.help] },
     { title: 'Society', items: [I.notices, I.occasions, I.nearby, I.emergency, I.upkeep, I.documents] },
+    CITY,
     { items: [I.guide] }
   ],
   society_admin: [
@@ -112,6 +124,7 @@ const NAV = {
     { title: 'Operations', items: [I.upkeep, I.documents] },
     { title: 'Money', items: [I.payments, I.accounts] },
     { title: 'Setup', items: [I.societies] },
+    CITY,
     { items: [I.guide] }
   ],
   super_admin: [
@@ -125,6 +138,7 @@ const NAV = {
   ],
   staff: [
     { items: [I.home, I.people, I.bookings, I.shifts, I.swaps, I.upkeep, I.complaints, I.notices, I.occasions, I.nearby, I.documents] },
+    CITY,
     { items: [I.guide] }
   ],
   vendor: [
@@ -472,7 +486,7 @@ const Layout = () => {
 
       {drawer && (
         <div className="fixed inset-0 z-50 lg:hidden">
-          <div className="absolute inset-0 bg-[#031414]/60" onClick={() => setDrawer(false)} aria-hidden="true" />
+          <div className="absolute inset-0 bg-[#06182a]/60" onClick={() => setDrawer(false)} aria-hidden="true" />
           <aside className="absolute inset-y-0 left-0 w-72 max-w-[85vw] shadow-pop">
             {sidebar}
             <button

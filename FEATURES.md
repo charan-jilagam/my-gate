@@ -272,3 +272,21 @@ Numbers without a country code get `+91`; change it with `SMS_DEFAULT_COUNTRY_CO
 - **Private vendor ratings**: a vendor's rating and comment about a resident are never shown to that resident (job page, notifications, API). Vendors still see the resident's average.
 - **Footer**: "© year Nivora. All rights reserved. Developed with ♥ by Nivero-Dev Team" on every screen, including sign-in and guest pass pages.
 - **Scrollbars**: hidden everywhere; scrolling by touch, wheel and keyboard still works.
+
+## City updates: weather, alerts, gold, news and nearby help
+
+Free public data for the society's area, shown on the home screen and on `/weather`, `/more` and `/news`. No API keys and no cost.
+
+| What | Source | Notes |
+|---|---|---|
+| Weather, hourly and 7-day | Open-Meteo | Free tier is for non-commercial use. Take their commercial plan or swap `backend/utils/insights/weather.js` before selling Nivora as a paid service. |
+| Official warnings | NDMA SACHET CAP feeds | State feed first, then the national feed filtered by city/state. |
+| Forecast advisories | Worked out from the forecast | Heavy rain (IMD 64.5 mm), thunderstorm, strong wind, heat. |
+| Earthquakes | USGS | Within 500 km, last 3 days, magnitude 3.5+. |
+| Gold per gram (24K/22K, INR) | Gold-API.com + open.er-api.com (Frankfurter backup) | International spot converted to rupees. Labelled "indicative"; Indian shop rates differ. Check Gold-API's current terms. |
+| Local news | Google News RSS (GDELT backup) | Headline, publisher and link only. Hindi and Telugu follow the app language. |
+| Police, hospitals | OpenStreetMap (existing nearby helper) + national helplines | |
+
+Everything is cached on the server (`backend/utils/insights/cache.js`) and shared by all residents of the same area. If a source is down, the last good answer is shown, marked stale. API: `GET /api/insights/{overview,weather,alerts,gold,news,emergency}`. Tests: `backend/tests/insights.test.js`.
+
+The society needs a map pin or a city name (Society admin > location) so the area can be found.

@@ -35,7 +35,7 @@ export const openCheckout = async ({ keyId, order, name, description, prefill })
       name,
       description,
       prefill,
-      theme: { color: '#0F4C4A' },
+      theme: { color: '#0F766E' },
       handler: (response) => resolve(response),
       modal: { ondismiss: () => reject({ dismissed: true }) }
     })

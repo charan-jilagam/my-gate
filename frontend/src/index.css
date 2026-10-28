@@ -3,50 +3,52 @@
 @tailwind utilities;
 
 :root {
-  --bg: 244 246 244;
+  --bg: 241 246 252;
+  --bg-tint: 222 236 252; /* the soft sky wash at the top of every page */
   --surface: 255 255 255;
-  --sunken: 229 235 232;
-  --ink: 18 42 41;
-  --muted: 91 111 109;
-  --line: 205 216 213; /* dividers */
-  --edge: 189 202 198; /* outlines of fields, buttons, chips and cards: strong enough to see on white */
-  --brand: 15 76 74;
-  --brand-strong: 10 58 57;
-  --brand-soft: 222 238 236;
+  --sunken: 232 239 247;
+  --ink: 14 30 54;
+  --muted: 94 110 133;
+  --line: 221 230 241; /* dividers */
+  --edge: 203 214 228; /* outlines of fields, buttons, chips and cards */
+  --brand: 15 118 110;
+  --brand-strong: 17 94 89;
+  --brand-soft: 222 244 240;
   --brand-ink: 255 255 255;
   --amber-soft: 254 240 199;
-  --ok: 30 122 76;
-  --ok-soft: 220 243 229;
-  --danger: 190 52 52;
-  --danger-soft: 252 228 228;
-  --info: 30 90 160;
-  --info-soft: 221 233 249;
-  --side: 10 58 57;
+  --ok: 22 128 80;
+  --ok-soft: 220 245 231;
+  --danger: 207 49 59;
+  --danger-soft: 253 232 233;
+  --info: 37 99 235;
+  --info-soft: 224 236 254;
+  --side: 11 47 66;
   --on-solid: 255 255 255;
 }
 
 /* Dark theme: a calm slate with a hint of teal. Surfaces step up in lightness (bg < sunken < surface)
    so cards read as raised without needing shadows, and coloured fills are muted to avoid glare. */
 .dark {
-  --bg: 12 20 22;
-  --surface: 21 32 35;
-  --sunken: 16 26 28;
-  --ink: 231 238 238;
-  --muted: 150 166 168;
-  --line: 44 60 63;
-  --edge: 44 60 63;
-  --brand: 78 196 187;
-  --brand-strong: 112 214 205;
-  --brand-soft: 24 54 56;
+  --bg: 10 18 28;
+  --bg-tint: 14 32 50;
+  --surface: 18 29 42;
+  --sunken: 14 24 36;
+  --ink: 230 238 247;
+  --muted: 148 163 184;
+  --line: 38 54 74;
+  --edge: 44 62 84;
+  --brand: 94 205 190;
+  --brand-strong: 130 224 211;
+  --brand-soft: 20 56 62;
   --brand-ink: 4 28 28;
   --amber-soft: 62 48 12;
   --ok: 88 190 138;
   --ok-soft: 20 54 40;
-  --danger: 240 118 118;
-  --danger-soft: 66 28 30;
-  --info: 124 172 238;
-  --info-soft: 26 42 74;
-  --side: 8 17 19;
+  --danger: 245 128 128;
+  --danger-soft: 70 28 34;
+  --info: 125 170 250;
+  --info-soft: 24 42 78;
+  --side: 7 16 26;
   --on-solid: 6 24 24;
 }
 
@@ -76,6 +78,8 @@
   body {
     @apply bg-bg font-sans text-ink antialiased;
     margin: 0;
+    background-image: linear-gradient(180deg, rgb(var(--bg-tint)) 0, rgb(var(--bg)) 360px);
+    background-repeat: no-repeat;
   }
   h1,
   h2,
@@ -118,7 +122,7 @@
     @apply mb-1 block text-sm font-semibold text-ink;
   }
   .panel {
-    @apply rounded-2xl border border-edge/80 bg-surface shadow-card dark:border-edge dark:shadow-none;
+    @apply rounded-2xl border border-line bg-surface shadow-card dark:border-edge dark:shadow-none;
   }
   /* A card you can tap: lifts a little on hover. */
   .panel-link {
@@ -150,7 +154,7 @@
 
 /* The one signature element: a boom-barrier stripe, used on the sidebar edge and active nav state. */
 .hazard {
-  background-image: repeating-linear-gradient(-45deg, #f5a800 0 10px, #0a3a39 10px 20px);
+  background-image: repeating-linear-gradient(-45deg, #f5a800 0 10px, rgb(var(--side)) 10px 20px);
 }
 
 @keyframes shimmer {
@@ -206,8 +210,8 @@
 
 /* Sign-in screens */
 .auth-hero {
-  /* One hue, darker toward the bottom: the brand teal, not a rainbow. */
-  background: linear-gradient(165deg, #0e4c49 0%, #0a3a39 52%, #082d2c 100%);
+  /* One hue, darker toward the bottom: teal into deep blue. */
+  background: linear-gradient(165deg, #0f6a70 0%, #0b3a50 52%, #082a3c 100%);
 }
 @keyframes float-slow {
   0%, 100% { transform: translate3d(0, 0, 0); }
@@ -279,3 +283,32 @@
   100% { box-shadow: 0 0 0 0 rgb(var(--brand) / 0); }
 }
 .flash-highlight { animation: flash-ring 3.4s ease-out; border-radius: 0.75rem; }
+
+/* ---------- Weather and city updates ---------- */
+
+/* The sky behind the weather card follows the weather: day blue, cloud, rain, storm, night. Text on it is white. */
+.sky {
+  position: relative;
+  overflow: hidden;
+  color: #fff;
+  background: linear-gradient(160deg, #1f5fd0 0%, #3a82e6 55%, #5a9bf0 100%);
+}
+.sky::before,
+.sky::after {
+  content: '';
+  position: absolute;
+  border-radius: 9999px;
+  background: rgb(255 255 255 / 0.13);
+  pointer-events: none;
+}
+.sky::before { width: 11rem; height: 11rem; right: -3rem; top: -4rem; }
+.sky::after { width: 8rem; height: 8rem; left: -2rem; bottom: -3.5rem; background: rgb(255 255 255 / 0.08); }
+.sky-cloud { background: linear-gradient(160deg, #35629f 0%, #5380b8 55%, #7aa0cf 100%); }
+.sky-rain { background: linear-gradient(160deg, #2f4766 0%, #4a6683 55%, #6a869f 100%); }
+.sky-storm { background: linear-gradient(160deg, #1f2740 0%, #384360 55%, #55617f 100%); }
+.sky-night { background: linear-gradient(160deg, #0c1b3d 0%, #1a3367 60%, #2b4a86 100%); }
+.glass {
+  background: rgb(255 255 255 / 0.16);
+  border: 1px solid rgb(255 255 255 / 0.22);
+  backdrop-filter: blur(6px);
+}

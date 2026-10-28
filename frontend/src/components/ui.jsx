@@ -216,7 +216,7 @@ export const Modal = ({ open, onClose, title: rawTitle, children, footer, size =
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center sm:p-4">
       <div
-        className="fade-in absolute inset-0 bg-[#031414]/60 backdrop-blur-[2px]"
+        className="fade-in absolute inset-0 bg-[#06182a]/60 backdrop-blur-[2px]"
         // mousedown (not click): a text selection dragged out of a field ends on the backdrop and must not close it.
         onMouseDown={(e) => e.target === e.currentTarget && !hasFields() && onClose?.()}
         aria-hidden="true"
