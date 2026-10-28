@@ -1,12 +1,15 @@
 import { FiRefreshCw } from 'react-icons/fi'
 import { useT } from '../contexts/LanguageContext'
 import useApi from '../hooks/useApi'
+import LocationChip from '../components/LocationChip'
+import { useLiveLocation } from '../contexts/LocationContext'
 import { NewsRow, SoftNote } from '../components/insights'
 import { ErrorState, ListSkeleton, PageHeader } from '../components/ui'
 
 const News = () => {
   const { t, lang } = useT()
-  const news = useApi('/insights/news', { params: { lang }, live: false })
+  const { params: where } = useLiveLocation()
+  const news = useApi('/insights/news', { params: { lang, ...where }, live: false })
   const place = news.data?.place
 
   return (
@@ -20,6 +23,8 @@ const News = () => {
           </button>
         }
       />
+
+      <LocationChip place={place} className="mb-4" />
 
       {news.loading && !news.data ? (
         <ListSkeleton rows={6} />

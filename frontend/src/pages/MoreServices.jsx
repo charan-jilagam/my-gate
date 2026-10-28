@@ -4,6 +4,8 @@ import { FiAlertTriangle, FiMapPin, FiRss, FiShield, FiRefreshCw } from 'react-i
 import { GiGoldBar } from 'react-icons/gi'
 import { useT } from '../contexts/LanguageContext'
 import useApi from '../hooks/useApi'
+import LocationChip from '../components/LocationChip'
+import { useLiveLocation } from '../contexts/LocationContext'
 import { AlertRow, GoldCards, Helplines, NewsRow, SectionCard, ServicePlace, SoftNote, clockLabel } from '../components/insights'
 import { ListSkeleton, PageHeader } from '../components/ui'
 
@@ -11,10 +13,11 @@ const MoreServices = () => {
   const { t, lang } = useT()
   const { hash } = useLocation()
   const [allAlerts, setAllAlerts] = useState(false)
-  const alerts = useApi('/insights/alerts', { live: false })
+  const { params: where } = useLiveLocation()
+  const alerts = useApi('/insights/alerts', { params: where, live: false })
   const gold = useApi('/insights/gold', { live: false })
-  const emergency = useApi('/insights/emergency', { live: false })
-  const news = useApi('/insights/news', { params: { lang }, live: false })
+  const emergency = useApi('/insights/emergency', { params: where, live: false })
+  const news = useApi('/insights/news', { params: { lang, ...where }, live: false })
 
   // /more#gold opens scrolled to the gold section.
   useEffect(() => {
@@ -46,6 +49,8 @@ const MoreServices = () => {
           </button>
         }
       />
+
+      <LocationChip place={alerts.data?.place} className="mb-4" />
 
       <div className="grid items-start gap-5 lg:grid-cols-2">
         <div className="space-y-5">

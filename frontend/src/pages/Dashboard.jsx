@@ -3,6 +3,8 @@ import { FiAlertTriangle, FiArrowRight, FiCamera, FiCompass, FiMapPin, FiPhone, 
 import { useAuth } from '../contexts/AuthContext'
 import { useT } from '../contexts/LanguageContext'
 import useApi from '../hooks/useApi'
+import { useLiveLocation } from '../contexts/LocationContext'
+import LocationChip from '../components/LocationChip'
 import { ErrorState, PageHeader, formatDate, formatINR } from '../components/ui'
 import RequestCard from '../components/RequestCard'
 import { AlertBanner, ServiceTiles, TopNews, WeatherHero } from '../components/HomeLive'
@@ -101,7 +103,8 @@ const Dashboard = () => {
   const swapsToAnswer = useApi('/guards/swaps', { enabled: sees('security', 'staff'), select: (d) => (d.swaps || []).filter((x) => x.canAccept) })
   // Weather, alerts and headlines for the society's area, from free public sources (one call, cached on the server).
   const hasPlace = Boolean(user?.societyId) && role !== 'vendor'
-  const live = useApi('/insights/overview', { params: { lang }, enabled: hasPlace, live: false })
+  const { params: where } = useLiveLocation()
+  const live = useApi('/insights/overview', { params: { lang, ...where }, enabled: hasPlace, live: false })
   const notifications = useApi('/users/notifications', { params: { limit: 6 }, select: (d) => d.notifications || [] })
 
   const pendingPaymentTotal = (paymentsPending.data?.payments || []).reduce((n, p) => n + (p.amount || 0), 0)
@@ -143,6 +146,8 @@ const Dashboard = () => {
   return (
     <>
       <PageHeader title={`${t(greeting())}, ${user?.name?.split(' ')[0] || 'there'}`} subtitle={subtitle || undefined} />
+
+      {hasPlace && <LocationChip place={live.data?.place} className="mb-3" />}
 
       {hasPlace && (
         <section aria-label={t('Weather and city updates')} className="mb-6 grid gap-4 lg:grid-cols-[1.2fr_1fr]">

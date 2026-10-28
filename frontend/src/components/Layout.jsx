@@ -6,6 +6,7 @@ import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import ErrorBoundary from './ErrorBoundary'
 import Footer from './Footer'
 import {
+  FiActivity,
   FiAlertTriangle,
   FiBell,
   FiBookOpen,
@@ -20,7 +21,9 @@ import {
   FiFolder,
   FiGlobe,
   FiGrid,
+  FiHeart,
   FiHome,
+  FiKey,
   FiLayers,
   FiLogOut,
   FiMenu,
@@ -85,39 +88,47 @@ const I = {
   weather: { to: '/weather', icon: FiCloud, label: 'Weather & alerts' },
   news: { to: '/news', icon: FiRss, label: 'Local news' },
   more: { to: '/more', icon: FiLayers, label: 'More services' },
+  myPass: { to: '/my-pass', icon: FiKey, label: 'My entry pass' },
+  household: { to: '/household', icon: FiHeart, label: 'My family' },
+  steps: { to: '/steps', icon: FiActivity, label: 'Walking challenge' },
   guide: { to: '/help', icon: FiBookOpen, label: 'User guide' }
 }
 
 // Weather, headlines, gold rates and nearby help for the society's area.
 const CITY = { title: 'City updates', items: [I.weather, I.news, I.more] }
+// The walking challenge and the person's own entry pass, for everyone who belongs to a society.
+const HEALTH = { title: 'Wellbeing', items: [I.steps] }
 
 // Sidebar and "More" menu: grouped so a long list stays scannable.
 const NAV = {
   resident: [
     { items: [I.home] },
-    { title: 'At the gate', items: [I.visitors, I.deliveries, I.vehicles, I.help] },
+    { title: 'At the gate', items: [I.visitors, I.deliveries, I.vehicles, I.help, I.myPass, I.household] },
     { title: 'Home and community', items: [I.services, I.bookings, I.community, I.nearby, I.notices, I.occasions, I.votes, I.documents] },
     { title: 'Money and help', items: [I.payments, I.accounts, I.complaints, I.upkeep, I.emergency] },
     CITY,
+    HEALTH,
     { items: [I.guide] }
   ],
   security: [
-    { items: [I.home, I.gate, I.shifts, I.swaps] },
+    { items: [I.home, I.gate, I.shifts, I.swaps, I.myPass] },
     { title: 'Gate', items: [I.visitors, I.deliveries, I.vehicles, I.help] },
     { title: 'Society', items: [I.notices, I.occasions, I.nearby, I.emergency, I.upkeep, I.documents] },
     CITY,
+    HEALTH,
     { items: [I.guide] }
   ],
   guard_admin: [
-    { items: [I.home, I.gate, I.shifts, I.swaps] },
+    { items: [I.home, I.gate, I.shifts, I.swaps, I.myPass] },
     { title: 'Guards', items: [I.roster, I.attendance, I.live, I.posts] },
     { title: 'Gate', items: [I.visitors, I.deliveries, I.vehicles, I.help] },
     { title: 'Society', items: [I.notices, I.occasions, I.nearby, I.emergency, I.upkeep, I.documents] },
     CITY,
+    HEALTH,
     { items: [I.guide] }
   ],
   society_admin: [
-    { items: [I.home, I.people] },
+    { items: [I.home, I.people, I.myPass] },
     { title: 'Gate', items: [I.gate, I.visitors, I.deliveries, I.vehicles, I.help] },
     { title: 'Society', items: [I.notices, I.occasions, I.nearby, I.votes, I.complaints, I.community, I.bookings, I.adminServices, I.emergency] },
     { title: 'Guards', items: [I.roster, I.attendance, I.live, I.swaps, I.posts] },
@@ -125,6 +136,7 @@ const NAV = {
     { title: 'Money', items: [I.payments, I.accounts] },
     { title: 'Setup', items: [I.societies] },
     CITY,
+    HEALTH,
     { items: [I.guide] }
   ],
   super_admin: [
@@ -137,8 +149,9 @@ const NAV = {
     { items: [I.guide] }
   ],
   staff: [
-    { items: [I.home, I.people, I.bookings, I.shifts, I.swaps, I.upkeep, I.complaints, I.notices, I.occasions, I.nearby, I.documents] },
+    { items: [I.home, I.people, I.bookings, I.shifts, I.swaps, I.upkeep, I.complaints, I.notices, I.occasions, I.nearby, I.documents, I.myPass] },
     CITY,
+    HEALTH,
     { items: [I.guide] }
   ],
   vendor: [

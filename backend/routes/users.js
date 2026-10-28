@@ -9,7 +9,7 @@ const { notifyUser } = require('../utils/notifyUser');
 const { isSafeUrl } = require('../utils/imageUrl');
 const { safeNotifyMany } = require('../utils/safeNotify');
 const crypto = require('crypto');
-const { sendApprovedEmail, sendRejectedEmail, sendInviteEmail, baseUrl } = require('../utils/accountMail');
+const { sendApprovedEmail, sendRejectedEmail } = require('../utils/accountMail');
 const Society = require('../models/Society');
 
 // @route   GET /api/users/notifications
@@ -281,22 +281,8 @@ const CREATABLE = {
   society_admin: ['resident', 'security', 'guard_admin', 'staff', 'vendor'],
   super_admin: ['society_admin', 'resident', 'security', 'guard_admin', 'staff', 'vendor']
 };
-const INVITE_DAYS = 7;
-
-// New reset-style token for the person; the plain token only ever leaves in the link.
-const issueSetupLink = async (user) => {
-  const token = crypto.randomBytes(20).toString('hex');
-  user.resetPasswordToken = crypto.createHash('sha256').update(token).digest('hex');
-  user.resetPasswordExpire = Date.now() + INVITE_DAYS * 24 * 60 * 60 * 1000;
-  await user.save({ validateBeforeSave: false });
-  return `${baseUrl()}/reset-password/${token}?welcome=1`;
-};
-
-const inviteResult = async (req, user, society) => {
-  const setupUrl = await issueSetupLink(user);
-  const emailSent = await sendInviteEmail({ user, societyName: society && society.name, invitedByName: req.user.name, setupUrl, days: INVITE_DAYS });
-  return { emailSent, setupUrl, days: INVITE_DAYS };
-};
+const { inviteResult: sendInvite } = require('../utils/invite');
+const inviteResult = (req, user, society) => sendInvite(req.user, user, society);
 
 // @route   POST /api/users/create
 // @desc    Create an account for someone (resident, guard, guard head, staff, vendor; the super admin also society admins)

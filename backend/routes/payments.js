@@ -305,7 +305,8 @@ router.post('/generate', protect, authorize(...ADMINS), [
     }
 
     const User = require('../models/User');
-    const filter = { societyId, role: 'resident', isApproved: true, isActive: true };
+    // One bill per home: family accounts (which belong to a head of the house) are not billed separately.
+    const filter = { societyId, role: 'resident', isApproved: true, isActive: true, householdHeadId: null };
     if (Array.isArray(residentIds) && residentIds.length) filter._id = { $in: residentIds };
     const residents = await User.find(filter).select('name flatNo block');
     if (!residents.length) {

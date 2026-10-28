@@ -146,6 +146,32 @@ describe('weather', () => {
   test('needs a signed-in user', async () => {
     expect((await h.api().get('/api/insights/weather')).status).toBe(401);
   });
+
+  test('uses the phone’s live position when lat and lng are sent', async () => {
+    global.fetch = jest.fn().mockImplementation(async (url) =>
+      String(url).includes('nominatim') ? json({ address: { city: 'Pune', state: 'Maharashtra' } }) : json(forecast())
+    );
+    const res = await get('/weather?lat=18.5204&lng=73.8567');
+    expect(res.status).toBe(200);
+    expect(res.body.place).toMatchObject({ city: 'Pune', state: 'Maharashtra', live: true, pinned: false });
+    const weatherUrl = String(global.fetch.mock.calls.find((c) => String(c[0]).includes('open-meteo'))[0]);
+    expect(weatherUrl).toContain('latitude=18.5204');
+  });
+
+  test('names the town once per area and still answers if the name lookup fails', async () => {
+    global.fetch = jest.fn().mockImplementation(async (url) => (String(url).includes('nominatim') ? down : json(forecast())));
+    const res = await get('/weather?lat=18.5204&lng=73.8567');
+    expect(res.status).toBe(200);
+    // falls back to the society's town so news and warnings still have a place name
+    expect(res.body.place).toMatchObject({ city: 'Hyderabad', live: true });
+  });
+
+  test('falls back to the society when the position is missing, and rejects nonsense', async () => {
+    global.fetch = jest.fn().mockResolvedValue(json(forecast()));
+    const none = await get('/weather');
+    expect(none.body.place.live).toBe(false);
+    expect((await get('/weather?lat=999&lng=10')).status).toBe(400);
+  });
 });
 
 describe('alerts', () => {

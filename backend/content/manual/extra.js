@@ -265,4 +265,80 @@ const addPeopleSuper = {
   tips: ['A society can have more than one admin.']
 };
 
-module.exports = { occasions, occasionsManage, addPeople, addPeopleSuper, nearby, societyAddress, swaps, availability, clockLocation, roster, attendance, live, posts, head, onDuty, rateResident, ratings, openLinks };
+const myPass = {
+  id: 'my-pass',
+  title: 'My entry pass',
+  path: '/my-pass',
+  covers: ['/my-pass'],
+  summary: 'Your own permanent pass for the society gate.',
+  steps: [
+    'Open My entry pass. You see your photo, a QR code and a pass code that starts with NV.',
+    'Show the QR code to the guard when you come in and when you go out. The guard sees your details.',
+    'Tap Save picture to keep the pass on your phone, or Copy code to read it out.',
+    'Tap Make a new pass if the pass was shared or lost. The old QR code stops working straight away.'
+  ],
+  tips: ['The pass does not expire. Only the society admin or the guard head can make a new pass for you if you cannot sign in.']
+};
+
+const household = {
+  id: 'household',
+  title: 'My family',
+  path: '/household',
+  covers: ['/household'],
+  summary: 'Add your family, give each person a photo, a login and an entry pass.',
+  steps: [
+    'Open My family and tap Add family member. Enter the name, relation and phone number, and add a photo.',
+    'Add an email if they should have their own login. They get a link to choose a password. Without an email they still get an entry pass.',
+    'Tap Show pass on a person to see their QR code. Tap Make a new pass there if you want to replace it.',
+    'The card shows if each person is At home or Out. The guard scans their pass when they go out and come in, and you are told.',
+    'Open Entry and exit log to see everyone who came or went at your flat: family, visitors and daily help.',
+    'Tap Switch off to stop a person\'s login and pass. Their history is kept.'
+  ],
+  tips: ['Only the head of the house can add or change family members. Visitor approvals and bills still go to the head of the house.']
+};
+
+const steps = {
+  id: 'steps',
+  title: 'Walking challenge',
+  path: '/steps',
+  covers: [],
+  summary: 'Walk every day and see how your society is doing.',
+  steps: [
+    'Open Walking challenge and tap Start counting. Allow motion access if your phone asks.',
+    'Keep Nivora open and the phone with you while you walk. Steps are counted while the app is open.',
+    'The ring fills as you get closer to your daily goal. Reach it on consecutive days to build a streak.',
+    'The leaderboard shows who in the society walked most today or this week. Untick Show my name on the leaderboard to hide yourself.'
+  ],
+  tips: ['Steps cannot be counted while Nivora is closed.']
+};
+
+const memberGate = {
+  id: 'member-gate',
+  title: 'Family, guards and staff passes',
+  path: '/gate',
+  covers: [],
+  summary: 'Scan a permanent pass to see who the person is and record them.',
+  steps: [
+    'In the Gate console, open the tab Family & staff.',
+    'Tap Scan QR and scan the pass, or type the pass code that starts with NV, then tap Find.',
+    'You see the photo, name, relation, flat and phone number. Check that it is the same person.',
+    'For family you record Going out or Coming in. For guards, staff and admins you record Let in (entry) or Mark exit.',
+    'If the account is switched off, do not let the person in on that pass.'
+  ],
+  tips: ['Tap Wrong way? if the system guessed the direction wrongly.']
+};
+
+const adminPass = {
+  id: 'admin-pass',
+  title: 'Entry passes for people',
+  path: '/admin/residents',
+  covers: [],
+  summary: 'Show or replace the pass of any resident, guard or staff member.',
+  steps: [
+    'In All people, tap Entry pass next to a person to see their QR code and pass code.',
+    'Tap Make a new pass to replace it. The old pass stops working straight away and the person is told.'
+  ],
+  tips: ['Guard heads can make a new pass for the guards they lead.']
+};
+
+module.exports = { myPass, household, steps, memberGate, adminPass, occasions, occasionsManage, addPeople, addPeopleSuper, nearby, societyAddress, swaps, availability, clockLocation, roster, attendance, live, posts, head, onDuty, rateResident, ratings, openLinks };

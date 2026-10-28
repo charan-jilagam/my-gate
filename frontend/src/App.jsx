@@ -4,6 +4,7 @@ import { Toaster } from 'react-hot-toast'
 import { AuthProvider, useAuth } from './contexts/AuthContext'
 import { SocketProvider } from './contexts/SocketContext'
 import { LanguageProvider } from './contexts/LanguageContext'
+import { LocationProvider } from './contexts/LocationContext'
 import PrivateRoute, { FullPageSpinner } from './components/PrivateRoute'
 import Layout from './components/Layout'
 import ErrorBoundary from './components/ErrorBoundary'
@@ -53,6 +54,9 @@ const OccasionDetail = lazy(() => import('./pages/OccasionDetail'))
 const Votes = lazy(() => import('./pages/Votes'))
 const Upkeep = lazy(() => import('./pages/Upkeep'))
 const Roster = lazy(() => import('./pages/Roster'))
+const MyPass = lazy(() => import('./pages/MyPass'))
+const Household = lazy(() => import('./pages/Household'))
+const Steps = lazy(() => import('./pages/Steps'))
 const MyShifts = lazy(() => import('./pages/MyShifts'))
 const Help = lazy(() => import('./pages/Help'))
 const NotFound = lazy(() => import('./pages/NotFound'))
@@ -60,6 +64,8 @@ const NotFound = lazy(() => import('./pages/NotFound'))
 const ADMINS = ['society_admin', 'super_admin']
 const OFFICE = [...ADMINS, 'guard_admin']
 // Weather, news, gold rates and nearby help are for everyone who belongs to a society.
+// Everyone who lives or works inside a society has a permanent entry pass; residents manage their family on top of it.
+const PASS_ROLES = ['resident', 'security', 'guard_admin', 'staff', 'society_admin']
 const CITY_ROLES = ['resident', 'security', 'guard_admin', 'staff', ...ADMINS]
 
 // Signed-in users have no reason to see the sign-in screens.
@@ -75,6 +81,7 @@ function App() {
     <LanguageProvider>
     <AuthProvider>
       <SocketProvider>
+        <LocationProvider>
         <Router>
           <ErrorBoundary>
           <Suspense fallback={<FullPageSpinner />}>
@@ -118,6 +125,9 @@ function App() {
                 <Route path="/attendance" element={<PrivateRoute roles={OFFICE}><Attendance /></PrivateRoute>} />
                 <Route path="/live" element={<PrivateRoute roles={OFFICE}><LiveGuards /></PrivateRoute>} />
                 <Route path="/nearby" element={<PrivateRoute roles={['resident', 'security', 'guard_admin', 'staff', ...ADMINS]}><Nearby /></PrivateRoute>} />
+                <Route path="/my-pass" element={<PrivateRoute roles={PASS_ROLES}><MyPass /></PrivateRoute>} />
+                <Route path="/household" element={<PrivateRoute roles={['resident']}><Household /></PrivateRoute>} />
+                <Route path="/steps" element={<PrivateRoute roles={PASS_ROLES}><Steps /></PrivateRoute>} />
                 <Route path="/weather" element={<PrivateRoute roles={CITY_ROLES}><Weather /></PrivateRoute>} />
                 <Route path="/news" element={<PrivateRoute roles={CITY_ROLES}><News /></PrivateRoute>} />
                 <Route path="/more" element={<PrivateRoute roles={CITY_ROLES}><MoreServices /></PrivateRoute>} />
@@ -151,6 +161,7 @@ function App() {
             }}
           />
         </Router>
+        </LocationProvider>
       </SocketProvider>
     </AuthProvider>
     </LanguageProvider>

@@ -676,7 +676,8 @@ router.post('/walk-in', protect, authorize('security', 'guard_admin', 'society_a
 
     const residentQuery = { societyId: req.user.societyId, role: 'resident', isApproved: true, isActive: true, flatNo };
     if (block) residentQuery.block = block;
-    const residents = await User.find(residentQuery);
+    let residents = await User.find({ ...residentQuery, householdHeadId: null }); // the approval goes to the head of the house
+    if (residents.length === 0) residents = await User.find(residentQuery);
 
     if (residents.length === 0) {
       return res.status(404).json({

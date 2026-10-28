@@ -116,7 +116,26 @@ const userSchema = new mongoose.Schema({
   lockUntil: Date,
   resetPasswordToken: String,
   resetPasswordExpire: Date,
-  lastLogin: Date
+  lastLogin: Date,
+
+  // Family accounts. A family member is a resident login that belongs to the home's head: it points at the head's account,
+  // shares the head's flat, and has its own photo and permanent entry pass. The head has no householdHeadId.
+  householdHeadId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    index: true
+  },
+  relation: {
+    type: String,
+    trim: true,
+    maxlength: 30,
+    default: ''
+  },
+  // Walking challenge: whether this person's name is shown on the society leaderboard.
+  stepsOnLeaderboard: {
+    type: Boolean,
+    default: true
+  }
 }, {
   timestamps: true
 });

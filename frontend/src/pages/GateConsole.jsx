@@ -11,6 +11,7 @@ import VisitorCard from '../components/VisitorCard'
 import CheckInSheet from '../components/CheckInSheet'
 import CodePrompt from '../components/CodePrompt'
 import HelperGate from '../components/HelperGate'
+import MemberGate from '../components/MemberGate'
 import { clock, flatText, isOverdue, minutesOver, overText } from '../utils/gate'
 import { EmptyState, ErrorState, Field, ListSkeleton, Modal, PageHeader, Spinner, StatusTag, errorMessage, formatDate, titleCase } from '../components/ui'
 
@@ -18,6 +19,7 @@ const PURPOSES = ['personal', 'business', 'delivery', 'service', 'other']
 const EMPTY_WALK_IN = { name: '', phone: '', block: '', flatNo: '', purpose: 'personal', numberOfVisitors: 1, vehicleNumber: '' }
 const TABS = [
   { key: 'visitors', label: 'Visitors' },
+  { key: 'members', label: 'Family & staff' },
   { key: 'help', label: 'Daily help' },
   { key: 'deliveries', label: 'Deliveries' },
   { key: 'vehicles', label: 'Vehicles' }
@@ -86,6 +88,10 @@ const GateConsole = () => {
     if (read.kind === 'helper') {
       setTab('help')
       return toast('That is a daily help code. Use the Daily help tab.')
+    }
+    if (read.kind === 'member') {
+      setTab('members')
+      return toast('That is a member pass. Use the Family & staff tab.')
     }
     if (read.kind !== 'visitor') return setLookupError('That QR code is not a Nivora visitor pass.')
     setCode(read.code)
@@ -315,6 +321,7 @@ const GateConsole = () => {
         </div>
       )}
 
+      {tab === 'members' && <MemberGate />}
       {tab === 'help' && <HelperGate />}
 
       {tab === 'deliveries' && (

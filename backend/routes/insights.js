@@ -2,7 +2,7 @@ const express = require('express');
 const { query } = require('express-validator');
 const { protect } = require('../middleware/auth');
 const { fail, invalid, societyFor } = require('../utils/routeKit');
-const { resolvePlace } = require('../utils/insights/place');
+const { resolvePlace, placeFromCoords } = require('../utils/insights/place');
 const { getWeather } = require('../utils/insights/weather');
 const { getAlerts } = require('../utils/insights/alerts');
 const { getGold } = require('../utils/insights/gold');
@@ -16,8 +16,21 @@ const router = express.Router();
 
 const langQuery = query('lang').optional().isIn(Object.keys(LANGS)).withMessage('Unknown language');
 
-// Finds the society's place or answers 409. Returns the place, or undefined when a reply has been sent.
+// The phone's live position, sent as ?lat=&lng=. When both are valid, data is for where the person is right now;
+// otherwise it is for the society.
+const liveQuery = [
+  query('lat').optional().isFloat({ min: -90, max: 90 }).withMessage('Latitude is not valid'),
+  query('lng').optional().isFloat({ min: -180, max: 180 }).withMessage('Longitude is not valid')
+];
+
+// Finds the place (live position first, then the society) or answers 409. Returns the place, or undefined when a reply has been sent.
 const placeOr409 = async (req, res) => {
+  const lat = req.query.lat === undefined ? NaN : Number(req.query.lat);
+  const lng = req.query.lng === undefined ? NaN : Number(req.query.lng);
+  if (Number.isFinite(lat) && Number.isFinite(lng) && !(lat === 0 && lng === 0)) {
+    const live = await placeFromCoords(lat, lng, societyFor(req));
+    if (live) return live;
+  }
   const place = await resolvePlace(societyFor(req));
   if (!place) {
     fail(res, 409, 'The society is not on the map yet. Ask the office to add its address.');
@@ -26,7 +39,7 @@ const placeOr409 = async (req, res) => {
   return place;
 };
 
-const publicPlace = (p) => ({ label: p.label, city: p.city, state: p.state, pinned: p.pinned });
+const publicPlace = (p) => ({ label: p.label, city: p.city, state: p.state, pinned: p.pinned, live: Boolean(p.live) });
 const meta = (r) => ({ updatedAt: new Date(r.at).toISOString(), stale: r.stale });
 
 // An upstream service being down is not our error: say so plainly and let the app show what it has.
@@ -36,7 +49,8 @@ const upstreamDown = (res, what, error) => {
 };
 
 // @route   GET /api/insights/weather
-router.get('/weather', protect, async (req, res) => {
+router.get('/weather', protect, liveQuery, async (req, res) => {
+  if (invalid(req, res)) return undefined;
   const place = await placeOr409(req, res);
   if (!place) return undefined;
   try {
@@ -49,7 +63,8 @@ router.get('/weather', protect, async (req, res) => {
 
 // @route   GET /api/insights/alerts
 // @desc    Official warnings, forecast advisories and nearby earthquakes, worst first.
-router.get('/alerts', protect, async (req, res) => {
+router.get('/alerts', protect, liveQuery, async (req, res) => {
+  if (invalid(req, res)) return undefined;
   const place = await placeOr409(req, res);
   if (!place) return undefined;
   try {
@@ -72,7 +87,7 @@ router.get('/gold', protect, async (req, res) => {
 });
 
 // @route   GET /api/insights/news?lang=en|hi|te
-router.get('/news', protect, [langQuery], async (req, res) => {
+router.get('/news', protect, [langQuery, ...liveQuery], async (req, res) => {
   if (invalid(req, res)) return undefined;
   const place = await placeOr409(req, res);
   if (!place) return undefined;
@@ -108,7 +123,8 @@ const slim = (p, kind) => ({
 
 // @route   GET /api/insights/emergency
 // @desc    Nearest police station and hospital (from OpenStreetMap) plus the national helpline numbers.
-router.get('/emergency', protect, async (req, res) => {
+router.get('/emergency', protect, liveQuery, async (req, res) => {
+  if (invalid(req, res)) return undefined;
   const place = await placeOr409(req, res);
   if (!place) return undefined;
   const nearest = async (category, kind) => (await findNearby({ category, lat: place.lat, lng: place.lng, radius: 5000 })).places.slice(0, 2).map((p) => slim(p, kind));
@@ -125,7 +141,7 @@ router.get('/emergency', protect, async (req, res) => {
 // @route   GET /api/insights/overview?lang=
 // @desc    What the home screen needs in one call: weather, the few most important alerts, and top headlines.
 //          Each part can fail on its own; the rest still comes back.
-router.get('/overview', protect, [langQuery], async (req, res) => {
+router.get('/overview', protect, [langQuery, ...liveQuery], async (req, res) => {
   if (invalid(req, res)) return undefined;
   const place = await placeOr409(req, res);
   if (!place) return undefined;

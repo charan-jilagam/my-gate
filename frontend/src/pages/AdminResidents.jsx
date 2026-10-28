@@ -1,11 +1,12 @@
 import { useMemo, useState } from 'react'
-import { FiAward, FiCheck, FiMail, FiSearch, FiSlash, FiUserCheck, FiUserPlus, FiUsers, FiX } from 'react-icons/fi'
+import { FiAward, FiCheck, FiKey, FiMail, FiSearch, FiSlash, FiUserCheck, FiUserPlus, FiUsers, FiX } from 'react-icons/fi'
 import { useAuth } from '../contexts/AuthContext'
 import api from '../services/api'
 import useApi from '../hooks/useApi'
 import useAction from '../hooks/useAction'
 import ExportButtons from '../components/ExportButtons'
 import AddPersonModal from '../components/AddPersonModal'
+import { PassModal } from '../components/PassCard'
 import { useT } from '../contexts/LanguageContext'
 import { ConfirmDialog, DataList, EmptyState, Field, Modal, PageHeader, StatusTag, formatDate, titleCase } from '../components/ui'
 
@@ -21,6 +22,7 @@ const AdminResidents = () => {
   const { user, isSuperAdmin, isStaff } = useAuth()
   const [adding, setAdding] = useState(false)
   const [resent, setResent] = useState(null)
+  const [passFor, setPassFor] = useState(null)
   const [tab, setTab] = useState('pending')
   // Staff can approve new residents, nothing else. The office is told when they do.
   const [query, setQuery] = useState('')
@@ -104,6 +106,11 @@ const AdminResidents = () => {
           )
         return (
           <div className="flex flex-wrap justify-end gap-2">
+            {state === 'active' && !isStaff && u.role !== 'vendor' && u.role !== 'super_admin' && (
+              <button className="btn-secondary btn-sm" onClick={() => setPassFor(u)}>
+                <FiKey size={14} /> {t('Entry pass')}
+              </button>
+            )}
             {state === 'active' && ['security', 'guard_admin'].includes(u.role) && (
               <button className="btn-secondary btn-sm" disabled={busy === u._id} onClick={() => run(u._id, () => api.put(`/users/${u._id}/guard-head`, { isHead: u.role !== 'guard_admin' }), u.role === 'guard_admin' ? `${u.name} is a guard again` : `${u.name} is now the guard head`)}>
                 <FiAward size={14} /> {u.role === 'guard_admin' ? 'Remove as guard head' : 'Make guard head'}
@@ -198,6 +205,8 @@ const AdminResidents = () => {
           />
         }
       />
+
+      <PassModal userId={passFor?._id} name={passFor?.name} onClose={() => setPassFor(null)} />
 
       <AddPersonModal
         open={adding}

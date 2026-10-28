@@ -290,3 +290,24 @@ Free public data for the society's area, shown on the home screen and on `/weath
 Everything is cached on the server (`backend/utils/insights/cache.js`) and shared by all residents of the same area. If a source is down, the last good answer is shown, marked stale. API: `GET /api/insights/{overview,weather,alerts,gold,news,emergency}`. Tests: `backend/tests/insights.test.js`.
 
 The society needs a map pin or a city name (Society admin > location) so the area can be found.
+
+### Live location
+Weather, alerts, news and nearby emergency help can use the person's own position instead of the society's. The app asks only when the person taps **Use my live location** (or the browser already allows it) and sends `?lat=&lng=` to `/api/insights/*`. The town name comes from OpenStreetMap Nominatim (free, cached per ~1 km cell, falls back to the society's town). The position is never stored. Code: `frontend/src/contexts/LocationContext.jsx`, `backend/utils/insights/place.js` (`placeFromCoords`).
+
+## Family accounts and permanent entry passes
+
+- **Family** (`/household`, residents): the head of the house adds family members with name, relation, phone, photo and (optionally) an email. With an email the person gets a setup link and their own login; without one they are "pass only". Members share the flat, can be switched off and on, and the head can send the sign-in link again. Up to 10 members.
+- **Entry passes** (`/my-pass`): every resident (including the head), guard, guard head, staff and society admin has one permanent QR pass plus a typed code (`NV-xxxx-xxxx-xxxx-xxxx`). It can be saved as a picture. **Make a new pass** replaces the code and the old QR stops working at once. Heads can do this for family; the society admin for anyone (People > Entry pass); a guard head for guards.
+- **At the gate** (Gate console > Family & staff): scan the QR or type the code to see photo, name, relation, flat, phone and who is in or out, then record the movement.
+- **Going out / coming in is for family only.** Family members are presumed at home, so their first scan is "going out", then "coming in", and the head is notified. Guards, staff and admins are presumed outside: "entry" then "exit", no family notification. Visitors, deliveries and daily help keep their existing flows.
+- **Flat log** (`/household` > Entry and exit log, head only): family movements, visitors and daily help for the flat, 1 to 30 days.
+- Family accounts are not billed separately (maintenance bills go to heads), and walk-in visitor approvals go to the head.
+
+API: `/api/household`, `/api/passes` (`me`, `user/:id`, `user/:id/regenerate`, `lookup`, `check`, `recent`). Tests: `passes.test.js`, `household.test.js`.
+
+## Walking challenge
+
+`/steps`: a daily goal (8,000 steps), a 7-day chart, a streak and a society leaderboard (today / this week; people can hide their name). Steps are counted from the phone's motion sensor **only while Nivora is open** (a web app cannot count in the background; iPhones ask for motion permission). Totals are saved to `POST /api/steps` and only ever go up. Code: `frontend/src/utils/stepCounter.js`, `backend/routes/steps.js`.
+
+### Plan for counting steps when Nivora is closed
+Build a small Android companion app (or wrap the PWA and add a native module). It would use Android's step counter sensor or Health Connect, sign in with the same Nivora login (`POST /api/auth/login`), and send the day's total with a daily background job to the API that already exists: `POST /api/steps { "steps": 7421, "date": "2026-10-28", "source": "android" }`. The server accepts today and the last two days, and keeps the highest value, so web and Android counts never conflict. No backend change is needed for it.

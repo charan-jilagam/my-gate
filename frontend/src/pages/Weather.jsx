@@ -2,6 +2,8 @@ import { useState } from 'react'
 import { FiDroplet, FiEye, FiMapPin, FiRefreshCw, FiSunrise, FiSunset, FiWind, FiAlertTriangle } from 'react-icons/fi'
 import { useT } from '../contexts/LanguageContext'
 import useApi from '../hooks/useApi'
+import LocationChip from '../components/LocationChip'
+import { useLiveLocation } from '../contexts/LocationContext'
 import WeatherIcon from '../components/WeatherIcon'
 import { AlertRow, SectionCard, SoftNote, clockLabel, dayLabel, hourLabel, shortDay, skyClass } from '../components/insights'
 import { ErrorState, ListSkeleton, Tabs } from '../components/ui'
@@ -173,8 +175,9 @@ const Alerts = ({ alerts, today }) => {
 const Weather = () => {
   const { t } = useT()
   const [tab, setTab] = useState('overview')
-  const weather = useApi('/insights/weather', { live: false })
-  const alerts = useApi('/insights/alerts', { live: false })
+  const { params: where } = useLiveLocation()
+  const weather = useApi('/insights/weather', { params: where, live: false })
+  const alerts = useApi('/insights/alerts', { params: where, live: false })
   const w = weather.data?.weather
   const place = weather.data?.place
   const today = w?.today
@@ -184,7 +187,7 @@ const Weather = () => {
       <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
         <div className="min-w-0">
           <h1 className="text-2xl font-bold sm:text-3xl">{t('Weather & Alerts')}</h1>
-          {place && <p className="mt-1 flex items-center gap-1.5 text-sm text-muted"><FiMapPin size={14} className="text-info" aria-hidden="true" /> {place.label}</p>}
+          <LocationChip place={place} className="mt-1" />
         </div>
         <button className="btn-secondary btn-sm" onClick={() => { weather.reload(); alerts.reload() }} aria-label={t('Refresh')}>
           <FiRefreshCw size={14} /> {t('Refresh')}
